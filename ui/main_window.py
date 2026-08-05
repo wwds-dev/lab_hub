@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import QEvent, QObject
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QStatusBar, QTabWidget
 
@@ -210,5 +211,25 @@ def run() -> int:
     app.aboutToQuit.connect(window.shutdown)
     app.aboutToQuit.connect(guard.release)
 
+    # Clicking the Dock icon of an app with no visible window sends
+    # ApplicationActivate and nothing else — Qt has no window to raise, so
+    # without this the window stays hidden and the app looks broken. It is the
+    # main way back in after the red button hides it.
+    reopener = _Reopener(window, app)
+    app.installEventFilter(reopener)
+
     window.show()
     return app.exec()
+
+
+class _Reopener(QObject):
+    """Re-show the window when the app is activated with nothing on screen."""
+
+    def __init__(self, window: MainWindow, parent=None) -> None:
+        super().__init__(parent)
+        self._window = window
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt override
+        if event.type() == QEvent.Type.ApplicationActivate and not self._window.isVisible():
+            self._window.present()
+        return False

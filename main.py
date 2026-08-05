@@ -46,6 +46,15 @@ def selftest() -> int:
     print(f"  config path:     {config.CONFIG_PATH}")
     print(f"  lab root:        {lab_root}")
 
+    # A frozen bundle exports its own Qt and Python paths into the process
+    # environment. A launched app that inherits them loads our Qt plugins
+    # against its own Qt and aborts inside QApplication() — invisible from
+    # source, because from source there is nothing to inherit.
+    import os
+
+    stripped = sorted(set(os.environ) - set(launcher.child_env()))
+    print(f"  child env strips: {', '.join(stripped) if stripped else 'nothing'}")
+
     problems = []
     if not icon.exists():
         problems.append("icon asset missing from the bundle")
@@ -53,6 +62,18 @@ def selftest() -> int:
         problems.append("menu bar icon missing from the bundle")
     if frozen and ".app/" in str(config.CONFIG_PATH):
         problems.append("config would be written inside the .app bundle")
+
+    # Guards the fix for the crash where a launched app inherited our Qt paths.
+    leaked = [
+        name
+        for name in ("QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH")
+        if name in os.environ and name in launcher.child_env()
+    ]
+    if leaked:
+        problems.append(
+            f"launched apps would inherit our Qt paths ({', '.join(leaked)}) "
+            "and abort at startup"
+        )
 
     try:
         from PIL import Image  # noqa: F401

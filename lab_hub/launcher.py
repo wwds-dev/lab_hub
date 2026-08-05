@@ -11,16 +11,61 @@ bundle. Two ways to start one, tried in order:
 Never `sys.executable`: frozen, that is Lab Hub's own binary, and handing it a
 script path runs it inside this app's bundled interpreter with this app's
 dependencies.
+
+And never the inherited environment either — see `child_env`.
 """
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 APPLICATIONS = Path("/Applications")
+
+# How long to watch a source-launched process before assuming it is healthy.
+# A Qt app that is going to abort does so inside QApplication(), well under a
+# second; one that survives this long is up.
+STARTUP_GRACE_SECONDS = 1.5
+
+# Variables a frozen Lab Hub exports so its own bundled Qt and Python can find
+# themselves. A child inherits them and then loads *our* Qt plugins against
+# *its* Qt — two incompatible Qt builds in one process, which calls qFatal
+# inside QApplication() and aborts before a window ever appears. PyInstaller
+# stashes the pre-launch value of these as <VAR>_ORIG; restore that where it
+# exists, drop ours otherwise.
+INHERITED_VARS = (
+    "QT_PLUGIN_PATH",
+    "QT_QPA_PLATFORM_PLUGIN_PATH",
+    "QT_QPA_PLATFORM",
+    "QML2_IMPORT_PATH",
+    "QML_IMPORT_PATH",
+    "DYLD_LIBRARY_PATH",
+    "DYLD_FRAMEWORK_PATH",
+    "DYLD_FALLBACK_LIBRARY_PATH",
+    "DYLD_FALLBACK_FRAMEWORK_PATH",
+    "DYLD_INSERT_LIBRARIES",
+    "LD_LIBRARY_PATH",
+    "PYTHONHOME",
+    "PYTHONPATH",
+    "SSL_CERT_FILE",
+)
+
+
+def child_env() -> dict[str, str]:
+    """The environment a launched app should see: ours, minus our own runtime."""
+    env = dict(os.environ)
+    for name in INHERITED_VARS:
+        original = env.pop(f"{name}_ORIG", None)
+        env.pop(name, None)
+        if original:
+            env[name] = original
+    env.pop("_MEIPASS2", None)
+    return env
 
 
 class LaunchError(RuntimeError):
@@ -125,7 +170,10 @@ def launch(app: ExternalApp, lab_root: Path) -> str:
         # -n so a second click brings up a new instance rather than silently
         # doing nothing when the app is already open but on another Space.
         result = subprocess.run(
-            ["open", "-a", str(bundle)], capture_output=True, text=True
+            ["open", "-a", str(bundle)],
+            capture_output=True,
+            text=True,
+            env=child_env(),
         )
         if result.returncode != 0:
             raise LaunchError(result.stderr.strip() or f"'open' failed for {bundle}")
@@ -149,19 +197,57 @@ def launch(app: ExternalApp, lab_root: Path) -> str:
             "python3 is not on PATH."
         )
 
+    # Output goes to a file rather than DEVNULL. A child that dies during
+    # startup is the case worth diagnosing, and discarding its stderr is what
+    # turns "it crashed and here is why" into "nothing happened".
+    log = Path(tempfile.gettempdir()) / f"lab-hub-launch-{app.key}.log"
+    try:
+        handle = log.open("w")
+    except OSError:
+        handle = subprocess.DEVNULL
+
     try:
         # Detached, so quitting Lab Hub does not take the app down with it.
-        subprocess.Popen(
+        process = subprocess.Popen(
             [str(python), app.entry],
             cwd=project,
             start_new_session=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+            env=child_env(),
         )
     except OSError as error:
         raise LaunchError(f"Could not start {app.name}: {error}") from error
+    finally:
+        if handle is not subprocess.DEVNULL:
+            handle.close()
+
+    # Watch it briefly. A Qt app that is going to fail fails immediately, and
+    # reporting that here beats leaving the user to wonder why no window came up.
+    deadline = time.monotonic() + STARTUP_GRACE_SECONDS
+    while time.monotonic() < deadline:
+        code = process.poll()
+        if code is None:
+            time.sleep(0.05)
+            continue
+        if code != 0:
+            raise LaunchError(
+                f"{app.name} started and then exited with status {code}.\n\n"
+                f"{_log_tail(log)}"
+            )
+        break  # exited cleanly and immediately — odd, but not an error
 
     return f"Launched {app.name} from source ({project}) using {python}"
+
+
+def _log_tail(log: Path, lines: int = 12) -> str:
+    try:
+        captured = log.read_text(errors="replace").strip().splitlines()
+    except OSError:
+        return f"No output was captured (see {log})."
+    if not captured:
+        return f"It produced no output (see {log})."
+    return "\n".join(captured[-lines:])
 
 
 def reveal(path: Path) -> None:
