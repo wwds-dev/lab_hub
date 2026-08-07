@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject
+from PySide6.QtCore import QObject, Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QStatusBar, QTabWidget
 
@@ -177,7 +177,6 @@ def run() -> int:
     """Create the application and show the window."""
     import sys
 
-    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
 
     from .single_instance import SingleInstance
@@ -211,25 +210,31 @@ def run() -> int:
     app.aboutToQuit.connect(window.shutdown)
     app.aboutToQuit.connect(guard.release)
 
-    # Clicking the Dock icon of an app with no visible window sends
-    # ApplicationActivate and nothing else — Qt has no window to raise, so
-    # without this the window stays hidden and the app looks broken. It is the
-    # main way back in after the red button hides it.
-    reopener = _Reopener(window, app)
-    app.installEventFilter(reopener)
+    _Reopener(window, app)
 
     window.show()
     return app.exec()
 
 
 class _Reopener(QObject):
-    """Re-show the window when the app is activated with nothing on screen."""
+    """Bring the window back when the app is switched to with nothing on screen.
 
-    def __init__(self, window: MainWindow, parent=None) -> None:
-        super().__init__(parent)
+    Watches application *state*, not the ApplicationActivate event. Closing the
+    window leaves the app active and still delivers that event, so filtering on
+    it re-showed the window in the same breath as closing it — a window that is
+    visible but was never repainted, i.e. a black rectangle. A state change only
+    fires on a real inactive → active transition, which closing a window is not.
+    """
+
+    def __init__(self, window: MainWindow, app) -> None:
+        super().__init__(app)
         self._window = window
+        self._was_active = app.applicationState() == Qt.ApplicationState.ApplicationActive
+        app.applicationStateChanged.connect(self._on_state_changed)
 
-    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt override
-        if event.type() == QEvent.Type.ApplicationActivate and not self._window.isVisible():
+    def _on_state_changed(self, state) -> None:
+        active = state == Qt.ApplicationState.ApplicationActive
+        became_active = active and not self._was_active
+        self._was_active = active
+        if became_active and not self._window.isVisible():
             self._window.present()
-        return False
