@@ -138,6 +138,9 @@ that emits Qt signals and raises `Cancelled` when Stop is pressed.
     uv pip install -r requirements.txt
     python main.py
 
+    uv pip install -r requirements-dev.txt
+    python -m pytest
+
     ./build_app.sh            # -> dist.noindex/Lab Hub.app
     ./build_app.sh --install  # -> /Applications/Lab Hub.app
 
@@ -146,6 +149,23 @@ anything. That check matters here because Pillow ships a binary extension, and
 because a frozen app that writes its config inside its own bundle breaks its
 signature and loses everything on reinstall — settings go to
 `~/Library/Application Support/Lab Hub/` instead.
+
+## Tests
+
+`python -m pytest` — offscreen, no display needed, about a second.
+
+The weight is on the window lifecycle, because that is where this app has
+actually broken: the red button once quit instead of hiding, and the fix for
+that then re-showed the window in the same breath as closing it (a visible but
+never-repainted black rectangle). Both shipped. `tests/test_window_lifecycle.py`
+is that hunt written down, and its regression test fails against the old code.
+
+`--selftest` covers what pytest structurally cannot. It runs against the built
+binary from `build_app.sh`, and beyond checking assets and paths it **starts a
+real PySide6 child** from a sibling project's venv. That is the one bug class
+this app is uniquely prone to — it exists only in the bundle, because from
+source there are no Qt paths to leak into a child — so no unit test can reach
+it. A build whose launched apps would die now fails before it installs.
 
 ## What this does not do
 

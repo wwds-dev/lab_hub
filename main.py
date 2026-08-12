@@ -30,6 +30,66 @@ def _probe_conversion() -> tuple[bool, str]:
         return job.status is Status.DONE, f"{job.status.value} {job.detail}".strip()
 
 
+def _probe_child_launch(lab_root) -> tuple[bool | None, str]:
+    """Start a real PySide6 process the way the Apps tab does.
+
+    Inspecting the environment proves we *intend* to hand a child a clean one.
+    This proves the child actually survives, which is the thing that was broken:
+    a launched app inherited this bundle's Qt paths, loaded our cocoa plugin
+    against its own QtGui, and was killed by qFatal inside QApplication().
+
+    Needs a second Python that has its own PySide6 — one of the lab projects'
+    venvs. Returns (None, reason) when there is no such interpreter to probe
+    with, which is not a failure, just nothing to say.
+    """
+    import subprocess
+
+    from lab_hub import launcher
+
+    python = None
+    for app in launcher.APPS:
+        project = launcher.source_dir(app, lab_root)
+        if project is not None:
+            python = launcher.venv_python(project)
+            if python is not None:
+                break
+    if python is None:
+        return None, "no project venv to probe with"
+
+    # A QApplication is the whole test — that is where the abort happened.
+    code = "from PySide6.QtWidgets import QApplication; QApplication([])"
+    try:
+        result = subprocess.run(
+            [str(python), "-c", code],
+            env=launcher.child_env(),
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        return False, f"could not run the probe ({error})"
+
+    if result.returncode == 0:
+        return True, f"a real Qt child started under {python.parent.parent.parent.name}"
+
+    output = (result.stderr or result.stdout).strip().splitlines()
+    if any("No module named 'PySide6'" in line for line in output):
+        return None, "the probe interpreter has no PySide6"
+
+    # Qt prints several lines and the diagnosis is rarely the last one — the
+    # useful sentence is the one naming the failure, not the trailing list of
+    # available plugins.
+    telling = next(
+        (
+            line.strip()
+            for line in output
+            if "failed to start" in line or "Could not load" in line
+        ),
+        output[-1].strip() if output else f"exit {result.returncode}",
+    )
+    return False, f"a launched Qt app would die at startup: {telling}"
+
+
 def selftest() -> int:
     from lab_hub import APP_NAME, asset_path, config, launcher
 
@@ -95,6 +155,11 @@ def selftest() -> int:
         print(f"  txt -> epub:     {detail}")
         if not ok:
             problems.append(f"round-trip conversion failed: {detail}")
+
+    launched, detail = _probe_child_launch(lab_root)
+    print(f"  child Qt app:    {'ok — ' + detail if launched else detail}")
+    if launched is False:
+        problems.append(detail)
 
     # Reported but never fatal: whether the other apps are installed says
     # nothing about whether this build is sound.

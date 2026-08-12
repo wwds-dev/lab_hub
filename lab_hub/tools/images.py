@@ -123,6 +123,11 @@ def resize_for_print(
 # ----------------------------------------------------------------------
 # Rename
 # ----------------------------------------------------------------------
+def _numbered(path: Path, base_name: str) -> bool:
+    """Whether this file already carries `base_name_NNN` as its whole name."""
+    return re.fullmatch(rf"{re.escape(base_name)}_\d+", path.stem, re.IGNORECASE) is not None
+
+
 def next_index(folder: Path, base_name: str) -> int:
     """The highest `base_name_NNN` already used in `folder`."""
     pattern = re.compile(rf"{re.escape(base_name)}_(\d+)", re.IGNORECASE)
@@ -156,8 +161,14 @@ def rename_for_print(
     if not target.is_dir():
         raise NotADirectoryError(f"Target folder not found: {target}")
 
-    index = next_index(target, base_name)
-    report.log(f"Highest existing index in {target.name}: {index}")
+    folder = target if move else source
+
+    # Both folders get a say. `target` is the numbering authority, but with
+    # `move` off the renamed files stay in `source`, so numbers already used
+    # there count too — otherwise the counter starts at 1 and collides with the
+    # previous run's output.
+    index = max(next_index(target, base_name), next_index(folder, base_name))
+    report.log(f"Continuing after {base_name}_{str(index).zfill(padding)}.")
 
     files = [p for p in _images_in(source) if p.parent != target]
     if not files:
@@ -169,15 +180,21 @@ def rename_for_print(
         report.checkpoint()
         report.progress(position - 1, len(files))
 
+        # A file that already carries this batch's numbering has been done
+        # before. Renumbering it would churn the folder on every run.
+        if _numbered(path, base_name):
+            report.log(f"Skipping (already numbered): {path.name}")
+            result.skipped += 1
+            continue
+
         index += 1
         name = f"{base_name}_{str(index).zfill(padding)}{path.suffix.lower()}"
-        destination = (target if move else source) / name
+        destination = folder / name
 
         if destination.exists():
             message = f"Skipped: {name} already exists"
             report.log(message)
             result.skipped += 1
-            index -= 1  # do not burn a number on a file we did not write
             continue
 
         try:

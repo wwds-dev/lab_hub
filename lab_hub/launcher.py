@@ -144,7 +144,7 @@ def source_dir(app: ExternalApp, lab_root: Path) -> Path | None:
     return project if (project / app.entry).is_file() else None
 
 
-def _venv_python(project: Path) -> Path | None:
+def venv_python(project: Path) -> Path | None:
     for name in (".venv", "venv"):
         candidate = project / name / "bin" / "python"
         if candidate.is_file():
@@ -188,7 +188,7 @@ def launch(app: ExternalApp, lab_root: Path) -> str:
             "somewhere else."
         )
 
-    python = _venv_python(project) or (
+    python = venv_python(project) or (
         Path(shutil.which("python3")) if shutil.which("python3") else None
     )
     if python is None:
