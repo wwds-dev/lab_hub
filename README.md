@@ -3,7 +3,7 @@
 One front door for the lab's desktop tools: a launcher for the standalone apps,
 and a home for the small utilities that never had a UI.
 
-Tabs: **Apps** · **Convert** · **Images** · **Unblock Tracker** · **Settings**
+Tabs: **Apps** · **Convert Files** · **Prepare Images** · **Unblock Tracker** · **Settings**
 
 ## Why two kinds of thing
 
@@ -43,7 +43,7 @@ Center**. A card per app, showing where it will start from:
 Source runs never use Lab Hub's own interpreter. Frozen, that is this app's
 binary, and it would run the other project inside this bundle's dependencies.
 
-### Convert
+### Convert Files
 Any document format Calibre reads into any format it writes — **47 in, 19 out**.
 EPUB, AZW3, MOBI, DOCX, PDF, TXT, RTF, FB2, KEPUB and the long tail, in both
 directions.
@@ -72,7 +72,7 @@ a full-length book takes minutes.
 > they carry no reliable text structure, so expect broken paragraphs and lost
 > formatting. The tab warns rather than refusing.
 
-### Images
+### Prepare Images
 Three tools sharing one log:
 
 - **Print size** — copies at an exact pixel size with the DPI written into the

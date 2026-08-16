@@ -83,7 +83,8 @@ class ConvertTab(QWidget):
 
         # --- files card --------------------------------------------------
         files_card, files_layout = theme.card()
-        files_layout.addWidget(theme.section_title("Convert"))
+        # Names the list beneath it, rather than repeating the tab's own name.
+        files_layout.addWidget(theme.section_title("Files to convert"))
         files_layout.addWidget(
             theme.hint(
                 "Drop files or folders below — or use the buttons. Anything Calibre "

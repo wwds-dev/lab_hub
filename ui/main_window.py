@@ -1,4 +1,4 @@
-"""Main window: Apps / Convert / Images / Unblock Tracker / Settings."""
+"""Main window: Apps / Convert Files / Prepare Images / Unblock Tracker / Settings."""
 
 from __future__ import annotations
 
@@ -48,8 +48,8 @@ class MainWindow(QMainWindow):
         self.settings_tab = SettingsTab(self.settings)
 
         self.tabs.addTab(self.apps_tab, "Apps")
-        self.tabs.addTab(self.convert_tab, "Convert")
-        self.tabs.addTab(self.images_tab, "Images")
+        self.tabs.addTab(self.convert_tab, "Convert Files")
+        self.tabs.addTab(self.images_tab, "Prepare Images")
         self.tabs.addTab(self.unblock_tab, "Unblock Tracker")
         self.tabs.addTab(self.settings_tab, "Settings")
         self.setCentralWidget(self.tabs)

@@ -27,7 +27,10 @@ from .widgets import FolderField, RunPanel, scroll_column
 
 PRINT, RENAME, SWEEP = 0, 1, 2
 
-RUN_LABELS = {PRINT: "Resize", RENAME: "Rename", SWEEP: "Sweep"}
+# "Move", not "Remove" or "Sweep": the sweep relocates files into a subfolder
+# rather than deleting them, and a button that overstates what it does is worse
+# than a vague one.
+RUN_LABELS = {PRINT: "Resize", RENAME: "Rename", SWEEP: "Move"}
 
 
 def _spin(value: int, low: int, high: int, suffix: str = "") -> QSpinBox:
@@ -51,9 +54,9 @@ class ImagesTab(QWidget):
         layout.addWidget(area)
 
         self.tools = QTabWidget()
-        self.tools.addTab(self._print_page(), "Print size")
-        self.tools.addTab(self._rename_page(), "Rename")
-        self.tools.addTab(self._sweep_page(), "Sweep small")
+        self.tools.addTab(self._print_page(), "Resize for print")
+        self.tools.addTab(self._rename_page(), "Rename in sequence")
+        self.tools.addTab(self._sweep_page(), "Move small aside")
         self.tools.currentChanged.connect(self._on_tool_changed)
 
         run_card, run_layout = theme.card()
@@ -162,7 +165,7 @@ class ImagesTab(QWidget):
         outer.setContentsMargins(0, 12, 0, 0)
 
         card, layout = theme.card()
-        layout.addWidget(theme.section_title("Sweep small images"))
+        layout.addWidget(theme.section_title("Move small images aside"))
         layout.addWidget(
             theme.hint(
                 "Moves thumbnails and junk into a 'Delete' subfolder — moved, "
