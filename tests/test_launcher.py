@@ -141,3 +141,62 @@ def test_a_healthy_child_is_left_running(tmp_path, monkeypatch):
     message = launcher.launch(app, tmp_path)
 
     assert "Launched Alive" in message
+
+
+# ----------------------------------------------------------------------
+# Knowing what is already running
+# ----------------------------------------------------------------------
+def test_an_installed_app_is_seen_by_its_bundle_executable(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    (tmp_path / "SONAR.app").mkdir()
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+    table = f"/bin/zsh\n{tmp_path}/SONAR.app/Contents/MacOS/SONAR\n"
+
+    assert launcher.is_running(app, tmp_path, table) is True
+    assert launcher.is_running(app, tmp_path, "/bin/zsh\n") is False
+
+
+def test_a_source_run_is_told_apart_by_its_absolute_entry(tmp_path, monkeypatch):
+    """Every project's entry is `main.py`, so a relative command line would
+    make one running project look like all of them."""
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    _project(tmp_path, "sonar")
+    _project(tmp_path, "vidforge")
+    sonar = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+    other = launcher.ExternalApp("vidforge", "vidforge", "vidforge", "main.py", "")
+    table = f"/usr/bin/python3 {tmp_path}/sonar/main.py\n"
+
+    assert launcher.is_running(sonar, tmp_path, table) is True
+    assert launcher.is_running(other, tmp_path, table) is False
+
+
+def test_an_app_that_is_nowhere_is_never_running(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    app = launcher.ExternalApp("ghost", "Ghost", "ghost", "main.py", "")
+
+    assert launcher.is_running(app, tmp_path, "anything") is False
+
+
+def test_only_an_installed_app_can_be_raised(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    (tmp_path / "SONAR.app").mkdir()
+    installed = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+    from_source = launcher.ExternalApp("v", "vidforge", "vidforge", "main.py", "")
+
+    assert launcher.can_bring_to_front(installed) is True
+    assert launcher.can_bring_to_front(from_source) is False
+
+
+def test_raising_a_source_run_says_why_it_cannot(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    _project(tmp_path, "sonar")
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    with pytest.raises(launcher.LaunchError) as raised:
+        launcher.bring_to_front(app, tmp_path)
+
+    assert "Dock" in str(raised.value), "tell the user what to do instead"
+
+
+def test_the_process_table_is_readable():
+    assert "\n" in launcher.process_table()

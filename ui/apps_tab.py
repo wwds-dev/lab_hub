@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -25,6 +25,14 @@ STATE_LABELS = {
     "missing": ("Not found", "stateBad"),
 }
 
+# While an app is running, that is the more useful thing to say — where it
+# would have been started from is answered by the path underneath either way.
+RUNNING_LABEL = ("Running", "stateOk")
+
+# Slow enough to be invisible in Activity Monitor, quick enough that the card
+# is right by the time you have finished reading it.
+POLL_MS = 3000
+
 
 class AppCard(QWidget):
     """Name, what it does, where it will be started from, and a Launch button."""
@@ -35,6 +43,7 @@ class AppCard(QWidget):
         super().__init__(parent)
         self.app = app
         self.lab_root = config.DEFAULT_LAB_ROOT
+        self.running = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -71,11 +80,14 @@ class AppCard(QWidget):
         layout.addWidget(self.detail)
 
     # ------------------------------------------------------------------
-    def refresh(self, lab_root: Path) -> None:
+    def refresh(self, lab_root: Path, table: str | None = None) -> None:
         self.lab_root = lab_root
         state, detail = launcher.status(self.app, lab_root)
-        label, style = STATE_LABELS[state]
+        self.running = state != "missing" and launcher.is_running(
+            self.app, lab_root, table
+        )
 
+        label, style = RUNNING_LABEL if self.running else STATE_LABELS[state]
         self.state.setText(label)
         self.state.setObjectName(style)
         # A changed objectName only takes effect after the style is re-applied.
@@ -83,11 +95,33 @@ class AppCard(QWidget):
         self.state.style().polish(self.state)
 
         self.detail.setText(detail)
-        self.launch_button.setEnabled(state != "missing")
+        self._update_button(state)
+
+    def _update_button(self, state: str) -> None:
+        if not self.running:
+            self.launch_button.setText("Launch")
+            self.launch_button.setToolTip("")
+            self.launch_button.setEnabled(state != "missing")
+            return
+
+        if launcher.can_bring_to_front(self.app):
+            self.launch_button.setText("Bring to front")
+            self.launch_button.setToolTip("Already open — raise its window")
+            self.launch_button.setEnabled(True)
+        else:
+            # Nothing to address it by, so offering a button that cannot work
+            # would be worse than saying plainly that it is already open.
+            self.launch_button.setText("Running")
+            self.launch_button.setToolTip(
+                "Already open. Lab Hub can only raise apps installed in "
+                "/Applications — switch to it from the Dock or with ⌘-Tab."
+            )
+            self.launch_button.setEnabled(False)
 
     def _launch(self) -> None:
+        action = launcher.bring_to_front if self.running else launcher.launch
         try:
-            message = launcher.launch(self.app, self.lab_root)
+            message = action(self.app, self.lab_root)
         except launcher.LaunchError as error:
             QMessageBox.warning(self, f"Could not launch {self.app.name}", str(error))
             return
@@ -141,7 +175,23 @@ class AppsTab(QWidget):
         column.addLayout(row)
         column.addStretch(1)
 
+        # An app can start or quit without Lab Hub being told, so the state has
+        # to be re-read rather than remembered. Only while the tab is on screen:
+        # polling a page nobody is looking at is pure waste.
+        self._poll = QTimer(self)
+        self._poll.setInterval(POLL_MS)
+        self._poll.timeout.connect(self.refresh)
+
         self.refresh()
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt override
+        super().showEvent(event)
+        self.refresh()
+        self._poll.start()
+
+    def hideEvent(self, event) -> None:  # noqa: N802 - Qt override
+        super().hideEvent(event)
+        self._poll.stop()
 
     def apply_settings(self, settings: config.Settings) -> None:
         self.settings = settings
@@ -149,5 +199,6 @@ class AppsTab(QWidget):
 
     def refresh(self) -> None:
         lab_root = self.settings.resolved_lab_root()
+        table = launcher.process_table()  # one snapshot, shared by every card
         for card in self.cards:
-            card.refresh(lab_root)
+            card.refresh(lab_root, table)

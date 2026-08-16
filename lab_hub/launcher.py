@@ -152,6 +152,70 @@ def venv_python(project: Path) -> Path | None:
     return None
 
 
+def process_table() -> str:
+    """One snapshot of every running command line.
+
+    Taken once per refresh and shared across the cards: a `pgrep` per app would
+    be four processes spawned every few seconds for a label that rarely changes.
+    """
+    try:
+        return subprocess.run(
+            ["ps", "-Axo", "command="], capture_output=True, text=True, timeout=5
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def running_marker(app: ExternalApp, lab_root: Path) -> str | None:
+    """The absolute path that appears in the command line of a running copy.
+
+    Installed apps are their bundle executable. Source runs are the entry
+    script, which is why `launch` hands the interpreter an absolute path — with
+    a relative one every project shows up as a bare `python main.py` and they
+    cannot be told apart.
+    """
+    bundle = bundle_path(app)
+    if bundle is not None:
+        return str(bundle / "Contents" / "MacOS")
+    project = source_dir(app, lab_root)
+    if project is not None:
+        return str(project / app.entry)
+    return None
+
+
+def is_running(app: ExternalApp, lab_root: Path, table: str | None = None) -> bool:
+    marker = running_marker(app, lab_root)
+    if marker is None:
+        return False
+    return marker in (process_table() if table is None else table)
+
+
+def can_bring_to_front(app: ExternalApp) -> bool:
+    """Only an installed bundle can be raised.
+
+    A source run is a bare `python`, with no bundle identifier for `open` to
+    address; raising it by pid needs System Events, which is assistive access
+    the user would have to grant. Better to say so than to fail quietly.
+    """
+    return bundle_path(app) is not None
+
+
+def bring_to_front(app: ExternalApp, lab_root: Path) -> str:
+    bundle = bundle_path(app)
+    if bundle is None:
+        raise LaunchError(
+            f"{app.name} is already running, but Lab Hub can only raise apps "
+            "installed in /Applications. Switch to it from the Dock or with "
+            "⌘-Tab."
+        )
+    result = subprocess.run(
+        ["open", "-a", str(bundle)], capture_output=True, text=True, env=child_env()
+    )
+    if result.returncode != 0:
+        raise LaunchError(result.stderr.strip() or f"'open' failed for {bundle}")
+    return f"Brought {app.name} to the front"
+
+
 def status(app: ExternalApp, lab_root: Path) -> tuple[str, str]:
     """A (state, detail) pair for the UI. State is installed/source/missing."""
     bundle = bundle_path(app)
@@ -209,7 +273,10 @@ def launch(app: ExternalApp, lab_root: Path) -> str:
     try:
         # Detached, so quitting Lab Hub does not take the app down with it.
         process = subprocess.Popen(
-            [str(python), app.entry],
+            # Absolute, not `app.entry`: the command line is how a running copy
+            # is recognised later, and every project's relative entry is the
+            # same `main.py`.
+            [str(python), str(project / app.entry)],
             cwd=project,
             start_new_session=True,
             stdout=handle,

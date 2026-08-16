@@ -75,14 +75,14 @@ a full-length book takes minutes.
 ### Prepare Images
 Three tools sharing one log:
 
-- **Print size** — copies at an exact pixel size with the DPI written into the
+- **Resize for print** — copies at an exact pixel size with the DPI written into the
   file. *Fit* scales and centres on a canvas; *Exact* stretches to fill, which
   distorts anything that is not already the target aspect ratio. The two modes
   were the two separate `dpi/` scripts.
-- **Rename** — numbers files `base_001`, `base_002`, … continuing from the
+- **Rename in sequence** — numbers files `base_001`, `base_002`, … continuing from the
   highest number already in the target folder, so a second batch never collides
   with the first. Optionally moves them there too.
-- **Sweep small** — moves images at or under a size threshold into a `Delete`
+- **Move small aside** — moves images at or under a size threshold into a `Delete`
   subfolder. Moved, not deleted: a filter on pixel size alone will occasionally
   catch something wanted.
 
@@ -120,12 +120,13 @@ available the app falls back to quitting on window close.
       config.py          settings, stored in Application Support
       launcher.py        finding and starting the standalone apps
       tools/convert/     any format to any format (vendored engine)
-      tools/images.py    print sizing, rename, sweep
+      tools/images.py    resizing, renaming, moving small files aside
     ui/                  the only package that imports PySide6
       widgets.py         folder field, run/log panel
       worker.py          runs any tool off the GUI thread
       single_instance.py the one-copy guard
       tray.py            the menu bar item
+    tests/               pytest, offscreen — see Tests below
     assets/make_icon.py  regenerates icon.icns and the menu bar PNGs
 
 The tools take a `Reporter` rather than printing, which is what lets the same
