@@ -126,6 +126,14 @@ LAUNCHPAD: tuple[ExternalApp, ...] = (
         summary="Run and monitor the Google Drive rsync backup, and keep an eye "
         "on the other sync engines.",
     ),
+    ExternalApp(
+        key="vpn_agent",
+        name="VPN Agent",
+        project="vpn_agent",
+        entry="main.py",
+        summary="Run a VPN you own end to end: monitor a tunnel with a kill "
+        "switch, or build the WireGuard/OpenVPN server at the far end.",
+    ),
 )
 
 # Everything launchable, wherever it appears in the UI. Used by the self-test.

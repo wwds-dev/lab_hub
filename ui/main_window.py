@@ -6,7 +6,7 @@ from PySide6.QtCore import QObject, Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QStatusBar, QTabWidget
 
-from lab_hub import APP_NAME, asset_path, config, launcher
+from lab_hub import APP_NAME, asset_path, config, launcher, login_item
 
 from . import theme, tray
 from .apps_tab import AppsTab
@@ -212,7 +212,13 @@ def run() -> int:
 
     _Reopener(window, app)
 
-    window.show()
+    # Started by the login agent: stay in the menu bar instead of opening a
+    # window nobody asked for. Only honoured when there *is* a menu bar item to
+    # retreat to — otherwise the app would run with no way to reach it.
+    if login_item.BACKGROUND_FLAG in sys.argv and window.tray is not None:
+        window.statusBar().showMessage(f"{APP_NAME} started in the menu bar.", 5000)
+    else:
+        window.show()
     return app.exec()
 
 
