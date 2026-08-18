@@ -197,11 +197,11 @@ class RunPanel(QWidget):
         self.append("\nStopped.")
 
 
-def scroll_column(spacing: int = 18) -> tuple[QWidget, QVBoxLayout]:
+def scroll_column(spacing: int = 18, max_width: int | None = None) -> tuple[QWidget, QVBoxLayout]:
     """A centred content column inside a vertical scroll area."""
     from PySide6.QtWidgets import QScrollArea
 
-    inner, layout = theme.column(spacing)
+    inner, layout = theme.column(spacing, max_width)
     layout.setContentsMargins(24, 20, 24, 24)
 
     area = QScrollArea()

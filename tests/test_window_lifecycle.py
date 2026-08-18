@@ -138,3 +138,32 @@ def test_present_shows_a_hidden_window(window, fake_tray):
     window.present()
 
     assert window.isVisible()
+
+
+def test_closing_while_fullscreen_leaves_fullscreen_first(window, fake_tray, qapp):
+    """The stuck-black-screen bug.
+
+    macOS keeps the fullscreen Space when a fullscreen window is hidden, so the
+    app vanished and left an empty black screen with no window to close or
+    minimise. Dropping out of fullscreen is what releases the Space.
+    """
+    window.tray = fake_tray
+    window.show()
+    window.showFullScreen()
+    assert window.windowState() & Qt.WindowState.WindowFullScreen
+
+    window.close()
+
+    assert not (window.windowState() & Qt.WindowState.WindowFullScreen), (
+        "the fullscreen Space would be left behind, black and empty"
+    )
+
+
+def test_a_normal_window_still_hides_immediately(window, fake_tray):
+    """Only the fullscreen path defers; the ordinary close must not lag."""
+    window.tray = fake_tray
+    window.show()
+
+    window.close()
+
+    assert not window.isVisible()

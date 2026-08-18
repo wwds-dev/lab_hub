@@ -1,12 +1,12 @@
-"""Main window: Apps / Convert Files / Prepare Images / Unblock Tracker / Settings."""
+"""Main window: Apps / Convert Files / Prepare Images / Settings."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, Qt
+from PySide6.QtCore import QObject, Qt, QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QStatusBar, QTabWidget
 
-from lab_hub import APP_NAME, asset_path, config, launcher, login_item
+from lab_hub import APP_NAME, asset_path, config, login_item
 
 from . import theme, tray
 from .apps_tab import AppsTab
@@ -14,10 +14,9 @@ from .convert_tab import ConvertTab
 from .images_tab import ImagesTab
 from .settings_tab import SettingsTab
 
-UNBLOCK_INTRO = (
-    "Kept off the launchpad because it is an occasional tool rather than a "
-    "daily one. It still runs as its own separate app."
-)
+# Long enough for macOS's fullscreen-exit animation to finish before the
+# window is hidden out from under it.
+FULLSCREEN_EXIT_MS = 450
 
 
 class MainWindow(QMainWindow):
@@ -39,25 +38,17 @@ class MainWindow(QMainWindow):
         self.apps_tab = AppsTab(self.settings)
         self.convert_tab = ConvertTab(self.settings)
         self.images_tab = ImagesTab(self.settings)
-        self.unblock_tab = AppsTab(
-            self.settings,
-            (launcher.UNBLOCK_TRACKER,),
-            "Unblock Tracker",
-            UNBLOCK_INTRO,
-        )
         self.settings_tab = SettingsTab(self.settings)
 
         self.tabs.addTab(self.apps_tab, "Apps")
         self.tabs.addTab(self.convert_tab, "Convert Files")
         self.tabs.addTab(self.images_tab, "Prepare Images")
-        self.tabs.addTab(self.unblock_tab, "Unblock Tracker")
         self.tabs.addTab(self.settings_tab, "Settings")
         self.setCentralWidget(self.tabs)
 
         self.setStatusBar(QStatusBar())
 
         self.apps_tab.launched.connect(self._on_launched)
-        self.unblock_tab.launched.connect(self._on_launched)
         self.settings_tab.settings_saved.connect(self._on_settings_saved)
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
@@ -77,6 +68,9 @@ class MainWindow(QMainWindow):
 
     def present(self) -> None:
         """Bring the window up — from the menu bar, or from a second launch."""
+        # show(), not showMaximized(): a hidden window remembers its geometry,
+        # so summoning it restores whatever size the user last chose instead of
+        # overriding it every time.
         self.show()
         self.setWindowState(
             self.windowState() & ~self.windowState().WindowMinimized
@@ -96,7 +90,6 @@ class MainWindow(QMainWindow):
 
     def _on_settings_saved(self) -> None:
         self.apps_tab.apply_settings(self.settings)
-        self.unblock_tab.apply_settings(self.settings)
         self.statusBar().showMessage("Settings saved.", 4000)
 
     def _on_tab_changed(self, index: int) -> None:
@@ -105,7 +98,7 @@ class MainWindow(QMainWindow):
         widget = self.tabs.widget(index)
         if widget is self.convert_tab:
             self.convert_tab.refresh_calibre()
-        elif widget in (self.apps_tab, self.unblock_tab):
+        elif widget is self.apps_tab:
             widget.refresh()
 
     # ------------------------------------------------------------------
@@ -142,13 +135,32 @@ class MainWindow(QMainWindow):
         if self.tray is not None:
             self.tray.hide()
 
+    def _hide_to_menu_bar(self) -> None:
+        """Hide the window, leaving fullscreen first if it is in it.
+
+        macOS keeps the fullscreen Space when a fullscreen window is hidden:
+        the app vanishes but its Space stays, so you are left staring at an
+        empty black screen with no window to close or minimise, and no obvious
+        way back. Dropping out of fullscreen first is the only thing that
+        releases the Space.
+
+        The hide is deferred because leaving fullscreen is an animated,
+        asynchronous transition — hiding in the same breath races it and lands
+        back in the same stuck state.
+        """
+        if self.windowState() & Qt.WindowState.WindowFullScreen:
+            self.setWindowState(self.windowState() & ~Qt.WindowState.WindowFullScreen)
+            QTimer.singleShot(FULLSCREEN_EXIT_MS, self.hide)
+            return
+        self.hide()
+
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt override
         # With a menu bar item present, the red button hides rather than quits —
         # otherwise closing the window would strand a still-running conversion
         # with no way back to its log.
         if self.tray is not None and not self._quitting:
             event.ignore()
-            self.hide()
+            self._hide_to_menu_bar()
             if not self._warned_about_hiding:
                 self._warned_about_hiding = True
                 self.tray.notify(
@@ -218,7 +230,7 @@ def run() -> int:
     if login_item.BACKGROUND_FLAG in sys.argv and window.tray is not None:
         window.statusBar().showMessage(f"{APP_NAME} started in the menu bar.", 5000)
     else:
-        window.show()
+        window.showMaximized()
     return app.exec()
 
 

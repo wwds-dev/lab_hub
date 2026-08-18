@@ -128,6 +128,7 @@ available the app falls back to quitting on window close.
       tray.py            the menu bar item
     tests/               pytest, offscreen — see Tests below
     assets/make_icon.py  regenerates icon.icns and the menu bar PNGs
+    docs/                reserved for future documentation; currently empty
 
 The tools take a `Reporter` rather than printing, which is what lets the same
 function back both the GUI and a shell call. `ui/worker.py` supplies a Reporter

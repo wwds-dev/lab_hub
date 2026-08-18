@@ -81,18 +81,7 @@ class ExternalApp:
     summary: str
 
 
-UNBLOCK_TRACKER = ExternalApp(
-    key="unblock_tracker",
-    name="Unblock Tracker",
-    project="unblock_tracker",
-    entry="main.py",
-    summary="Watch whether an Instagram profile has unblocked you, and get "
-    "notified the moment it changes.",
-)
-
-# The launchpad — the apps reached for often enough to earn a front page.
-# Unblock Tracker is deliberately not here: it is occasional, so it lives on its
-# own tab instead of competing for attention with the two daily tools.
+# The launchpad — every app Lab Hub can start, on one front page.
 LAUNCHPAD: tuple[ExternalApp, ...] = (
     ExternalApp(
         key="sentinel_ai",
@@ -134,10 +123,19 @@ LAUNCHPAD: tuple[ExternalApp, ...] = (
         summary="Run a VPN you own end to end: monitor a tunnel with a kill "
         "switch, or build the WireGuard/OpenVPN server at the far end.",
     ),
+    ExternalApp(
+        key="unblock_tracker",
+        name="Unblock Tracker",
+        project="unblock_tracker",
+        entry="main.py",
+        summary="Watch whether an Instagram profile has unblocked you, and get "
+        "notified the moment it changes.",
+    ),
 )
 
-# Everything launchable, wherever it appears in the UI. Used by the self-test.
-APPS: tuple[ExternalApp, ...] = LAUNCHPAD + (UNBLOCK_TRACKER,)
+# Everything launchable. One tuple now that Unblock Tracker is a tile like the
+# rest; kept as a separate name because the self-test reads it.
+APPS: tuple[ExternalApp, ...] = LAUNCHPAD
 
 
 def bundle_path(app: ExternalApp) -> Path | None:

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtWidgets import (
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -32,6 +33,12 @@ RUNNING_LABEL = ("Running", "stateOk")
 # Slow enough to be invisible in Activity Monitor, quick enough that the card
 # is right by the time you have finished reading it.
 POLL_MS = 3000
+
+# A tile narrower than this squeezes the summary into a ragged column of
+# single words, so the grid drops a column instead of going narrower.
+TILE_MIN_WIDTH = 380
+SUMMARY_HEIGHT = 52
+GRID_MAX_WIDTH = 1500
 
 
 class AppCard(QWidget):
@@ -64,11 +71,18 @@ class AppCard(QWidget):
         self.launch_button.setObjectName("primary")
         self.launch_button.clicked.connect(self._launch)
 
+        # Name and state on one line, the button along the bottom. Side by side
+        # the tiles are too narrow to keep all three on one row without the
+        # summary being squeezed into a column of single words.
         header.addWidget(name)
-        header.addWidget(self.state, 1)
-        header.addWidget(self.launch_button)
+        header.addStretch(1)
+        header.addWidget(self.state)
 
         summary = theme.hint(app.summary)
+        # The tiles sit in a grid, so they must agree on a height; the summaries
+        # differ in length and would otherwise give every row a ragged edge.
+        summary.setMinimumHeight(SUMMARY_HEIGHT)
+        summary.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self.detail = QLabel()
         self.detail.setObjectName("hint")
@@ -78,6 +92,8 @@ class AppCard(QWidget):
         layout.addLayout(header)
         layout.addWidget(summary)
         layout.addWidget(self.detail)
+        layout.addStretch(1)
+        layout.addWidget(self.launch_button)
 
     # ------------------------------------------------------------------
     def refresh(self, lab_root: Path, table: str | None = None) -> None:
@@ -151,7 +167,7 @@ class AppsTab(QWidget):
         super().__init__(parent)
         self.settings = settings
 
-        area, column = scroll_column()
+        area, column = scroll_column(max_width=GRID_MAX_WIDTH)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(area)
@@ -159,12 +175,20 @@ class AppsTab(QWidget):
         column.addWidget(theme.section_title(title))
         column.addWidget(theme.hint(intro))
 
+        # Tiles side by side rather than a single scrolling stack: the whole
+        # point of a launchpad is seeing everything at once.
+        self.grid = QGridLayout()
+        self.grid.setSpacing(16)
+        column.addLayout(self.grid)
+
         self.cards = []
         for app in apps:
             card = AppCard(app)
             card.launched.connect(self.launched)
             self.cards.append(card)
-            column.addWidget(card)
+
+        self._columns = 0
+        self._arrange(1)
 
         refresh = QPushButton("Re-check")
         refresh.setToolTip("Look again for installed apps and source checkouts")
@@ -183,6 +207,27 @@ class AppsTab(QWidget):
         self._poll.timeout.connect(self.refresh)
 
         self.refresh()
+
+    def _arrange(self, columns: int) -> None:
+        """Lay the tiles out in `columns` columns, if that is a change."""
+        if columns == self._columns:
+            return
+        self._columns = columns
+
+        for card in self.cards:
+            self.grid.removeWidget(card)
+        for index, card in enumerate(self.cards):
+            self.grid.addWidget(card, index // columns, index % columns)
+        # Equal shares, and no leftover stretch from a wider previous layout
+        # holding open an empty column.
+        for index in range(self.grid.columnCount()):
+            self.grid.setColumnStretch(index, 1 if index < columns else 0)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt override
+        super().resizeEvent(event)
+        usable = self.width() - 48  # the column's own margins
+        fits = max(1, usable // TILE_MIN_WIDTH)
+        self._arrange(min(len(self.cards) or 1, fits))
 
     def showEvent(self, event) -> None:  # noqa: N802 - Qt override
         super().showEvent(event)

@@ -513,7 +513,7 @@ def hint(text: str) -> QLabel:
     return widget
 
 
-def column(spacing: int = 18) -> tuple[QWidget, QVBoxLayout]:
+def column(spacing: int = 18, max_width: int | None = None) -> tuple[QWidget, QVBoxLayout]:
     """A width-capped, centred content column.
 
     Stretch spacers rather than AlignHCenter: alignment would give the column
@@ -526,7 +526,7 @@ def column(spacing: int = 18) -> tuple[QWidget, QVBoxLayout]:
     outer_layout.setSpacing(0)
 
     inner = QWidget()
-    inner.setMaximumWidth(CONTENT_WIDTH)
+    inner.setMaximumWidth(max_width or CONTENT_WIDTH)
     inner_layout = QVBoxLayout(inner)
     inner_layout.setContentsMargins(0, 0, 0, 0)
     inner_layout.setSpacing(spacing)
