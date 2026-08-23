@@ -2,7 +2,8 @@
 
 Two kinds of thing live behind this app, and the distinction is deliberate:
 
-* **Apps** (Unblock Tracker, git_autosync, Backup Control Center) are full
+* Standalone apps (including Unblock Tracker, git_autosync and Backup Control
+  Center) are full
   PySide6 applications with their own windows, state and lifecycles. Hosting
   them in-process would mean running three event loops' worth of UI inside one,
   so they are *launched* instead — their installed .app if there is one, the

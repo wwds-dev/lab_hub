@@ -5,6 +5,9 @@ item cannot pass arguments. This app lives in the menu bar, so starting it at
 login should leave it *in* the menu bar — throwing a window across the screen
 every time you log in is worse than not starting at all. The agent runs
 `open -a … --args --background`, which the app reads to skip showing its window.
+That background start also ensures the backup and repository-sync companions
+are running. Lab Hub then watches for sleep/resume and repeats the same quiet
+check after every wake.
 
 Writing the plist is enough; it takes effect at the next login. The agent is
 deliberately not bootstrapped into the running session — that would launch a

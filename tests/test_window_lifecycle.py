@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 
-from ui.main_window import _Reopener
+from ui.main_window import REOPEN_GRACE_MS, _Reopener
 
 
 def test_close_hides_the_window_when_there_is_a_tray(window, fake_tray):
@@ -72,6 +72,19 @@ def test_activation_while_already_active_does_not_resurrect(window, fake_tray, q
     assert not window.isVisible(), "closing the window must not re-show it"
 
 
+def test_close_activation_echo_does_not_resurrect(window, fake_tray, qapp):
+    """macOS briefly deactivates and reactivates an app that hides its window."""
+    window.tray = fake_tray
+    window.show()
+    reopener = _Reopener(window, qapp)
+
+    window.close()
+    reopener._on_state_changed(Qt.ApplicationState.ApplicationInactive)
+    reopener._on_state_changed(Qt.ApplicationState.ApplicationActive)
+
+    assert not window.isVisible(), "the post-close activation echo must be ignored"
+
+
 def test_switching_back_to_the_app_restores_the_window(window, fake_tray, qapp):
     """Clicking the Dock icon is the other way back in, and must still work."""
     window.tray = fake_tray
@@ -79,6 +92,7 @@ def test_switching_back_to_the_app_restores_the_window(window, fake_tray, qapp):
     reopener = _Reopener(window, qapp)
 
     window.close()
+    window._hidden_at -= (REOPEN_GRACE_MS + 200) / 1000
     reopener._was_active = False  # the user went to another app
     reopener._on_state_changed(Qt.ApplicationState.ApplicationActive)
 

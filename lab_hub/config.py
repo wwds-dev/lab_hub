@@ -39,6 +39,12 @@ class Settings:
     convert_recurse: bool = True
     convert_source_dir: str = ""  # where the Add dialogs open
 
+    # Narrator (ebook to audiobook)
+    narrator_input: str = ""
+    narrator_output: str = ""
+    narrator_voice: str = "alloy"
+    narrator_chunk_tokens: int = 1400
+
     # Image tools — DPI
     dpi_input: str = ""
     dpi_output: str = ""

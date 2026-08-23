@@ -200,3 +200,20 @@ def test_raising_a_source_run_says_why_it_cannot(tmp_path, monkeypatch):
 
 def test_the_process_table_is_readable():
     assert "\n" in launcher.process_table()
+
+
+def test_background_bundle_launch_passes_the_hidden_flag(tmp_path, monkeypatch):
+    app = launcher.ExternalApp("backup", "Backup", "backup", "main.py", "summary")
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    (tmp_path / "Backup.app").mkdir()
+    calls = []
+    monkeypatch.setattr(
+        launcher.subprocess,
+        "run",
+        lambda command, **kwargs: calls.append(command)
+        or launcher.subprocess.CompletedProcess(command, 0, "", ""),
+    )
+
+    launcher.launch(app, tmp_path, background=True)
+
+    assert calls[0][-2:] == ["--args", "--background"]

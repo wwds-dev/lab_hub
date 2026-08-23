@@ -1,22 +1,28 @@
-"""Main window: Apps / Convert Files / Prepare Images / Settings."""
+"""Main window: launcher and integrated lab tools."""
 
 from __future__ import annotations
+
+import time
 
 from PySide6.QtCore import QObject, Qt, QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QStatusBar, QTabWidget
 
-from lab_hub import APP_NAME, asset_path, config, login_item
+from lab_hub import APP_NAME, asset_path, config, launcher, login_item
 
 from . import theme, tray
 from .apps_tab import AppsTab
 from .convert_tab import ConvertTab
 from .images_tab import ImagesTab
+from .narrator_tab import NarratorTab
 from .settings_tab import SettingsTab
 
 # Long enough for macOS's fullscreen-exit animation to finish before the
 # window is hidden out from under it.
 FULLSCREEN_EXIT_MS = 450
+REOPEN_GRACE_MS = 1000
+WAKE_POLL_MS = 30_000
+WAKE_GAP_SECONDS = 60
 
 
 class MainWindow(QMainWindow):
@@ -26,6 +32,7 @@ class MainWindow(QMainWindow):
         self.tray: tray.Tray | None = None
         self._quitting = False
         self._warned_about_hiding = False
+        self._hidden_at = 0.0
 
         self.setWindowTitle(APP_NAME)
         self.resize(1020, 820)
@@ -35,22 +42,57 @@ class MainWindow(QMainWindow):
         self.tabs.tabBar().setExpanding(False)
         self.tabs.tabBar().setDrawBase(False)
 
-        self.apps_tab = AppsTab(self.settings)
+        self.apps_tab = AppsTab(self.settings, apps=launcher.PRIMARY_APPS)
+        self.backup_sync_tab = AppsTab(
+            self.settings,
+            apps=launcher.BACKUP_SYNC_APPS,
+            title="Backup & Sync",
+            intro=(
+                "Run backups and keep the lab's repositories synchronized. "
+                "Each control center opens in its own window."
+            ),
+        )
         self.convert_tab = ConvertTab(self.settings)
+        self.narrator_tab = NarratorTab(self.settings)
         self.images_tab = ImagesTab(self.settings)
+        self.unblock_tracker_tab = AppsTab(
+            self.settings,
+            apps=launcher.TOOL_APPS,
+            title="Unblock Tracker",
+            intro="Open the tracker to monitor an Instagram profile's block status.",
+        )
         self.settings_tab = SettingsTab(self.settings)
 
+        self.tools_tabs = QTabWidget()
+        self.tools_tabs.tabBar().setExpanding(False)
+        self.tools_tabs.addTab(self.convert_tab, "Convert Files")
+        self.tools_tabs.addTab(self.narrator_tab, "Narrator")
+        self.tools_tabs.addTab(self.images_tab, "Prepare Images")
+        self.tools_tabs.addTab(self.unblock_tracker_tab, "Unblock Tracker")
+
         self.tabs.addTab(self.apps_tab, "Apps")
-        self.tabs.addTab(self.convert_tab, "Convert Files")
-        self.tabs.addTab(self.images_tab, "Prepare Images")
+        self.tabs.addTab(self.backup_sync_tab, "Backup & Sync")
+        self.tabs.addTab(self.tools_tabs, "Tools")
         self.tabs.addTab(self.settings_tab, "Settings")
         self.setCentralWidget(self.tabs)
 
         self.setStatusBar(QStatusBar())
 
         self.apps_tab.launched.connect(self._on_launched)
+        self.backup_sync_tab.launched.connect(self._on_launched)
+        self.unblock_tracker_tab.launched.connect(self._on_launched)
         self.settings_tab.settings_saved.connect(self._on_settings_saved)
         self.tabs.currentChanged.connect(self._on_tab_changed)
+        self.tools_tabs.currentChanged.connect(self._on_tool_tab_changed)
+
+        # Qt timers pause while macOS sleeps. A large monotonic gap on the next
+        # tick is therefore a reliable resume signal without a macOS-only GUI
+        # dependency. Keep the three menu-bar apps alive, but never raise them.
+        self._last_wake_poll = time.monotonic()
+        self._wake_poll = QTimer(self)
+        self._wake_poll.setInterval(WAKE_POLL_MS)
+        self._wake_poll.timeout.connect(self._check_for_wake)
+        self._wake_poll.start()
 
     # ------------------------------------------------------------------
     # Menu bar item
@@ -90,22 +132,54 @@ class MainWindow(QMainWindow):
 
     def _on_settings_saved(self) -> None:
         self.apps_tab.apply_settings(self.settings)
+        self.backup_sync_tab.apply_settings(self.settings)
+        self.unblock_tracker_tab.apply_settings(self.settings)
         self.statusBar().showMessage("Settings saved.", 4000)
 
     def _on_tab_changed(self, index: int) -> None:
         # Calibre may have been installed since startup, and an app may have
         # been built since the tab was last looked at.
         widget = self.tabs.widget(index)
+        if widget is self.tools_tabs:
+            self._refresh_tool_tab(self.tools_tabs.currentWidget())
+        elif widget in (self.apps_tab, self.backup_sync_tab):
+            widget.refresh()
+
+    def _on_tool_tab_changed(self, index: int) -> None:
+        self._refresh_tool_tab(self.tools_tabs.widget(index))
+
+    def _refresh_tool_tab(self, widget) -> None:
         if widget is self.convert_tab:
             self.convert_tab.refresh_calibre()
-        elif widget is self.apps_tab:
+        elif widget is self.unblock_tracker_tab:
             widget.refresh()
+
+    def _check_for_wake(self) -> None:
+        now = time.monotonic()
+        gap = now - self._last_wake_poll
+        self._last_wake_poll = now
+        if gap >= WAKE_GAP_SECONDS:
+            self.start_sync_apps_in_background()
+
+    def start_sync_apps_in_background(self) -> None:
+        """Ensure the two sync companions are running without showing them."""
+        lab_root = self.settings.resolved_lab_root()
+        table = launcher.process_table()
+        for app in launcher.BACKUP_SYNC_APPS:
+            if launcher.is_running(app, lab_root, table):
+                continue
+            try:
+                launcher.launch(app, lab_root, background=True)
+            except launcher.LaunchError as error:
+                self.statusBar().showMessage(
+                    f"Could not start {app.name} in the background: {error}", 8000
+                )
 
     # ------------------------------------------------------------------
     def _running_panels(self):
         return [
             panel
-            for panel in (self.convert_tab.run_panel, self.images_tab.run_panel)
+            for panel in (self.convert_tab.run_panel, self.images_tab.run_panel, self.narrator_tab)
             if panel.is_running()
         ]
 
@@ -150,9 +224,18 @@ class MainWindow(QMainWindow):
         """
         if self.windowState() & Qt.WindowState.WindowFullScreen:
             self.setWindowState(self.windowState() & ~Qt.WindowState.WindowFullScreen)
-            QTimer.singleShot(FULLSCREEN_EXIT_MS, self.hide)
+            QTimer.singleShot(FULLSCREEN_EXIT_MS, self._hide_now)
             return
+        self._hide_now()
+
+    def _hide_now(self) -> None:
+        """Hide and timestamp it so macOS's activation echo cannot reopen us."""
+        self._hidden_at = time.monotonic()
         self.hide()
+
+    def reopen_allowed(self) -> bool:
+        """Return whether an activation is late enough to be a real Dock click."""
+        return (time.monotonic() - self._hidden_at) * 1000 > REOPEN_GRACE_MS
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt override
         # With a menu bar item present, the red button hides rather than quits —
@@ -229,6 +312,7 @@ def run() -> int:
     # retreat to — otherwise the app would run with no way to reach it.
     if login_item.BACKGROUND_FLAG in sys.argv and window.tray is not None:
         window.statusBar().showMessage(f"{APP_NAME} started in the menu bar.", 5000)
+        QTimer.singleShot(0, window.start_sync_apps_in_background)
     else:
         window.showMaximized()
     return app.exec()
@@ -254,5 +338,9 @@ class _Reopener(QObject):
         active = state == Qt.ApplicationState.ApplicationActive
         became_active = active and not self._was_active
         self._was_active = active
-        if became_active and not self._window.isVisible():
+        if (
+            became_active
+            and not self._window.isVisible()
+            and self._window.reopen_allowed()
+        ):
             self._window.present()

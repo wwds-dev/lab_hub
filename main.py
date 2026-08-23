@@ -14,6 +14,16 @@ against the built binary before trusting the build.
 import sys
 
 
+# A frozen app has no Python interpreter with which to run ``-m``. Narrator
+# re-invokes the Lab Hub executable with this sentinel so conversion still runs
+# in a separate, stoppable process and keeps the UI responsive.
+if "--narrator-worker" in sys.argv:
+    sys.argv.remove("--narrator-worker")
+    from lab_hub.tools.narrator.converter import main as _narrator_main
+
+    _narrator_main()
+
+
 def _probe_conversion() -> tuple[bool, str]:
     """Convert a throwaway file end to end and describe the outcome."""
     import tempfile
@@ -142,6 +152,14 @@ def selftest() -> int:
     except ImportError as error:
         print("  pillow:          MISSING")
         problems.append(f"Pillow did not import: {error}")
+
+    try:
+        from lab_hub.tools.narrator import converter as narrator_converter
+
+        print(f"  narrator:        ok ({narrator_converter.TTS_MODEL})")
+    except ImportError as error:
+        print("  narrator:        MISSING DEPENDENCY")
+        problems.append(f"Narrator did not import: {error}")
 
     from lab_hub.tools import convert
 

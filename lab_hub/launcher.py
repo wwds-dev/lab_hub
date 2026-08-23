@@ -81,15 +81,31 @@ class ExternalApp:
     summary: str
 
 
-# The launchpad — every app Lab Hub can start, on one front page.
-LAUNCHPAD: tuple[ExternalApp, ...] = (
+# Standalone apps are grouped by where they appear in Lab Hub. LAUNCHPAD is
+# retained below as the complete set used by the menu-bar launcher and self-test.
+PRIMARY_APPS: tuple[ExternalApp, ...] = (
     ExternalApp(
         key="sentinel_ai",
         name="Sentinel AI",
         project="sentinel_ai",
         entry="main.py",
-        summary="The multi-agent workspace, with the ebook→audiobook narrator "
-        "bundled in.",
+        summary="The multi-agent workspace for writing, research and publishing.",
+    ),
+    ExternalApp(
+        key="sentinel_fork",
+        name="Sentinel Fork",
+        project="sentinel_fork",
+        entry="main.py",
+        summary="A local-first command centre for security, investigation, and "
+        "controlled AI-assisted workflows.",
+    ),
+    ExternalApp(
+        key="create_and_publish",
+        name="Create & Publish",
+        project="create_and_publish",
+        entry="main.py",
+        summary="Create, manage, and publish books, websites, and other creative "
+        "work from one workspace.",
     ),
     ExternalApp(
         key="sonar",
@@ -100,13 +116,16 @@ LAUNCHPAD: tuple[ExternalApp, ...] = (
         "prediction-market odds and a probability model, traded with paper money.",
     ),
     ExternalApp(
-        key="git_autosync",
-        name="git_autosync",
-        project="git_autosync",
-        entry="packaging/entry_point.py",
-        summary="Commit and push the lab's repos on a schedule, with per-repo "
-        "status and manual sync.",
+        key="vpn_agent",
+        name="VPN Agent",
+        project="vpn_agent",
+        entry="main.py",
+        summary="Run a VPN you own end to end: monitor a tunnel with a kill "
+        "switch, or build the WireGuard/OpenVPN server at the far end.",
     ),
+)
+
+BACKUP_SYNC_APPS: tuple[ExternalApp, ...] = (
     ExternalApp(
         key="backup_manager",
         name="Backup Control Center",
@@ -116,13 +135,16 @@ LAUNCHPAD: tuple[ExternalApp, ...] = (
         "on the other sync engines.",
     ),
     ExternalApp(
-        key="vpn_agent",
-        name="VPN Agent",
-        project="vpn_agent",
-        entry="main.py",
-        summary="Run a VPN you own end to end: monitor a tunnel with a kill "
-        "switch, or build the WireGuard/OpenVPN server at the far end.",
+        key="git_autosync",
+        name="git_autosync",
+        project="git_autosync",
+        entry="packaging/entry_point.py",
+        summary="Commit and push the lab's repos on a schedule, with per-repo "
+        "status and manual sync.",
     ),
+)
+
+TOOL_APPS: tuple[ExternalApp, ...] = (
     ExternalApp(
         key="unblock_tracker",
         name="Unblock Tracker",
@@ -133,8 +155,8 @@ LAUNCHPAD: tuple[ExternalApp, ...] = (
     ),
 )
 
-# Everything launchable. One tuple now that Unblock Tracker is a tile like the
-# rest; kept as a separate name because the self-test reads it.
+# Everything launchable, including apps shown outside the main Apps tab.
+LAUNCHPAD: tuple[ExternalApp, ...] = PRIMARY_APPS + BACKUP_SYNC_APPS + TOOL_APPS
 APPS: tuple[ExternalApp, ...] = LAUNCHPAD
 
 
@@ -233,14 +255,18 @@ def status(app: ExternalApp, lab_root: Path) -> tuple[str, str]:
     return "missing", f"not in /Applications, and no checkout at {lab_root / app.project}"
 
 
-def launch(app: ExternalApp, lab_root: Path) -> str:
+def launch(app: ExternalApp, lab_root: Path, *, background: bool = False) -> str:
     """Start the app. Returns a line describing what was started."""
+    extra_args = ["--background"] if background else []
     bundle = bundle_path(app)
     if bundle is not None:
         # -n so a second click brings up a new instance rather than silently
         # doing nothing when the app is already open but on another Space.
+        command = ["open", "-a", str(bundle)]
+        if extra_args:
+            command.extend(["--args", *extra_args])
         result = subprocess.run(
-            ["open", "-a", str(bundle)],
+            command,
             capture_output=True,
             text=True,
             env=child_env(),
@@ -282,7 +308,7 @@ def launch(app: ExternalApp, lab_root: Path) -> str:
             # Absolute, not `app.entry`: the command line is how a running copy
             # is recognised later, and every project's relative entry is the
             # same `main.py`.
-            [str(python), str(project / app.entry)],
+            [str(python), str(project / app.entry), *extra_args],
             cwd=project,
             start_new_session=True,
             stdout=handle,

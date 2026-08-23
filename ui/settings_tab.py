@@ -66,8 +66,10 @@ class SettingsTab(QWidget):
         login_layout.addWidget(theme.section_title("Start at login"))
         login_layout.addWidget(
             theme.hint(
-                "Starts Lab Hub into the menu bar when you log in — no window "
-                "opens until you ask for one. Takes effect at your next login."
+                "Starts Lab Hub, Backup Control Center, and git_autosync in the "
+                "background when you log in. Lab Hub also makes sure the two "
+                "sync apps are running whenever the Mac wakes. No window opens "
+                "until you ask for one. Takes effect at your next login."
             )
         )
 

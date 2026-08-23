@@ -3,7 +3,7 @@
 One front door for the lab's desktop tools: a launcher for the standalone apps,
 and a home for the small utilities that never had a UI.
 
-Tabs: **Apps** · **Convert Files** · **Prepare Images** · **Unblock Tracker** · **Settings**
+Tabs: **Apps** · **Backup & Sync** · **Tools** · **Settings**
 
 ## Why two kinds of thing
 
@@ -28,11 +28,15 @@ The conversion engine under `tools/convert/` is a **vendored copy** of
 copied rather than imported so Lab Hub does not depend on a sibling checkout
 being present — keep the two in step when either changes.
 
+**Narrator belongs here.** Its tab runs Lab Hub's bundled ebook-to-audiobook
+engine in a separate, stoppable worker process. It does not launch or import
+Sentinel AI and works the same way from source and from the installed app.
+
 ## Tabs
 
 ### Apps
-The launchpad: **Sentinel AI**, **SONAR**, **git_autosync**, **Backup Control
-Center**. A card per app, showing where it will start from:
+The front desk for **Sentinel AI**, **Sentinel Fork**, **Create & Publish**,
+**SONAR**, and **VPN Agent**. A card per app, showing where it will start from:
 
 | State | Meaning |
 | --- | --- |
@@ -43,7 +47,16 @@ Center**. A card per app, showing where it will start from:
 Source runs never use Lab Hub's own interpreter. Frozen, that is this app's
 binary, and it would run the other project inside this bundle's dependencies.
 
-### Convert Files
+### Backup & Sync
+
+Launch **Backup Control Center** and **git_autosync** from one place.
+
+### Tools
+
+The built-in utilities and occasional standalone tools are grouped under one
+tab: **Convert Files**, **Narrator**, **Prepare Images**, and **Unblock Tracker**.
+
+#### Convert Files
 Any document format Calibre reads into any format it writes — **47 in, 19 out**.
 EPUB, AZW3, MOBI, DOCX, PDF, TXT, RTF, FB2, KEPUB and the long tail, in both
 directions.
@@ -72,7 +85,7 @@ a full-length book takes minutes.
 > they carry no reliable text structure, so expect broken paragraphs and lost
 > formatting. The tab warns rather than refusing.
 
-### Prepare Images
+#### Prepare Images
 Three tools sharing one log:
 
 - **Resize for print** — copies at an exact pixel size with the DPI written into the
@@ -86,9 +99,10 @@ Three tools sharing one log:
   subfolder. Moved, not deleted: a filter on pixel size alone will occasionally
   catch something wanted.
 
-### Unblock Tracker
-The same launch card, on its own tab. It is an occasional tool, not a daily one,
-so it stays off the launchpad rather than competing with what is used every day.
+#### Unblock Tracker
+
+An occasional standalone tool, kept with the other tools rather than competing
+with the main launchpad apps.
 
 ### Settings
 Only the lab folder, and only because it cannot always be inferred: launching an
@@ -112,6 +126,11 @@ than quitting — a conversion left running would otherwise lose the log it is
 writing to. Quit from the menu bar item (or ⌘Q). The first time the window is
 hidden it says so, so nothing disappears silently. If no system tray is
 available the app falls back to quitting on window close.
+
+When **Open Lab Hub at login** is enabled, Lab Hub starts hidden in the menu bar
+and quietly starts Backup Control Center and git_autosync the same way. After
+the Mac wakes from sleep, it checks those two companions again and starts only
+the ones that are not already running; no windows are brought forward.
 
 ## Layout
 

@@ -30,6 +30,7 @@ pyinstaller --noconfirm --clean --windowed \
   --add-data "assets/icon.icns:assets" \
   --add-data "assets/tray.png:assets" \
   --add-data "assets/tray@2x.png:assets" \
+  --hidden-import lab_hub.tools.narrator.converter \
   --exclude-module PySide6.QtWebEngineCore \
   --exclude-module PySide6.QtWebEngineWidgets \
   --exclude-module PySide6.Qt3DCore \
