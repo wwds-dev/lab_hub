@@ -10,12 +10,12 @@ Tabs: **Apps** · **Backup & Sync** · **Tools** · **Settings**
 The projects behind this app do not want the same treatment, so they do not get
 it.
 
-**Launched, not embedded.** Sentinel AI, SONAR, git_autosync, Backup Control
-Center and Unblock Tracker are complete PySide6 applications — own window, own
-settings, own background work, own lifecycle. Embedding them would mean nesting
-five apps' worth of UI and state inside a sixth, and every one of them is
-something you leave running. Lab Hub starts them as separate processes: quit it
-and they keep going.
+**Launched, not embedded.** Sentinel AI, Sentinel Fork, Create & Publish, SONAR,
+VPN Agent, Backup Control Center, git_autosync, and Unblock Tracker are complete
+PySide6 applications — own window, own settings, own background work, own
+lifecycle. Embedding them would mean nesting eight apps' worth of UI and state
+inside a ninth, and every one of them is something you leave running. Lab Hub
+starts them as separate processes: quit it and they keep going.
 
 **Embedded, not launched.** convert_epub and image_tools were single-file
 scripts whose configuration lived in a `# === CONFIG ===` block at the top —
