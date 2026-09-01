@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QSpinBox,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -27,6 +28,7 @@ from lab_hub import config
 
 from . import theme
 from .widgets import FolderField, LOG_LIMIT, scroll_column
+from .narrator_library import NarratorLibrary
 
 SUPPORTED_BOOKS = "Ebooks (*.epub *.pdf *.mobi *.azw3 *.txt);;All files (*)"
 VOICES = ("alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer")
@@ -43,7 +45,12 @@ class NarratorTab(QWidget):
         area, column = scroll_column()
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        outer.addWidget(area)
+        self.sections = QTabWidget()
+        self.sections.addTab(area, "Convert")
+        self.library = NarratorLibrary(settings)
+        self.library.book_selected.connect(self._use_library_book)
+        self.sections.addTab(self.library, "Library")
+        outer.addWidget(self.sections)
 
         source_card, source_layout = theme.card()
         source_layout.addWidget(theme.section_title("Book and destination"))
@@ -112,6 +119,12 @@ class NarratorTab(QWidget):
 
         column.addWidget(source_card)
         column.addWidget(run_card, 1)
+
+    def _use_library_book(self, path: str) -> None:
+        """Load a library selection into the existing conversion workflow."""
+        self.input_edit.setText(path)
+        self.sections.setCurrentIndex(0)
+        self.status.setText(f"Ready: {Path(path).name}")
 
     def choose_book(self) -> None:
         start = self.input_edit.text() or str(Path.home())
@@ -213,4 +226,3 @@ class NarratorTab(QWidget):
     def _process_error(self, _error) -> None:
         if self.process is not None:
             self.log.appendPlainText(f"\nCould not run Narrator: {self.process.errorString()}")
-

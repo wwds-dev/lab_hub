@@ -35,3 +35,22 @@ def test_form_values_reach_the_lab_hub_worker(qapp, tmp_path, monkeypatch):
     assert source == book
     assert output == Path(tmp_path)
     assert tab.voice.currentText() == "nova"
+
+
+def test_narrator_has_native_library_tab(qapp, tmp_path, monkeypatch):
+    monkeypatch.setattr("ui.narrator_library.find_catalog", lambda: None)
+    tab = NarratorTab(config.Settings(narrator_output=str(tmp_path)))
+    assert tab.sections.count() == 2
+    assert tab.sections.tabText(0) == "Convert"
+    assert tab.sections.tabText(1) == "Library"
+
+
+def test_library_selection_moves_book_into_converter(qapp, tmp_path, monkeypatch):
+    monkeypatch.setattr("ui.narrator_library.find_catalog", lambda: None)
+    book = tmp_path / "selected.epub"
+    book.write_text("test", encoding="utf-8")
+    tab = NarratorTab(config.Settings(narrator_output=str(tmp_path)))
+    tab.sections.setCurrentIndex(1)
+    tab._use_library_book(str(book))
+    assert tab.input_edit.text() == str(book)
+    assert tab.sections.currentIndex() == 0

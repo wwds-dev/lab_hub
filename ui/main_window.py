@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QMainWindow, QMessageBox, QStatusBar, QTabWidget
 
 from lab_hub import APP_NAME, asset_path, config, launcher, login_item
 
-from . import theme, tray
+from . import dock, theme, tray
 from .apps_tab import AppsTab
 from .convert_tab import ConvertTab
 from .images_tab import ImagesTab
@@ -110,6 +110,10 @@ class MainWindow(QMainWindow):
 
     def present(self) -> None:
         """Bring the window up — from the menu bar, or from a second launch."""
+        # Back into the Dock first: a window belonging to an Accessory app
+        # cannot properly take focus, so the order matters.
+        dock.show_in_dock()
+
         # show(), not showMaximized(): a hidden window remembers its geometry,
         # so summoning it restores whatever size the user last chose instead of
         # overriding it every time.
@@ -232,6 +236,11 @@ class MainWindow(QMainWindow):
         """Hide and timestamp it so macOS's activation echo cannot reopen us."""
         self._hidden_at = time.monotonic()
         self.hide()
+        # Nothing left on screen, so nothing for the Dock to point at. The menu
+        # bar item is unaffected: a status item does not depend on the
+        # activation policy, which is what makes this switch safe.
+        if self.tray is not None:
+            dock.hide_from_dock()
 
     def reopen_allowed(self) -> bool:
         """Return whether an activation is late enough to be a real Dock click."""
@@ -311,9 +320,20 @@ def run() -> int:
     # window nobody asked for. Only honoured when there *is* a menu bar item to
     # retreat to — otherwise the app would run with no way to reach it.
     if login_item.BACKGROUND_FLAG in sys.argv and window.tray is not None:
+        # Started by the login agent with no window, so it should not be in the
+        # Dock either — it is a menu bar resident until asked for.
+        #
+        # Deferred to the first turn of the event loop: Qt's cocoa plugin sets
+        # its own activation policy while it finishes starting up, and a call
+        # made before that simply gets overwritten. Running from source it
+        # appeared to work, because nothing there re-asserted it afterwards.
+        QTimer.singleShot(0, dock.hide_from_dock)
         window.statusBar().showMessage(f"{APP_NAME} started in the menu bar.", 5000)
         QTimer.singleShot(0, window.start_sync_apps_in_background)
     else:
+        # The bundle declares LSUIElement so a login start has no Dock icon;
+        # a normal launch shows a window, so it has to promote itself back.
+        dock.show_in_dock()
         window.showMaximized()
     return app.exec()
 

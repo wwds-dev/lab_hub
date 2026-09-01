@@ -181,3 +181,73 @@ def test_a_normal_window_still_hides_immediately(window, fake_tray):
     window.close()
 
     assert not window.isVisible()
+
+
+# ----------------------------------------------------------------------
+# The Dock icon follows the window, not the process
+# ----------------------------------------------------------------------
+def test_closing_the_window_leaves_the_menu_bar_item(window, fake_tray, monkeypatch):
+    """The whole point of hiding rather than quitting: the app stays reachable."""
+    monkeypatch.setattr("ui.main_window.dock.hide_from_dock", lambda: True)
+    window.tray = fake_tray
+    window.show()
+
+    window.close()
+
+    assert not fake_tray.hidden, "the menu bar icon must survive a window close"
+    assert window.tray is fake_tray
+
+
+def test_closing_the_window_drops_the_dock_icon(window, fake_tray, monkeypatch):
+    """With no window on screen there is nothing for the Dock to point at."""
+    calls = []
+    monkeypatch.setattr(
+        "ui.main_window.dock.hide_from_dock", lambda: calls.append("hide") or True
+    )
+    window.tray = fake_tray
+    window.show()
+
+    window.close()
+
+    assert calls == ["hide"]
+
+
+def test_a_window_with_no_menu_bar_item_keeps_its_dock_icon(window, monkeypatch):
+    """Without a status item the Dock is the only way back — never hide it."""
+    calls = []
+    monkeypatch.setattr(
+        "ui.main_window.dock.hide_from_dock", lambda: calls.append("hide") or True
+    )
+    window.tray = None
+    window.show()
+
+    window._hide_now()
+
+    assert calls == [], "hiding the Dock icon here would strand the app"
+
+
+def test_showing_the_window_puts_the_icon_back(window, fake_tray, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "ui.main_window.dock.show_in_dock", lambda: calls.append("show") or True
+    )
+    monkeypatch.setattr("ui.main_window.dock.hide_from_dock", lambda: True)
+    window.tray = fake_tray
+    window.show()
+    window.close()
+
+    window.present()
+
+    assert calls == ["show"]
+
+
+def test_only_quitting_removes_the_menu_bar_item(window, fake_tray, monkeypatch):
+    monkeypatch.setattr("ui.main_window.dock.hide_from_dock", lambda: True)
+    window.tray = fake_tray
+    window.show()
+    window.close()
+    assert not fake_tray.hidden
+
+    window.shutdown()
+
+    assert fake_tray.hidden

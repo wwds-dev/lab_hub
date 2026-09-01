@@ -41,6 +41,19 @@ pyinstaller --noconfirm --clean --windowed \
   --exclude-module tkinter \
   main.py
 
+# Start life as a menu bar accessory: no Dock icon, no ⌘-Tab entry. The app
+# promotes itself to a regular Dock app whenever it actually shows a window,
+# and drops back when the window closes. Setting this at runtime alone is not
+# enough — LaunchServices pins a bundled app's type from Info.plist at launch,
+# so the runtime call was being ignored in the .app while working from source.
+/usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" \
+  "$DIST/$APP_NAME.app/Contents/Info.plist" 2>/dev/null \
+  || /usr/libexec/PlistBuddy -c "Set :LSUIElement true" \
+     "$DIST/$APP_NAME.app/Contents/Info.plist"
+
+# Re-sign: editing Info.plist invalidates the ad-hoc signature PyInstaller made.
+codesign --force --deep -s - "$DIST/$APP_NAME.app" 2>/dev/null || true
+
 # Confirm the bundle actually works before it is installed: Pillow ships a
 # binary extension, and a missing icon or a config path inside the bundle are
 # both invisible until someone runs it.
