@@ -33,6 +33,7 @@ def _icon() -> QIcon:
 
 class Tray(QObject):
     open_requested = Signal()
+    menu_opened = Signal()
     quit_requested = Signal()
     launched = Signal(str)
     launch_failed = Signal(str, str)  # app name, message
@@ -62,6 +63,10 @@ class Tray(QObject):
         quit_action = QAction(f"Quit {APP_NAME}", menu)
         quit_action.triggered.connect(self.quit_requested)
         menu.addAction(quit_action)
+
+        # Opening the menu activates the app. That activation must not be
+        # mistaken for the user asking for the window back.
+        menu.aboutToShow.connect(self.menu_opened)
 
         # Held on the instance: a QMenu that only the tray icon references is
         # garbage collected out from under it, and the menu comes up empty.

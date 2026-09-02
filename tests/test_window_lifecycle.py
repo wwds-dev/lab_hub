@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 
-from ui.main_window import REOPEN_GRACE_MS, _Reopener
+from ui.main_window import REOPEN_GRACE_MS, TRAY_SUPPRESS_S, _Reopener
 
 
 def test_close_hides_the_window_when_there_is_a_tray(window, fake_tray):
@@ -251,3 +251,60 @@ def test_only_quitting_removes_the_menu_bar_item(window, fake_tray, monkeypatch)
     window.shutdown()
 
     assert fake_tray.hidden
+
+
+# ----------------------------------------------------------------------
+# Using the menu bar must not drag the window along
+# ----------------------------------------------------------------------
+def test_launching_from_the_menu_bar_does_not_open_our_window(
+    window, fake_tray, qapp, monkeypatch
+):
+    """Picking SONAR from the menu bar should start SONAR and nothing else.
+
+    Opening the menu activates Lab Hub, and so does the focus change when the
+    launched app appears. Both look like "the user switched back to us".
+    """
+    monkeypatch.setattr("ui.main_window.dock.hide_from_dock", lambda: True)
+    window.tray = fake_tray
+    window.show()
+    reopener = _Reopener(window, qapp)
+    window.close()
+    window._hidden_at -= (REOPEN_GRACE_MS + 200) / 1000  # past the close grace
+
+    window.suppress_reopen()  # what the tray's menu_opened / launched signals do
+    reopener._was_active = False
+    reopener._on_state_changed(Qt.ApplicationState.ApplicationActive)
+
+    assert not window.isVisible(), "the hub must stay out of the way"
+
+
+def test_the_suppression_wears_off(window, fake_tray, qapp, monkeypatch):
+    """It is a short grace, not a permanent block — the Dock must still work."""
+    monkeypatch.setattr("ui.main_window.dock.hide_from_dock", lambda: True)
+    monkeypatch.setattr("ui.main_window.dock.show_in_dock", lambda: True)
+    window.tray = fake_tray
+    window.show()
+    reopener = _Reopener(window, qapp)
+    window.close()
+    window._hidden_at -= (REOPEN_GRACE_MS + 200) / 1000
+
+    window.suppress_reopen()
+    window._suppress_reopen_until -= TRAY_SUPPRESS_S + 1  # time passes
+    reopener._was_active = False
+    reopener._on_state_changed(Qt.ApplicationState.ApplicationActive)
+
+    assert window.isVisible()
+
+
+def test_open_lab_hub_still_works_while_suppressed(window, fake_tray, monkeypatch):
+    """Suppression must not block the menu item whose whole job is to show it."""
+    monkeypatch.setattr("ui.main_window.dock.hide_from_dock", lambda: True)
+    monkeypatch.setattr("ui.main_window.dock.show_in_dock", lambda: True)
+    window.tray = fake_tray
+    window.show()
+    window.close()
+
+    window.suppress_reopen()  # the menu was just opened
+    window.present()  # "Open Lab Hub" chosen from that same menu
+
+    assert window.isVisible()

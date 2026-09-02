@@ -132,6 +132,33 @@ and quietly starts Backup Control Center and git_autosync the same way. After
 the Mac wakes from sleep, it checks those two companions again and starts only
 the ones that are not already running; no windows are brought forward.
 
+## The Dock icon follows the window
+
+Lab Hub is two things at once: a window you open occasionally, and a menu bar
+item that stays. The Dock only carries an icon when there is actually a window
+behind it — close the window and the icon goes, leaving the status item.
+
+macOS has a matching pair of activation policies, and the app switches between
+them: `Regular` (Dock icon, ⌘-Tab entry) when a window is shown, `Accessory`
+(status item only) when it is hidden. The switch is one Objective-C selector
+reached through ctypes; pulling a whole framework binding into the bundle for
+`setActivationPolicy:` was not worth the weight.
+
+Two things about this took a while to get right, both invisible from source:
+
+* **The bundle has to declare `LSUIElement`.** LaunchServices pins a bundled
+  app's type from `Info.plist` at launch, so the runtime call alone was ignored
+  in the `.app` while working perfectly from source. `build_app.sh` sets the key
+  after PyInstaller runs — and re-signs, because editing `Info.plist`
+  invalidates the signature. The app then *promotes* itself to `Regular`
+  whenever it shows a window.
+* **The menu bar item is unaffected by any of this.** A status item does not
+  depend on the activation policy, which is what makes the switch safe. Closing
+  the window never removes it; only quitting does.
+
+Hiding the Dock icon is skipped when there is no menu bar item — without a
+status item the Dock is the only way back, and dropping it would strand the app.
+
 ## Layout
 
     main.py              entry point; --selftest checks a build

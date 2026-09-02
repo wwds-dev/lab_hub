@@ -21,6 +21,9 @@ from .settings_tab import SettingsTab
 # window is hidden out from under it.
 FULLSCREEN_EXIT_MS = 450
 REOPEN_GRACE_MS = 1000
+# How long after using the menu bar item to ignore activations. Long enough to
+# cover picking an app and the focus bouncing to it as it starts.
+TRAY_SUPPRESS_S = 5.0
 WAKE_POLL_MS = 30_000
 WAKE_GAP_SECONDS = 60
 
@@ -33,6 +36,7 @@ class MainWindow(QMainWindow):
         self._quitting = False
         self._warned_about_hiding = False
         self._hidden_at = 0.0
+        self._suppress_reopen_until = 0.0
 
         self.setWindowTitle(APP_NAME)
         self.resize(1020, 820)
@@ -106,6 +110,10 @@ class MainWindow(QMainWindow):
         self.tray.quit_requested.connect(self.quit)
         self.tray.launched.connect(self._on_launched)
         self.tray.launch_failed.connect(self._on_launch_failed)
+        # Both ends of a menu bar interaction: opening the menu, and the focus
+        # change when the launched app comes up.
+        self.tray.menu_opened.connect(self.suppress_reopen)
+        self.tray.launched.connect(lambda _message: self.suppress_reopen())
         self.tray.show()
 
     def present(self) -> None:
@@ -242,8 +250,19 @@ class MainWindow(QMainWindow):
         if self.tray is not None:
             dock.hide_from_dock()
 
+    def suppress_reopen(self, seconds: float = TRAY_SUPPRESS_S) -> None:
+        """Ignore activations for a moment.
+
+        Using the menu bar item activates the app, and launching something from
+        it activates us again as focus moves. Neither is a request for Lab Hub's
+        own window — picking SONAR should start SONAR and nothing else.
+        """
+        self._suppress_reopen_until = time.monotonic() + seconds
+
     def reopen_allowed(self) -> bool:
         """Return whether an activation is late enough to be a real Dock click."""
+        if time.monotonic() < self._suppress_reopen_until:
+            return False
         return (time.monotonic() - self._hidden_at) * 1000 > REOPEN_GRACE_MS
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt override
