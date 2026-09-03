@@ -15,6 +15,8 @@
 - [x] `P3` `design` `@ai` Apps tab: group by category rather than one flat list, now that there are twelve projects — addressed by splitting into three tabs (Apps / Backup & Sync / Tools) instead of grouping within one tab; the Apps tab itself is back down to 5 items (`PRIMARY_APPS`).
 - [x] `P1` `bug` `@ai` Red button quit instead of hiding — and the fix for that re-showed the window in the same breath as closing it. Both shipped, with `tests/test_window_lifecycle.py` as the regression.
 - [x] `P2` `infra` `@ai` Config written to `~/Library/Application Support/Lab Hub/`, never inside the bundle
+- [x] `P2` `feature` `@ai` **Narrator Library** — a second sub-tab browsing the generated ebook catalogue (`ebook_catalog.csv` from Codex's `outputs/`), with per-row Read/Queue checkboxes persisted to `narrator_library_state.json`, a Narrated-books filter (matched against existing audio files, not tracked separately), and one click to load a book into Convert. `ui/narrator_library.py`, `tests/test_narrator_tab.py`.
+- [x] `P1` `bug` `@ai` **Dock icon shown only while a window is open** — `ui/dock.py` switches the app's macOS activation policy (`Regular`/`Accessory`) via ctypes; the bundle needs `LSUIElement` set too, or LaunchServices pins the type at launch and the runtime call is ignored. A related reopen bug: opening the tray menu, or launching an app from it, was reactivating Lab Hub's own hidden window — `suppress_reopen()` now blocks that for 5s. `tests/test_window_lifecycle.py`, `tests/test_tray.py`.
 
 ## v3 — later
 

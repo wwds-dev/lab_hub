@@ -25,3 +25,5 @@ Status: `IDEA` · `CONSIDERING` · `PLANNED` · `DONE` · `REJECTED`
 | `--selftest` that starts a real PySide6 child from a sibling venv before installing | Aug 2026 |
 | Start-at-login via LaunchAgent, plus auto-start Backup Control Center/git_autosync and a post-wake recheck | Aug 2026 |
 | Backup & Sync tab split out of Apps; Narrator tab added to Tools | Aug 2026 |
+| Narrator Library sub-tab — browse the ebook catalogue, mark read/queued, filter to narrated books, load straight into Convert | Sep 2026 |
+| Dock icon follows the window (hidden while no window is open); tray-menu and app-launch reopen suppression so using the menu bar doesn't reactivate Lab Hub's own window | Sep 2026 |

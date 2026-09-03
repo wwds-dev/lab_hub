@@ -85,6 +85,34 @@ a full-length book takes minutes.
 > they carry no reliable text structure, so expect broken paragraphs and lost
 > formatting. The tab warns rather than refusing.
 
+#### Narrator
+Two sub-tabs sharing one settings object: **Convert** turns one ebook into an
+MP3 audiobook, and **Library** browses a generated ebook catalogue and feeds
+books into Convert.
+
+**Convert** extracts the book's text (EPUB, PDF, MOBI, AZW3 or TXT), creates
+speech with OpenAI in one of ten voices, and joins the chunks into a single
+MP3. Chunk size (in tokens) is adjustable; interrupted books keep the chunks
+they already finished and resume on the next run rather than starting over.
+Requires `OPENAI_API_KEY` (Lab Hub's `.env` file or the environment) and
+`ffmpeg` on PATH — the tab checks both before it will start and explains
+which is missing. Runs as a separate, stoppable worker process (`QProcess`):
+from source that's `python -m lab_hub.tools.narrator.converter`, frozen it's
+the app's own binary re-invoked with `--narrator-worker`, so the packaged app
+needs no separate interpreter for it. OpenAI usage costs real money.
+
+**Library** reads `ebook_catalog.csv` from wherever the Codex project last
+wrote it (`~/Documents/Codex/**/outputs/`, newest match; overridable with
+`EBOOK_CATALOG_PATH`) and shows it as a searchable, filterable table: Ranked
+recommendations, Books I've read, or Narrated books (detected by matching
+title against existing audio files — `.mp3`/`.m4b`/`.wav`/`.aac` — under the
+Narrator output folder, so nothing has to be tracked separately). Two
+per-row checkboxes persist to `narrator_library_state.json`: **Read** and
+**Queue**. Double-click a row, or **Use selected in Converter**, to load that
+book straight into the Convert sub-tab. **Copy queued books to Narrator**
+copies every queued file into the default Narrator input folder in one pass,
+skipping books already there and reporting what was unavailable.
+
 #### Prepare Images
 Three tools sharing one log:
 
@@ -158,6 +186,20 @@ Two things about this took a while to get right, both invisible from source:
 
 Hiding the Dock icon is skipped when there is no menu bar item — without a
 status item the Dock is the only way back, and dropping it would strand the app.
+
+**Reopening only happens for a real Dock click.** A `_Reopener` watches
+`applicationStateChanged` (not the raw activation event — closing the window
+delivers that event too, and filtering on it re-showed a window that had
+never been repainted: a black rectangle) and re-shows the window on an
+inactive→active transition, but only when `reopen_allowed()` agrees:
+
+* Hiding the window stamps `_hidden_at`; for `REOPEN_GRACE_MS` afterward,
+  activation is treated as the echo of that hide, not a click — this is what
+  stops leaving fullscreen from reopening the window it was just told to hide.
+* Opening the tray menu, or launching an app from it, calls `suppress_reopen()`
+  and blocks reactivation for `TRAY_SUPPRESS_S` (5s) — using the menu bar item
+  activates Lab Hub, and launching SONAR (say) activates it again as focus
+  moves; neither means "bring my window back."
 
 ## Layout
 
