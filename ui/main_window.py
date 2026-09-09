@@ -46,7 +46,15 @@ class MainWindow(QMainWindow):
         self.tabs.tabBar().setExpanding(False)
         self.tabs.tabBar().setDrawBase(False)
 
-        self.apps_tab = AppsTab(self.settings, apps=launcher.PRIMARY_APPS)
+        self.apps_tab = AppsTab(
+            self.settings,
+            apps=launcher.SUITES,
+            intro=(
+                "These run in their own window, as their own process — quitting "
+                "Lab Hub leaves them running. An app listed under a suite lives "
+                "inside that project's repository and belongs to it."
+            ),
+        )
         self.backup_sync_tab = AppsTab(
             self.settings,
             apps=launcher.BACKUP_SYNC_APPS,
@@ -61,7 +69,7 @@ class MainWindow(QMainWindow):
         self.images_tab = ImagesTab(self.settings)
         self.unblock_tracker_tab = AppsTab(
             self.settings,
-            apps=launcher.TOOL_APPS,
+            apps=launcher.UTILITIES,
             title="Unblock Tracker",
             intro="Open the tracker to monitor an Instagram profile's block status.",
         )
@@ -75,7 +83,7 @@ class MainWindow(QMainWindow):
         self.tools_tabs.addTab(self.unblock_tracker_tab, "Unblock Tracker")
 
         self.tabs.addTab(self.apps_tab, "Apps")
-        self.tabs.addTab(self.backup_sync_tab, "Backup & Sync")
+        self.tabs.addTab(self.backup_sync_tab, "Backup and Sync")
         self.tabs.addTab(self.tools_tabs, "Tools")
         self.tabs.addTab(self.settings_tab, "Settings")
         self.setCentralWidget(self.tabs)
@@ -352,6 +360,11 @@ def run() -> int:
     else:
         # The bundle declares LSUIElement so a login start has no Dock icon;
         # a normal launch shows a window, so it has to promote itself back.
+        #
+        # Synchronously, and before showMaximized: the bundle starts as an
+        # accessory, and an accessory app cannot materialise a window — deferring
+        # this to the first event-loop turn left the app running with no window
+        # at all. The hide below *must* be deferred; this must not be.
         dock.show_in_dock()
         window.showMaximized()
     return app.exec()

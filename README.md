@@ -3,18 +3,18 @@
 One front door for the lab's desktop tools: a launcher for the standalone apps,
 and a home for the small utilities that never had a UI.
 
-Tabs: **Apps** · **Backup & Sync** · **Tools** · **Settings**
+Tabs: **Apps** · **Backup and Sync** · **Tools** · **Settings**
 
 ## Why two kinds of thing
 
 The projects behind this app do not want the same treatment, so they do not get
 it.
 
-**Launched, not embedded.** Sentinel AI, Sentinel Fork, Create & Publish, SONAR,
-VPN Agent, Backup Control Center, git_autosync, and Unblock Tracker are complete
+**Launched, not embedded.** Sentinel Fork, Imprint, SONAR, VPN Agent, Bug Spray,
+vidforge, Backup Control Center, git_autosync and Unblock Tracker are complete
 PySide6 applications — own window, own settings, own background work, own
-lifecycle. Embedding them would mean nesting eight apps' worth of UI and state
-inside a ninth, and every one of them is something you leave running. Lab Hub
+lifecycle. Embedding them would mean nesting nine apps' worth of UI and state
+inside a tenth, and every one of them is something you leave running. Lab Hub
 starts them as separate processes: quit it and they keep going.
 
 **Embedded, not launched.** convert_epub and image_tools were single-file
@@ -24,19 +24,26 @@ nothing to keep running, so the logic moved into `lab_hub/tools/` as plain
 functions and the config block became a form.
 
 The conversion engine under `tools/convert/` is a **vendored copy** of
-`active/convert_epub/ebook_converter/`, where it is developed and tested. It is
+`active/toolbox/convert_epub/ebook_converter/`, where it is developed and tested. It is
 copied rather than imported so Lab Hub does not depend on a sibling checkout
 being present — keep the two in step when either changes.
 
 **Narrator belongs here.** Its tab runs Lab Hub's bundled ebook-to-audiobook
 engine in a separate, stoppable worker process. It does not launch or import
-Sentinel AI and works the same way from source and from the installed app.
+Sentinel Fork and works the same way from source and from the installed app.
 
 ## Tabs
 
 ### Apps
-The front desk for **Sentinel AI**, **Sentinel Fork**, **Create & Publish**,
-**SONAR**, and **VPN Agent**. A card per app, showing where it will start from:
+The front desk for the suites: **Sentinel Fork**, **Imprint** and **SONAR**.
+
+Some apps live *inside* another project's repository — VPN Agent and Bug Spray
+under `sentinel_fork`, vidforge under `imprint`. Those are **companions**: they
+appear as compact rows indented inside their suite's tile rather than as tiles of
+their own, so the launchpad mirrors the actual structure. Listing Bug Spray beside
+Sentinel Fork would suggest they are peers, which they are not.
+
+A tile shows where its app will start from:
 
 | State | Meaning |
 | --- | --- |
@@ -47,9 +54,11 @@ The front desk for **Sentinel AI**, **Sentinel Fork**, **Create & Publish**,
 Source runs never use Lab Hub's own interpreter. Frozen, that is this app's
 binary, and it would run the other project inside this bundle's dependencies.
 
-### Backup & Sync
+### Backup and Sync
 
-Launch **Backup Control Center** and **git_autosync** from one place.
+Launch **Backup Control Center** and **git_autosync** from one place. Spelled
+"and", not "&": Qt reads an ampersand in a tab label as a mnemonic marker and
+renders "Backup & Sync" as "Backup _Sync".
 
 ### Tools
 
@@ -147,7 +156,10 @@ forward instead of doing nothing.
 
 The menu bar item carries the same 2×2 mark, drawn solid black on transparent
 and flagged as a mask so macOS recolours it for a light or dark menu bar. Its
-menu opens the window and launches the launchpad apps directly.
+menu opens the window and launches apps directly — **top-level apps only**
+(`launcher.MENU_BAR_APPS`). Companions are reached from their suite; listing
+VPN Agent, Bug Spray and vidforge there too turned a six-item menu into a
+nine-item one and buried the apps actually reached for.
 
 Because the app lives in the menu bar, **closing the window hides it** rather
 than quitting — a conversion left running would otherwise lose the log it is
@@ -160,46 +172,36 @@ and quietly starts Backup Control Center and git_autosync the same way. After
 the Mac wakes from sleep, it checks those two companions again and starts only
 the ones that are not already running; no windows are brought forward.
 
-## The Dock icon follows the window
+## The Dock icon — unfinished
 
-Lab Hub is two things at once: a window you open occasionally, and a menu bar
-item that stays. The Dock only carries an icon when there is actually a window
-behind it — close the window and the icon goes, leaving the status item.
+The intent: the Dock carries an icon only while a window is actually open, so a
+Lab Hub sitting quietly in the menu bar does not squat in the Dock.
 
-macOS has a matching pair of activation policies, and the app switches between
-them: `Regular` (Dock icon, ⌘-Tab entry) when a window is shown, `Accessory`
-(status item only) when it is hidden. The switch is one Objective-C selector
-reached through ctypes; pulling a whole framework binding into the bundle for
-`setActivationPolicy:` was not worth the weight.
+`ui/dock.py` switches the macOS activation policy — `Regular` (Dock icon, ⌘-Tab
+entry) against `Accessory` (status item only) — through one Objective-C selector
+reached with ctypes, rather than pulling a whole framework binding into the
+bundle for a single call. **Run from source, that works**: the process flips
+between `Foreground` and `UIElement` on cue.
 
-Two things about this took a while to get right, both invisible from source:
+**It does not work in the packaged app, and the fix for that was worse.**
+LaunchServices pins a bundled app's type from `Info.plist` at launch, so the
+runtime call is ignored in the `.app`. Declaring `LSUIElement` to make the switch
+stick then broke the window outright — an accessory app cannot materialise one,
+and `open -a` left Lab Hub running with no window at all. That change is
+reverted. A working window beats a tidy Dock.
 
-* **The bundle has to declare `LSUIElement`.** LaunchServices pins a bundled
-  app's type from `Info.plist` at launch, so the runtime call alone was ignored
-  in the `.app` while working perfectly from source. `build_app.sh` sets the key
-  after PyInstaller runs — and re-signs, because editing `Info.plist`
-  invalidates the signature. The app then *promotes* itself to `Regular`
-  whenever it shows a window.
-* **The menu bar item is unaffected by any of this.** A status item does not
-  depend on the activation policy, which is what makes the switch safe. Closing
-  the window never removes it; only quitting does.
+The real blocker is measurement. `lsappinfo` reports the type *declared* in
+`Info.plist`, not the live policy, so without `LSUIElement` the app always reads
+`Foreground` no matter what the runtime call does — the instrument cannot see the
+thing being changed. Any next attempt needs a genuine look at the Dock.
 
-Hiding the Dock icon is skipped when there is no menu bar item — without a
-status item the Dock is the only way back, and dropping it would strand the app.
-
-**Reopening only happens for a real Dock click.** A `_Reopener` watches
-`applicationStateChanged` (not the raw activation event — closing the window
-delivers that event too, and filtering on it re-showed a window that had
-never been repainted: a black rectangle) and re-shows the window on an
-inactive→active transition, but only when `reopen_allowed()` agrees:
-
-* Hiding the window stamps `_hidden_at`; for `REOPEN_GRACE_MS` afterward,
-  activation is treated as the echo of that hide, not a click — this is what
-  stops leaving fullscreen from reopening the window it was just told to hide.
-* Opening the tray menu, or launching an app from it, calls `suppress_reopen()`
-  and blocks reactivation for `TRAY_SUPPRESS_S` (5s) — using the menu bar item
-  activates Lab Hub, and launching SONAR (say) activates it again as focus
-  moves; neither means "bring my window back."
+What *is* shipped and tested from this work: closing the window never removes the
+menu bar item (only quitting does), and using the menu bar no longer drags the
+window along. Opening the tray menu, or launching an app from it, activates Lab
+Hub, and that activation used to be mistaken for "the user wants the hub back";
+`suppress_reopen()` ignores activations for five seconds afterwards. It is a
+grace, not a block, so switching back to Lab Hub still restores the window, and
+"Open Lab Hub" still works while suppressed.
 
 ## Layout
 
@@ -261,4 +263,4 @@ it. A build whose launched apps would die now fails before it installs.
 
 It does not replace any of the projects it launches. Each keeps its own repo,
 README, venv and build script; Lab Hub only points at them. Changing what
-Sentinel AI does still means changing Sentinel AI.
+Sentinel Fork does still means changing Sentinel Fork.

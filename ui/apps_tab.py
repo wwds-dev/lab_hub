@@ -41,6 +41,64 @@ SUMMARY_HEIGHT = 52
 GRID_MAX_WIDTH = 1500
 
 
+class CompanionRow(QWidget):
+    """One compact line for an app that belongs to the suite above it."""
+
+    launched = Signal(str)
+
+    def __init__(self, app: launcher.ExternalApp, parent=None) -> None:
+        super().__init__(parent)
+        self.app = app
+        self.lab_root = config.DEFAULT_LAB_ROOT
+        self.running = False
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(14, 2, 0, 2)
+        layout.setSpacing(8)
+
+        self.name = QLabel(app.name)
+        self.state = QLabel()
+        self.state.setObjectName("hint")
+
+        self.button = QPushButton("Launch")
+        self.button.setObjectName("companion")
+        self.button.clicked.connect(self._launch)
+
+        layout.addWidget(self.name)
+        layout.addStretch(1)
+        layout.addWidget(self.state)
+        layout.addWidget(self.button)
+
+    def refresh(self, lab_root: Path, table: str | None = None) -> None:
+        self.lab_root = lab_root
+        state, _ = launcher.status(self.app, lab_root)
+        self.running = state != "missing" and launcher.is_running(
+            self.app, lab_root, table
+        )
+        label, _style = RUNNING_LABEL if self.running else STATE_LABELS[state]
+        self.state.setText(label)
+        self.setToolTip(self.app.summary)
+
+        if self.running and launcher.can_bring_to_front(self.app):
+            self.button.setText("Bring to front")
+        elif self.running:
+            self.button.setText("Running")
+        else:
+            self.button.setText("Launch")
+        self.button.setEnabled(state != "missing" and not (
+            self.running and not launcher.can_bring_to_front(self.app)
+        ))
+
+    def _launch(self) -> None:
+        action = launcher.bring_to_front if self.running else launcher.launch
+        try:
+            message = action(self.app, self.lab_root)
+        except launcher.LaunchError as error:
+            QMessageBox.warning(self, f"Could not launch {self.app.name}", str(error))
+            return
+        self.launched.emit(message)
+
+
 class AppCard(QWidget):
     """Name, what it does, where it will be started from, and a Launch button."""
 
@@ -92,8 +150,25 @@ class AppCard(QWidget):
         layout.addLayout(header)
         layout.addWidget(summary)
         layout.addWidget(self.detail)
-        layout.addStretch(1)
         layout.addWidget(self.launch_button)
+
+        # Companions live inside this project's repo and belong to it, so they
+        # sit indented under their suite rather than as tiles of their own —
+        # otherwise Bug Spray reads as a peer of Sentinel Fork rather than part
+        # of it.
+        self.companions: list[CompanionRow] = []
+        if app.companions:
+            layout.addSpacing(4)
+            for companion in app.companions:
+                row = CompanionRow(companion)
+                row.launched.connect(self.launched)
+                self.companions.append(row)
+                layout.addWidget(row)
+
+        # The spare room goes at the bottom. Put it above the button instead and
+        # a suite with two companions pushes its Launch far below a suite with
+        # none, leaving the row of tiles visibly ragged.
+        layout.addStretch(1)
 
     # ------------------------------------------------------------------
     def refresh(self, lab_root: Path, table: str | None = None) -> None:
@@ -112,6 +187,8 @@ class AppCard(QWidget):
 
         self.detail.setText(detail)
         self._update_button(state)
+        for row in self.companions:
+            row.refresh(lab_root, table)
 
     def _update_button(self, state: str) -> None:
         if not self.running:
@@ -162,6 +239,7 @@ class AppsTab(QWidget):
         apps: tuple[launcher.ExternalApp, ...] = launcher.LAUNCHPAD,
         title: str = "Standalone apps",
         intro: str = LAUNCHPAD_INTRO,
+        sections: tuple[tuple[str, str, tuple[launcher.ExternalApp, ...]], ...] | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -172,21 +250,31 @@ class AppsTab(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(area)
 
-        column.addWidget(theme.section_title(title))
-        column.addWidget(theme.hint(intro))
-
-        # Tiles side by side rather than a single scrolling stack: the whole
-        # point of a launchpad is seeing everything at once.
-        self.grid = QGridLayout()
-        self.grid.setSpacing(16)
-        column.addLayout(self.grid)
+        # One page, several headed sections. Suites, the sync companions and the
+        # small utilities are different kinds of thing and reading them as one
+        # undifferentiated wall of tiles was the problem with the flat grid.
+        groups = sections if sections is not None else ((title, intro, apps),)
 
         self.cards = []
-        for app in apps:
-            card = AppCard(app)
-            card.launched.connect(self.launched)
-            self.cards.append(card)
+        self.grids = []
+        for group_title, group_intro, group_apps in groups:
+            column.addWidget(theme.section_title(group_title))
+            if group_intro:
+                column.addWidget(theme.hint(group_intro))
 
+            grid = QGridLayout()
+            grid.setSpacing(16)
+            column.addLayout(grid)
+            self.grids.append((grid, []))
+
+            for app in group_apps:
+                card = AppCard(app)
+                card.launched.connect(self.launched)
+                self.cards.append(card)
+                self.grids[-1][1].append(card)
+
+        # Tests and the resize logic reach for the first grid by name.
+        self.grid = self.grids[0][0]
         self._columns = 0
         self._arrange(1)
 
@@ -214,14 +302,15 @@ class AppsTab(QWidget):
             return
         self._columns = columns
 
-        for card in self.cards:
-            self.grid.removeWidget(card)
-        for index, card in enumerate(self.cards):
-            self.grid.addWidget(card, index // columns, index % columns)
-        # Equal shares, and no leftover stretch from a wider previous layout
-        # holding open an empty column.
-        for index in range(self.grid.columnCount()):
-            self.grid.setColumnStretch(index, 1 if index < columns else 0)
+        for grid, cards in self.grids:
+            for card in cards:
+                grid.removeWidget(card)
+            for index, card in enumerate(cards):
+                grid.addWidget(card, index // columns, index % columns)
+            # Equal shares, and no leftover stretch from a wider previous layout
+            # holding open an empty column.
+            for index in range(grid.columnCount()):
+                grid.setColumnStretch(index, 1 if index < columns else 0)
 
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt override
         super().resizeEvent(event)

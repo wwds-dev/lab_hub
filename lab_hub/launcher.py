@@ -76,14 +76,16 @@ class LaunchError(RuntimeError):
 class ExternalApp:
     key: str
     name: str  # display name and installed bundle name
-    project: str  # folder name under the lab root
+    project: str  # folder path under the lab root
     entry: str  # entry script, relative to the project folder
     summary: str
+    # Apps that live *inside* this project's repo and belong to it. They are
+    # launched exactly like any other app; the nesting is only how they are
+    # presented, so a companion reads as part of its suite rather than a peer.
+    companions: tuple["ExternalApp", ...] = ()
 
 
-# Standalone apps are grouped by where they appear in Lab Hub. LAUNCHPAD is
-# retained below as the complete set used by the menu-bar launcher and self-test.
-PRIMARY_APPS: tuple[ExternalApp, ...] = (
+SUITES: tuple[ExternalApp, ...] = (
     ExternalApp(
         key="sentinel_fork",
         name="Sentinel Fork",
@@ -91,14 +93,41 @@ PRIMARY_APPS: tuple[ExternalApp, ...] = (
         entry="main.py",
         summary="A local-first command centre for security, investigation, and "
         "controlled AI-assisted workflows.",
+        companions=(
+            ExternalApp(
+                key="vpn_agent",
+                name="VPN Agent",
+                project="sentinel_fork/vpn_agent",
+                entry="main.py",
+                summary="Run a VPN you own end to end: monitor a tunnel with a "
+                "kill switch, or build the server at the far end.",
+            ),
+            ExternalApp(
+                key="bug_spray",
+                name="Bug Spray",
+                project="sentinel_fork/bug_spray",
+                entry="main.py",
+                summary="Standalone bug-bounty triage for the Bug Spray agent.",
+            ),
+        ),
     ),
     ExternalApp(
-        key="create_and_publish",
-        name="Create & Publish",
-        project="create_and_publish",
+        key="imprint",
+        name="Imprint",
+        project="imprint",
         entry="main.py",
-        summary="Create, manage, and publish books, websites, and other creative "
-        "work from one workspace.",
+        summary="The create-and-publish studio: books, websites and other "
+        "creative work from one workspace.",
+        companions=(
+            ExternalApp(
+                key="vidforge",
+                name="vidforge",
+                project="imprint/vidforge",
+                entry="main.py",
+                summary="Topic to narrated, illustrated video — script, voice, "
+                "imagery, captions and thumbnail.",
+            ),
+        ),
     ),
     ExternalApp(
         key="sonar",
@@ -107,14 +136,6 @@ PRIMARY_APPS: tuple[ExternalApp, ...] = (
         entry="main.py",
         summary="Market scanner and paper-trading terminal: live prices, "
         "prediction-market odds and a probability model, traded with paper money.",
-    ),
-    ExternalApp(
-        key="vpn_agent",
-        name="VPN Agent",
-        project="sentinel_fork/vpn_agent",
-        entry="main.py",
-        summary="Run a VPN you own end to end: monitor a tunnel with a kill "
-        "switch, or build the WireGuard/OpenVPN server at the far end.",
     ),
 )
 
@@ -137,7 +158,7 @@ BACKUP_SYNC_APPS: tuple[ExternalApp, ...] = (
     ),
 )
 
-TOOL_APPS: tuple[ExternalApp, ...] = (
+UTILITIES: tuple[ExternalApp, ...] = (
     ExternalApp(
         key="unblock_tracker",
         name="Unblock Tracker",
@@ -148,8 +169,26 @@ TOOL_APPS: tuple[ExternalApp, ...] = (
     ),
 )
 
-# Everything launchable, including apps shown outside the main Apps tab.
-LAUNCHPAD: tuple[ExternalApp, ...] = PRIMARY_APPS + BACKUP_SYNC_APPS + TOOL_APPS
+
+def flatten(apps: tuple[ExternalApp, ...]) -> tuple[ExternalApp, ...]:
+    """Suites and their companions as one flat sequence."""
+    out: list[ExternalApp] = []
+    for app in apps:
+        out.append(app)
+        out.extend(app.companions)
+    return tuple(out)
+
+
+# What the menu bar lists: top-level apps only. A companion is reached from its
+# suite — putting VPN Agent, Bug Spray and vidforge in the menu too turns a
+# six-item list into a nine-item one and buries the apps actually reached for.
+MENU_BAR_APPS: tuple[ExternalApp, ...] = SUITES + BACKUP_SYNC_APPS + UTILITIES
+
+# The Apps tab is grouped; everything else wants one flat list.
+PRIMARY_APPS: tuple[ExternalApp, ...] = SUITES
+LAUNCHPAD: tuple[ExternalApp, ...] = (
+    flatten(SUITES) + BACKUP_SYNC_APPS + UTILITIES
+)
 APPS: tuple[ExternalApp, ...] = LAUNCHPAD
 
 

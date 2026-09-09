@@ -51,10 +51,11 @@ class Tray(QObject):
         open_action.triggered.connect(self.open_requested)
         menu.addAction(open_action)
 
-        # Mirrors the Apps tab, launchpad only — the menu bar is for the things
-        # reached for without thinking.
+        # Top-level apps only. Companions (VPN Agent, Bug Spray, vidforge) are
+        # reached from their suite; listing them here as peers makes the menu
+        # half again as long and hides what is actually reached for.
         menu.addSeparator()
-        for app in launcher.LAUNCHPAD:
+        for app in launcher.MENU_BAR_APPS:
             action = QAction(app.name, menu)
             action.triggered.connect(lambda _checked=False, a=app: self._launch(a))
             menu.addAction(action)
