@@ -85,13 +85,6 @@ class ExternalApp:
 # retained below as the complete set used by the menu-bar launcher and self-test.
 PRIMARY_APPS: tuple[ExternalApp, ...] = (
     ExternalApp(
-        key="sentinel_ai",
-        name="Sentinel AI",
-        project="sentinel_ai",
-        entry="main.py",
-        summary="The multi-agent workspace for writing, research and publishing.",
-    ),
-    ExternalApp(
         key="sentinel_fork",
         name="Sentinel Fork",
         project="sentinel_fork",
@@ -118,7 +111,7 @@ PRIMARY_APPS: tuple[ExternalApp, ...] = (
     ExternalApp(
         key="vpn_agent",
         name="VPN Agent",
-        project="vpn_agent",
+        project="sentinel_fork/vpn_agent",
         entry="main.py",
         summary="Run a VPN you own end to end: monitor a tunnel with a kill "
         "switch, or build the WireGuard/OpenVPN server at the far end.",
@@ -148,7 +141,7 @@ TOOL_APPS: tuple[ExternalApp, ...] = (
     ExternalApp(
         key="unblock_tracker",
         name="Unblock Tracker",
-        project="unblock_tracker",
+        project="toolbox/unblock_tracker",
         entry="main.py",
         summary="Watch whether an Instagram profile has unblocked you, and get "
         "notified the moment it changes.",
