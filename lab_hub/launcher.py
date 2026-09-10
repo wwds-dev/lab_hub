@@ -83,7 +83,7 @@ class ExternalApp:
 
 # One tile per umbrella app, and nothing else. The agents and sub-modules that
 # live inside these projects — Tunnel and Bug Spray inside Sentinel Fork, the
-# video pipeline inside Imprint, macro and sports inside SONAR — are reached
+# video pipeline inside Imprint, macro and Playmaker inside SONAR — are reached
 # from their own app, never from here. Two doors to the same feature is how you
 # end up with a standalone VPN Agent window that knows nothing about the
 # Sentinel Fork session that should own it.

@@ -34,7 +34,7 @@
   silently launched a stale build. Worse than a dead tile.
 - [x] `P2` `design` `@ai` **Umbrella apps only — agents are not separately launchable.**
   Tunnel and Bug Spray live inside Sentinel Fork (`sentinel_fork/agents/`), the video
-  pipeline inside Imprint, macro and sports inside SONAR. Lab Hub lists the three
+  pipeline inside Imprint, macro and Playmaker inside SONAR. Lab Hub lists the three
   umbrella apps and nothing below them, in the Apps tab and the menu bar alike. The
   nested-companion rows tried in between are gone: they still offered a second door to
   a feature that belongs to its parent app. Note `/Applications/VPN Agent.app` is an

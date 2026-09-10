@@ -45,7 +45,7 @@ def test_agents_are_not_separately_launchable(window):
     """Agents and sub-modules belong to their umbrella app.
 
     Tunnel and Bug Spray live inside Sentinel Fork, the video pipeline inside
-    Imprint, macro and sports inside SONAR. Two doors to the same feature is how
+    Imprint, macro and Playmaker inside SONAR. Two doors to the same feature is how
     a standalone VPN Agent window ends up knowing nothing about the Sentinel
     Fork session that should own it.
     """
@@ -53,7 +53,7 @@ def test_agents_are_not_separately_launchable(window):
 
     listed = {app.key for app in launcher.LAUNCHPAD}
 
-    assert not (listed & {"vpn_agent", "bug_spray", "vidforge", "macro", "sports"})
+    assert not (listed & {"vpn_agent", "bug_spray", "vidforge", "macro", "playmaker"})
 
 
 def test_every_launchable_app_is_reachable(window):

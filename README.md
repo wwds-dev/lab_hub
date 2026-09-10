@@ -39,7 +39,7 @@ One tile per umbrella app: **Sentinel Fork**, **Imprint**, **SONAR**.
 
 **Agents and sub-modules are deliberately not here.** Tunnel and Bug Spray live
 inside Sentinel Fork (`sentinel_fork/agents/`), the video pipeline inside Imprint,
-macro and sports inside SONAR — and each is reached from its own app, never from
+macro and Playmaker inside SONAR — and each is reached from its own app, never from
 Lab Hub. Two doors to the same feature is how you end up with a standalone VPN
 Agent window that knows nothing about the Sentinel Fork session that should own
 it. The same rule covers the menu bar, which lists only these umbrella apps.
