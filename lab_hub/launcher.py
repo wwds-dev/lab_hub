@@ -220,8 +220,55 @@ def can_bring_to_front(app: ExternalApp) -> bool:
     return bundle_path(app) is not None
 
 
+def is_launcher_bundle(bundle: Path) -> bool:
+    """True when the .app only starts the real GUI in a separate process.
+
+    Sentinel Fork installs a compiled AppleScript applet that runs the project's
+    main.py, so edits go live without a rebuild. macOS then registers two apps:
+    the applet, which owns no window, and the python process, which owns the
+    window. `open -a` reaches the applet — blocked in `do shell script` and deaf
+    to the reopen event — so raising the app that way silently does nothing.
+
+    Self-contained PyInstaller bundles name their executable after the app, so
+    an executable called "applet" is the reliable tell.
+    """
+    plist = bundle / "Contents" / "Info.plist"
+    try:
+        result = subprocess.run(
+            ["/usr/libexec/PlistBuddy", "-c", "Print :CFBundleExecutable", str(plist)],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0 and result.stdout.strip() == "applet"
+
+
 def bring_to_front(app: ExternalApp, lab_root: Path) -> str:
     bundle = bundle_path(app)
+    project = source_dir(app, lab_root)
+
+    # A launcher bundle cannot raise its own GUI, so go at the entry script
+    # instead. These apps dedupe themselves: the second copy hands off to the
+    # running one, which comes forward, and then exits 0.
+    if bundle is not None and project is not None and is_launcher_bundle(bundle):
+        python = venv_python(project)
+        if python is not None:
+            try:
+                handoff = subprocess.run(
+                    [str(python), str(project / app.entry)],
+                    cwd=project, capture_output=True, text=True,
+                    env=child_env(), timeout=30,
+                )
+            except subprocess.SubprocessError as error:
+                raise LaunchError(f"Could not raise {app.name}: {error}") from error
+            if handoff.returncode != 0:
+                raise LaunchError(
+                    f"Could not raise {app.name} — its launcher exited with "
+                    f"status {handoff.returncode}.\n\n"
+                    f"{(handoff.stderr or handoff.stdout).strip()[-400:]}"
+                )
+            return f"Brought {app.name} to the front"
+
     if bundle is None:
         raise LaunchError(
             f"{app.name} is already running, but Lab Hub can only raise apps "
