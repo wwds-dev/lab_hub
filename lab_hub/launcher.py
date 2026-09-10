@@ -79,55 +79,30 @@ class ExternalApp:
     project: str  # folder path under the lab root
     entry: str  # entry script, relative to the project folder
     summary: str
-    # Apps that live *inside* this project's repo and belong to it. They are
-    # launched exactly like any other app; the nesting is only how they are
-    # presented, so a companion reads as part of its suite rather than a peer.
-    companions: tuple["ExternalApp", ...] = ()
 
 
+# One tile per umbrella app, and nothing else. The agents and sub-modules that
+# live inside these projects — Tunnel and Bug Spray inside Sentinel Fork, the
+# video pipeline inside Imprint, macro and sports inside SONAR — are reached
+# from their own app, never from here. Two doors to the same feature is how you
+# end up with a standalone VPN Agent window that knows nothing about the
+# Sentinel Fork session that should own it.
 SUITES: tuple[ExternalApp, ...] = (
     ExternalApp(
         key="sentinel_fork",
         name="Sentinel Fork",
         project="sentinel_fork",
         entry="main.py",
-        summary="A local-first command centre for security, investigation, and "
-        "controlled AI-assisted workflows.",
-        companions=(
-            ExternalApp(
-                key="vpn_agent",
-                name="VPN Agent",
-                project="sentinel_fork/vpn_agent",
-                entry="main.py",
-                summary="Run a VPN you own end to end: monitor a tunnel with a "
-                "kill switch, or build the server at the far end.",
-            ),
-            ExternalApp(
-                key="bug_spray",
-                name="Bug Spray",
-                project="sentinel_fork/bug_spray",
-                entry="main.py",
-                summary="Standalone bug-bounty triage for the Bug Spray agent.",
-            ),
-        ),
+        summary="Security and investigation command centre. Its agents — Chat, "
+        "Trace, Bloodhound, Beacon, Forge, Tunnel and Bug Spray — live inside it.",
     ),
     ExternalApp(
         key="imprint",
         name="Imprint",
         project="imprint",
         entry="main.py",
-        summary="The create-and-publish studio: books, websites and other "
-        "creative work from one workspace.",
-        companions=(
-            ExternalApp(
-                key="vidforge",
-                name="vidforge",
-                project="imprint/vidforge",
-                entry="main.py",
-                summary="Topic to narrated, illustrated video — script, voice, "
-                "imagery, captions and thumbnail.",
-            ),
-        ),
+        summary="The create-and-publish studio: writing, audio, video, social, "
+        "web and gigs, each behind its own mode tab.",
     ),
     ExternalApp(
         key="sonar",
@@ -169,26 +144,11 @@ UTILITIES: tuple[ExternalApp, ...] = (
     ),
 )
 
-
-def flatten(apps: tuple[ExternalApp, ...]) -> tuple[ExternalApp, ...]:
-    """Suites and their companions as one flat sequence."""
-    out: list[ExternalApp] = []
-    for app in apps:
-        out.append(app)
-        out.extend(app.companions)
-    return tuple(out)
-
-
-# What the menu bar lists: top-level apps only. A companion is reached from its
-# suite — putting VPN Agent, Bug Spray and vidforge in the menu too turns a
-# six-item list into a nine-item one and buries the apps actually reached for.
-MENU_BAR_APPS: tuple[ExternalApp, ...] = SUITES + BACKUP_SYNC_APPS + UTILITIES
-
-# The Apps tab is grouped; everything else wants one flat list.
+# Every launchable app. There is no nesting any more, so this is simply the
+# three groups in order — the menu bar and the self-test both read it.
 PRIMARY_APPS: tuple[ExternalApp, ...] = SUITES
-LAUNCHPAD: tuple[ExternalApp, ...] = (
-    flatten(SUITES) + BACKUP_SYNC_APPS + UTILITIES
-)
+MENU_BAR_APPS: tuple[ExternalApp, ...] = SUITES + BACKUP_SYNC_APPS + UTILITIES
+LAUNCHPAD: tuple[ExternalApp, ...] = MENU_BAR_APPS
 APPS: tuple[ExternalApp, ...] = LAUNCHPAD
 
 

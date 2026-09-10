@@ -16,30 +16,32 @@
 - [x] `P1` `bug` `@ai` Red button quit instead of hiding — and the fix for that re-showed the window in the same breath as closing it. Both shipped, with `tests/test_window_lifecycle.py` as the regression.
 - [x] `P2` `infra` `@ai` Config written to `~/Library/Application Support/Lab Hub/`, never inside the bundle
 - [x] `P2` `feature` `@ai` **Narrator Library** — a second sub-tab browsing the generated ebook catalogue (`ebook_catalog.csv` from Codex's `outputs/`), with per-row Read/Queue checkboxes persisted to `narrator_library_state.json`, a Narrated-books filter (matched against existing audio files, not tracked separately), and one click to load a book into Convert. `ui/narrator_library.py`, `tests/test_narrator_tab.py`.
-- [ ] `P1` `bug` `@ai` **Dock icon shown only while a window is open** — *reopened.*
-  `ui/dock.py` switches the macOS activation policy (`Regular`/`Accessory`) through
-  the Objective-C runtime via ctypes, and that part works: from source the process
-  flips between `Foreground` and `UIElement`. Setting `LSUIElement` in the bundle so
-  the switch also takes effect under LaunchServices **broke the window entirely** —
-  an accessory app cannot materialise one, so `open -a` left Lab Hub running with no
-  window at all. That change is reverted; a working window beats a tidy Dock.
-  The blocker is measurement: `lsappinfo` reports the *declared* type from
-  `Info.plist`, not the live policy, so with `LSUIElement` gone the app always reads
-  `Foreground` whatever the runtime call does. Needs a real check of the Dock itself
-  (a human looking, or a screen capture of the Dock) before the next attempt.
-  The related reopen fix **is** shipped and tested: opening the tray menu, or
-  launching an app from it, was reactivating Lab Hub's hidden window;
-  `suppress_reopen()` blocks that for 5s. `tests/test_window_lifecycle.py`,
-  `tests/test_tray.py`.
+- [x] `P1` `bug` `@ai` **Dock icon shown only while a window is open** — done, and
+  verified in the packaged app across all four states (login start, app launched from
+  the menu bar, window opened, window closed). Three pieces were needed: `LSUIElement`
+  in the bundle (LaunchServices pins the type from `Info.plist`, so the runtime switch
+  alone is ignored once packaged), the policy switch in `ui/dock.py`, and — the piece
+  that was missing — `dock.activate()`, because promoting out of `Accessory` gives a
+  Dock icon but does not make the app frontmost, so the window was created and left
+  sitting behind everything. That looked like "no window", which is why this was
+  reverted once as impossible. The real cause of that wrong turn was the instrument:
+  `lsappinfo` reports the type declared in `Info.plist`, not the live policy.
+  `--selftest` now prints the true reading via `dock.current_policy()` — use that,
+  never `lsappinfo`. `tests/test_window_lifecycle.py`.
 - [x] `P1` `bug` `@ai` **Apps tab pointed at a renamed project** — the tile called
   `create_and_publish` no longer resolved (renamed to `imprint`), but
   `Create & Publish.app` was still installed, so the card read *Installed* and
   silently launched a stale build. Worse than a dead tile.
-- [x] `P2` `design` `@ai` **Companions nested under their suite** — VPN Agent and Bug
-  Spray live inside `sentinel_fork`'s repo, vidforge inside `imprint`'s. They are now
-  compact rows indented inside their parent's tile rather than peers of it, so the
-  Apps tab mirrors the actual repo structure. Imprint, vidforge and Bug Spray were
-  missing from the hub entirely. `tests/test_tab_groups.py`.
+- [x] `P2` `design` `@ai` **Umbrella apps only — agents are not separately launchable.**
+  Tunnel and Bug Spray live inside Sentinel Fork (`sentinel_fork/agents/`), the video
+  pipeline inside Imprint, macro and sports inside SONAR. Lab Hub lists the three
+  umbrella apps and nothing below them, in the Apps tab and the menu bar alike. The
+  nested-companion rows tried in between are gone: they still offered a second door to
+  a feature that belongs to its parent app. Note `/Applications/VPN Agent.app` is an
+  **orphaned bundle** — its source moved to `sentinel_fork/agents/vpn_agent`, so the
+  installed copy is built from a path that no longer exists. Not deleted: VPN Agent is
+  essential to Sentinel and is being worked on elsewhere. `tests/test_tab_groups.py`,
+  `tests/test_tray.py`.
 - [x] `P3` `design` `@ai` Menu bar lists **top-level apps only** — companions were
   appearing there as peers, making a six-item menu nine items long. `MENU_BAR_APPS`,
   `tests/test_tray.py`.

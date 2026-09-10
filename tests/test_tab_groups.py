@@ -41,26 +41,25 @@ def test_the_apps_tab_lists_the_suites(window):
     assert _keys(window.apps_tab) == ["sentinel_fork", "imprint", "sonar"]
 
 
-def test_companions_are_nested_under_their_suite(window):
-    """VPN Agent and Bug Spray live inside sentinel_fork's repo, vidforge inside
-    imprint's. Listing them as peers would misrepresent the structure."""
-    nested = {
-        card.app.key: [row.app.key for row in card.companions]
-        for card in window.apps_tab.cards
-    }
+def test_agents_are_not_separately_launchable(window):
+    """Agents and sub-modules belong to their umbrella app.
 
-    assert nested == {
-        "sentinel_fork": ["vpn_agent", "bug_spray"],
-        "imprint": ["vidforge"],
-        "sonar": [],
-    }
+    Tunnel and Bug Spray live inside Sentinel Fork, the video pipeline inside
+    Imprint, macro and sports inside SONAR. Two doors to the same feature is how
+    a standalone VPN Agent window ends up knowing nothing about the Sentinel
+    Fork session that should own it.
+    """
+    from lab_hub import launcher
+
+    listed = {app.key for app in launcher.LAUNCHPAD}
+
+    assert not (listed & {"vpn_agent", "bug_spray", "vidforge", "macro", "sports"})
 
 
 def test_every_launchable_app_is_reachable(window):
     """The flat list behind the menu bar and the self-test must not lose an app
     just because the Apps tab groups them."""
     on_screen = {c.app.key for c in window.apps_tab.cards}
-    on_screen |= {r.app.key for c in window.apps_tab.cards for r in c.companions}
     on_screen |= {c.app.key for c in window.backup_sync_tab.cards}
     on_screen |= {c.app.key for c in window.unblock_tracker_tab.cards}
 

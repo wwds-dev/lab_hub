@@ -129,6 +129,7 @@ class MainWindow(QMainWindow):
         # Back into the Dock first: a window belonging to an Accessory app
         # cannot properly take focus, so the order matters.
         dock.show_in_dock()
+        dock.activate()
 
         # show(), not showMaximized(): a hidden window remembers its geometry,
         # so summoning it restores whatever size the user last chose instead of
@@ -367,6 +368,7 @@ def run() -> int:
         # at all. The hide below *must* be deferred; this must not be.
         dock.show_in_dock()
         window.showMaximized()
+        dock.activate()
     return app.exec()
 
 

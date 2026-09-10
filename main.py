@@ -100,6 +100,28 @@ def _probe_child_launch(lab_root) -> tuple[bool | None, str]:
     return False, f"a launched Qt app would die at startup: {telling}"
 
 
+def _probe_dock_policy() -> str:
+    """Read the live activation policy, and whether it can be switched."""
+    try:
+        from PySide6.QtWidgets import QApplication
+
+        from ui import dock
+    except ImportError as error:
+        return f"unavailable ({error})"
+
+    app = QApplication.instance() or QApplication([])  # noqa: F841
+    start = dock.current_policy()
+    dock.hide_from_dock()
+    hidden = dock.current_policy()
+    dock.show_in_dock()
+    shown = dock.current_policy()
+    switches = hidden == dock.ACCESSORY and shown == dock.REGULAR
+    return (
+        f"starts {dock.policy_name(start)}; "
+        f"switchable at runtime: {'yes' if switches else 'NO'}"
+    )
+
+
 def selftest() -> int:
     from lab_hub import APP_NAME, asset_path, config, launcher
 
@@ -173,6 +195,11 @@ def selftest() -> int:
         print(f"  txt -> epub:     {detail}")
         if not ok:
             problems.append(f"round-trip conversion failed: {detail}")
+
+    # The Dock icon is meant to follow the window. Only a live reading proves
+    # whether the switch takes effect once packaged — `lsappinfo` reports the
+    # type declared in Info.plist and cannot see a runtime change.
+    print(f"  dock policy:     {_probe_dock_policy()}")
 
     launched, detail = _probe_child_launch(lab_root)
     print(f"  child Qt app:    {'ok — ' + detail if launched else detail}")

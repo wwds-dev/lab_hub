@@ -308,3 +308,24 @@ def test_open_lab_hub_still_works_while_suppressed(window, fake_tray, monkeypatc
     window.present()  # "Open Lab Hub" chosen from that same menu
 
     assert window.isVisible()
+
+
+def test_showing_the_window_also_brings_the_app_forward(window, fake_tray, monkeypatch):
+    """Promoting out of Accessory gives a Dock icon but does not make the app
+    frontmost. Without activating, the window is created and then sits behind
+    everything — which looks exactly like no window at all."""
+    order = []
+    monkeypatch.setattr(
+        "ui.main_window.dock.show_in_dock", lambda: order.append("promote") or True
+    )
+    monkeypatch.setattr(
+        "ui.main_window.dock.activate", lambda: order.append("activate") or True
+    )
+    monkeypatch.setattr("ui.main_window.dock.hide_from_dock", lambda: True)
+    window.tray = fake_tray
+    window.show()
+    window.close()
+
+    window.present()
+
+    assert order == ["promote", "activate"], "promote first, then bring forward"

@@ -45,13 +45,8 @@ def test_the_menu_lists_the_top_level_apps(menu_bar_item):
         assert app.name in labels
 
 
-def test_companions_are_not_in_the_menu(menu_bar_item):
-    """VPN Agent, Bug Spray and vidforge are reached from their suite. Listing
-    them here as peers makes a six-item menu into a nine-item one."""
-    from lab_hub import launcher
-
+def test_the_menu_lists_only_umbrella_apps(menu_bar_item):
+    """No agent or sub-module gets its own menu entry."""
     labels = {a.text() for a in menu_bar_item._menu.actions() if a.text()}
-    companions = [c.name for s in launcher.SUITES for c in s.companions]
 
-    assert companions, "the fixture would pass vacuously with no companions"
-    assert not (labels & set(companions))
+    assert not (labels & {"VPN Agent", "Bug Spray", "vidforge"})

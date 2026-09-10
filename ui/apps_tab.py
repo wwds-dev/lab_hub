@@ -41,64 +41,6 @@ SUMMARY_HEIGHT = 52
 GRID_MAX_WIDTH = 1500
 
 
-class CompanionRow(QWidget):
-    """One compact line for an app that belongs to the suite above it."""
-
-    launched = Signal(str)
-
-    def __init__(self, app: launcher.ExternalApp, parent=None) -> None:
-        super().__init__(parent)
-        self.app = app
-        self.lab_root = config.DEFAULT_LAB_ROOT
-        self.running = False
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 2, 0, 2)
-        layout.setSpacing(8)
-
-        self.name = QLabel(app.name)
-        self.state = QLabel()
-        self.state.setObjectName("hint")
-
-        self.button = QPushButton("Launch")
-        self.button.setObjectName("companion")
-        self.button.clicked.connect(self._launch)
-
-        layout.addWidget(self.name)
-        layout.addStretch(1)
-        layout.addWidget(self.state)
-        layout.addWidget(self.button)
-
-    def refresh(self, lab_root: Path, table: str | None = None) -> None:
-        self.lab_root = lab_root
-        state, _ = launcher.status(self.app, lab_root)
-        self.running = state != "missing" and launcher.is_running(
-            self.app, lab_root, table
-        )
-        label, _style = RUNNING_LABEL if self.running else STATE_LABELS[state]
-        self.state.setText(label)
-        self.setToolTip(self.app.summary)
-
-        if self.running and launcher.can_bring_to_front(self.app):
-            self.button.setText("Bring to front")
-        elif self.running:
-            self.button.setText("Running")
-        else:
-            self.button.setText("Launch")
-        self.button.setEnabled(state != "missing" and not (
-            self.running and not launcher.can_bring_to_front(self.app)
-        ))
-
-    def _launch(self) -> None:
-        action = launcher.bring_to_front if self.running else launcher.launch
-        try:
-            message = action(self.app, self.lab_root)
-        except launcher.LaunchError as error:
-            QMessageBox.warning(self, f"Could not launch {self.app.name}", str(error))
-            return
-        self.launched.emit(message)
-
-
 class AppCard(QWidget):
     """Name, what it does, where it will be started from, and a Launch button."""
 
@@ -152,22 +94,8 @@ class AppCard(QWidget):
         layout.addWidget(self.detail)
         layout.addWidget(self.launch_button)
 
-        # Companions live inside this project's repo and belong to it, so they
-        # sit indented under their suite rather than as tiles of their own —
-        # otherwise Bug Spray reads as a peer of Sentinel Fork rather than part
-        # of it.
-        self.companions: list[CompanionRow] = []
-        if app.companions:
-            layout.addSpacing(4)
-            for companion in app.companions:
-                row = CompanionRow(companion)
-                row.launched.connect(self.launched)
-                self.companions.append(row)
-                layout.addWidget(row)
-
-        # The spare room goes at the bottom. Put it above the button instead and
-        # a suite with two companions pushes its Launch far below a suite with
-        # none, leaving the row of tiles visibly ragged.
+        # Spare room at the bottom keeps every tile's Launch button on the same
+        # line, whatever the summary length.
         layout.addStretch(1)
 
     # ------------------------------------------------------------------
@@ -187,8 +115,6 @@ class AppCard(QWidget):
 
         self.detail.setText(detail)
         self._update_button(state)
-        for row in self.companions:
-            row.refresh(lab_root, table)
 
     def _update_button(self, state: str) -> None:
         if not self.running:

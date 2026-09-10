@@ -14,7 +14,7 @@ Status: `IDEA` · `CONSIDERING` · `PLANNED` · `DONE` · `REJECTED`
 | 6 | Start at login via LaunchAgent | infra | S | DONE |
 | 7 | Per-app last-launched timestamp and crash count | feature | M | IDEA |
 | 8 | Drag-to-reorder the app list | design | S | IDEA |
-| 9 | Dock icon only while a window is open | bug | M | BLOCKED — the policy switch works, but `LSUIElement` (needed for it to stick in a bundle) stops the window appearing, and `lsappinfo` cannot tell us the live policy. See TODO. |
+| 9 | Dock icon only while a window is open | bug | M | DONE — `LSUIElement` + runtime policy switch + `activateIgnoringOtherApps:`; measure with `--selftest`, not `lsappinfo` |
 | 10 | Warn when a tile's bundle is newer or older than its checkout | feature | M | IDEA — would have caught `Create & Publish.app` still launching after the rename |
 
 ## Done
@@ -27,6 +27,7 @@ Status: `IDEA` · `CONSIDERING` · `PLANNED` · `DONE` · `REJECTED`
 | `--selftest` that starts a real PySide6 child from a sibling venv before installing | Aug 2026 |
 | Running-state on each card, with *Bring to front* instead of a duplicate launch | Aug 2026 |
 | Suites with companions nested under them (Sentinel Fork, Imprint) | Sep 2026 |
+| Dock icon only while a window is open; menu bar lists top-level apps only | Sep 2026 |
 | Start-at-login via LaunchAgent, plus auto-start Backup Control Center/git_autosync and a post-wake recheck | Aug 2026 |
 | Backup & Sync tab split out of Apps; Narrator tab added to Tools | Aug 2026 |
 | Narrator Library sub-tab — browse the ebook catalogue, mark read/queued, filter to narrated books, load straight into Convert | Sep 2026 |
