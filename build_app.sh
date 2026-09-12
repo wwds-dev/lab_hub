@@ -68,8 +68,10 @@ if [[ "${1:-}" == "--install" ]]; then
   touch "/Applications/$APP_NAME.app"  # nudge Finder/Dock to refresh the cached icon
   echo "Installed: /Applications/$APP_NAME.app"
 
-  # Nothing left behind to be indexed or backed up.
-  rm -rf build "$DIST"
+  # Nothing left behind to be indexed or backed up. Retried once: Finder can
+  # drop a .DS_Store into the directory between rm's walk and its final
+  # rmdir, which fails the whole script after a build that actually worked.
+  rm -rf build "$DIST" 2>/dev/null || rm -rf build "$DIST"
   echo "Cleaned: build/ and $DIST/"
 else
   echo "Run '$0 --install' to copy it into /Applications."

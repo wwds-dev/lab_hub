@@ -17,6 +17,8 @@ import pytest
 
 from lab_hub import launcher
 
+from .fakes import make_bundle
+
 
 # ----------------------------------------------------------------------
 # Environment sanitising
@@ -148,7 +150,7 @@ def test_a_healthy_child_is_left_running(tmp_path, monkeypatch):
 # ----------------------------------------------------------------------
 def test_an_installed_app_is_seen_by_its_bundle_executable(tmp_path, monkeypatch):
     monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
-    (tmp_path / "SONAR.app").mkdir()
+    make_bundle(tmp_path, "SONAR")
     app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
     table = f"/bin/zsh\n{tmp_path}/SONAR.app/Contents/MacOS/SONAR\n"
 
@@ -179,7 +181,7 @@ def test_an_app_that_is_nowhere_is_never_running(tmp_path, monkeypatch):
 
 def test_only_an_installed_app_can_be_raised(tmp_path, monkeypatch):
     monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
-    (tmp_path / "SONAR.app").mkdir()
+    make_bundle(tmp_path, "SONAR")
     installed = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
     from_source = launcher.ExternalApp("v", "vidforge", "vidforge", "main.py", "")
 
@@ -205,7 +207,7 @@ def test_the_process_table_is_readable():
 def test_background_bundle_launch_passes_the_hidden_flag(tmp_path, monkeypatch):
     app = launcher.ExternalApp("backup", "Backup", "backup", "main.py", "summary")
     monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
-    (tmp_path / "Backup.app").mkdir()
+    make_bundle(tmp_path, "Backup")
     calls = []
     monkeypatch.setattr(
         launcher.subprocess,
@@ -217,3 +219,120 @@ def test_background_bundle_launch_passes_the_hidden_flag(tmp_path, monkeypatch):
     launcher.launch(app, tmp_path, background=True)
 
     assert calls[0][-2:] == ["--args", "--background"]
+
+
+# ----------------------------------------------------------------------
+# Readiness: answered before the button is pressed, not during
+# ----------------------------------------------------------------------
+def test_an_installed_app_is_ready(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    make_bundle(tmp_path, "SONAR")
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    ready = launcher.readiness(app, tmp_path)
+
+    assert ready.ok
+    assert ready.state == "installed"
+
+
+def test_a_gutted_bundle_is_not_ready(tmp_path, monkeypatch):
+    """A bundle with nothing inside it still looks installed to `is_dir`."""
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    (tmp_path / "SONAR.app").mkdir()
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    ready = launcher.readiness(app, tmp_path)
+
+    assert ready.state == "installed"
+    assert not ready.ok
+    assert "rebuild" in ready.problem.lower()
+
+
+def test_a_gutted_bundle_refuses_to_launch(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    (tmp_path / "SONAR.app").mkdir()
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    with pytest.raises(launcher.LaunchError) as raised:
+        launcher.launch(app, tmp_path)
+
+    assert "no executable" in str(raised.value)
+
+
+def test_the_executable_comes_from_the_plist(tmp_path, monkeypatch):
+    """Sentinel is wrapped by an applet: its binary is called `applet`.
+
+    Assuming the executable shares the app's name would call that bundle
+    broken and refuse to start a perfectly good app.
+    """
+    import plistlib
+
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    macos = tmp_path / "Sentinel.app" / "Contents" / "MacOS"
+    macos.mkdir(parents=True)
+    (macos / "applet").write_text("#!/bin/sh\n")
+    with (tmp_path / "Sentinel.app" / "Contents" / "Info.plist").open("wb") as f:
+        plistlib.dump({"CFBundleExecutable": "applet"}, f)
+    app = launcher.ExternalApp("sf", "Sentinel", "sentinel_fork", "main.py", "")
+
+    assert launcher.bundle_executable(app).name == "applet"
+    assert launcher.readiness(app, tmp_path).ok
+
+
+def test_a_checkout_with_no_interpreter_is_not_ready(tmp_path, monkeypatch):
+    """The case that used to offer a working-looking button and a dialog."""
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    monkeypatch.setattr(launcher, "venv_python", lambda project: None)
+    monkeypatch.setattr(launcher.shutil, "which", lambda name: None)
+    _project(tmp_path, "sonar")
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    ready = launcher.readiness(app, tmp_path)
+
+    assert ready.state == "source"
+    assert not ready.ok
+    assert "no interpreter" in ready.problem
+
+
+def test_a_checkout_with_a_venv_says_so(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    monkeypatch.setattr(
+        launcher, "venv_python", lambda project: project / ".venv" / "bin" / "python"
+    )
+    _project(tmp_path, "sonar")
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    ready = launcher.readiness(app, tmp_path)
+
+    assert ready.ok
+    assert ".venv" in ready.detail
+
+
+def test_something_nowhere_is_not_ready(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    app = launcher.ExternalApp("ghost", "Ghost", "ghost", "main.py", "")
+
+    ready = launcher.readiness(app, tmp_path)
+
+    assert ready.state == "missing"
+    assert not ready.ok
+
+
+def test_the_log_hint_for_a_bundle_names_the_process(tmp_path, monkeypatch):
+    """A bundle started through `open` is not our child, so its output is not
+    ours to capture — the unified log is where it went."""
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    make_bundle(tmp_path, "SONAR")
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    hint = launcher.startup_log_hint(app)
+
+    assert "log show" in hint
+    assert '"SONAR"' in hint
+
+
+def test_the_log_hint_for_a_source_run_is_the_captured_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    assert launcher.startup_log_hint(app) == str(launcher.launch_log(app))

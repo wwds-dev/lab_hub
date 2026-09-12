@@ -40,31 +40,29 @@ def _probe_conversion() -> tuple[bool, str]:
         return job.status is Status.DONE, f"{job.status.value} {job.detail}".strip()
 
 
-def _probe_child_launch(lab_root) -> tuple[bool | None, str]:
-    """Start a real PySide6 process the way the Apps tab does.
+def _qt_diagnosis(result) -> str:
+    """The one telling line out of Qt's several.
 
-    Inspecting the environment proves we *intend* to hand a child a clean one.
-    This proves the child actually survives, which is the thing that was broken:
-    a launched app inherited this bundle's Qt paths, loaded our cocoa plugin
-    against its own QtGui, and was killed by qFatal inside QApplication().
-
-    Needs a second Python that has its own PySide6 — one of the lab projects'
-    venvs. Returns (None, reason) when there is no such interpreter to probe
-    with, which is not a failure, just nothing to say.
+    Qt prints a paragraph when a platform plugin fails and the diagnosis is
+    rarely the last line — the useful sentence is the one naming the failure,
+    not the trailing list of plugins that were available.
     """
+    output = (result.stderr or result.stdout).strip().splitlines()
+    return next(
+        (
+            line.strip()
+            for line in output
+            if "failed to start" in line or "Could not load" in line
+        ),
+        output[-1].strip() if output else f"exit {result.returncode}",
+    )
+
+
+def _probe_one_child(python) -> tuple[bool | None, str]:
+    """Start a real QApplication under `python` with a launched app's env."""
     import subprocess
 
     from lab_hub import launcher
-
-    python = None
-    for app in launcher.APPS:
-        project = launcher.source_dir(app, lab_root)
-        if project is not None:
-            python = launcher.venv_python(project)
-            if python is not None:
-                break
-    if python is None:
-        return None, "no project venv to probe with"
 
     # A QApplication is the whole test — that is where the abort happened.
     code = "from PySide6.QtWidgets import QApplication; QApplication([])"
@@ -80,24 +78,42 @@ def _probe_child_launch(lab_root) -> tuple[bool | None, str]:
         return False, f"could not run the probe ({error})"
 
     if result.returncode == 0:
-        return True, f"a real Qt child started under {python.parent.parent.parent.name}"
+        return True, "a real Qt child starts"
+    if "No module named 'PySide6'" in (result.stderr or ""):
+        return None, "its venv has no PySide6"
+    return False, f"a launched Qt app would die at startup: {_qt_diagnosis(result)}"
 
-    output = (result.stderr or result.stdout).strip().splitlines()
-    if any("No module named 'PySide6'" in line for line in output):
-        return None, "the probe interpreter has no PySide6"
 
-    # Qt prints several lines and the diagnosis is rarely the last one — the
-    # useful sentence is the one naming the failure, not the trailing list of
-    # available plugins.
-    telling = next(
-        (
-            line.strip()
-            for line in output
-            if "failed to start" in line or "Could not load" in line
-        ),
-        output[-1].strip() if output else f"exit {result.returncode}",
-    )
-    return False, f"a launched Qt app would die at startup: {telling}"
+def _probe_child_launches(lab_root) -> list[tuple[str, bool | None, str]]:
+    """Do that for every registered app, not one sibling sample.
+
+    Inspecting the environment proves we *intend* to hand a child a clean one.
+    This proves children actually survive it, which is the thing that was
+    broken: a launched app inherited this bundle's Qt paths, loaded our cocoa
+    plugin against its own QtGui, and was killed by qFatal inside
+    QApplication(). The env is shared, but the Qt build on the other side of it
+    is each project's own, so each venv is its own answer.
+
+    It probes each app's interpreter rather than running the app itself. A
+    self-test that opened six windows on every build would not survive being
+    run, and the crash being guarded against happens inside QApplication() —
+    before any of those apps reaches a line of its own code.
+    """
+    from lab_hub import launcher
+
+    results = []
+    for app in launcher.APPS:
+        project = launcher.source_dir(app, lab_root)
+        if project is None:
+            results.append((app.name, None, "no checkout to probe"))
+            continue
+        python = launcher.venv_python(project)
+        if python is None:
+            results.append((app.name, None, "no venv to probe with"))
+            continue
+        ok, detail = _probe_one_child(python)
+        results.append((app.name, ok, detail))
+    return results
 
 
 def _probe_dock_policy() -> str:
@@ -196,22 +212,30 @@ def selftest() -> int:
         if not ok:
             problems.append(f"round-trip conversion failed: {detail}")
 
-    # The Dock icon is meant to follow the window. Only a live reading proves
-    # whether the switch takes effect once packaged — `lsappinfo` reports the
-    # type declared in Info.plist and cannot see a runtime change.
+    # The Dock icon is meant to follow the window. Only a live reading from
+    # inside the process proves the switch takes effect once packaged.
     print(f"  dock policy:     {_probe_dock_policy()}")
 
-    launched, detail = _probe_child_launch(lab_root)
-    print(f"  child Qt app:    {'ok — ' + detail if launched else detail}")
-    if launched is False:
-        problems.append(detail)
+    # Every registered app, because the environment is shared but the Qt build
+    # on the other side of it is each project's own.
+    print("  child Qt apps:")
+    probed = _probe_child_launches(lab_root)
+    for name, ok, detail in probed:
+        mark = "ok" if ok else ("--" if ok is None else "FAILED")
+        print(f"    {name:<24} {mark:<8} {detail}")
+        if ok is False:
+            problems.append(f"{name}: {detail}")
+    if not any(ok for _name, ok, _detail in probed):
+        print("    (nothing probed — no project venv with PySide6 available)")
 
     # Reported but never fatal: whether the other apps are installed says
-    # nothing about whether this build is sound.
+    # nothing about whether this build is sound. A bundle that has lost its
+    # executable is worth naming, though — it still looks installed.
     print("  apps:")
     for app in launcher.APPS:
-        state, detail = launcher.status(app, lab_root)
-        print(f"    {app.name:<24} {state:<10} {detail}")
+        ready = launcher.readiness(app, lab_root)
+        note = ready.problem or ready.detail
+        print(f"    {app.name:<24} {ready.state:<10} {note}")
 
     if problems:
         print("\nFAILED:")

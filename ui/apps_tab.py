@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QTimer, Qt, Signal
@@ -30,6 +31,19 @@ STATE_LABELS = {
 # would have been started from is answered by the path underneath either way.
 RUNNING_LABEL = ("Running", "stateOk")
 
+# The two states between pressing Launch and knowing whether it worked. A
+# child that dies during startup used to look exactly like one that started
+# fine — the button greyed for a moment and nothing else ever happened.
+STARTING_LABEL = ("Starting…", "stateWarn")
+FAILED_LABEL = ("Did not start", "stateBad")
+
+# How long to wait for a launched app to appear in the process table before
+# saying it never came up. Generous on purpose: a cold PyInstaller bundle
+# unpacks itself before it execs, and a false "Did not start" would be worse
+# than a slow "Starting…". A source launch is already death-watched inside
+# `launcher.launch`, which reports the exit code outright.
+LAUNCH_CONFIRM_SECONDS = 20.0
+
 # Slow enough to be invisible in Activity Monitor, quick enough that the card
 # is right by the time you have finished reading it.
 POLL_MS = 3000
@@ -45,12 +59,17 @@ class AppCard(QWidget):
     """Name, what it does, where it will be started from, and a Launch button."""
 
     launched = Signal(str)
+    start_failed = Signal(str)
 
     def __init__(self, app: launcher.ExternalApp, parent=None) -> None:
         super().__init__(parent)
         self.app = app
         self.lab_root = config.DEFAULT_LAB_ROOT
         self.running = False
+        # Set while a launch is in flight, cleared the moment the app shows up
+        # in the process table — or turned into `_did_not_start` if it never does.
+        self._pending_since: float | None = None
+        self._did_not_start = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -101,26 +120,65 @@ class AppCard(QWidget):
     # ------------------------------------------------------------------
     def refresh(self, lab_root: Path, table: str | None = None) -> None:
         self.lab_root = lab_root
-        state, detail = launcher.status(self.app, lab_root)
-        self.running = state != "missing" and launcher.is_running(
+        ready = launcher.readiness(self.app, lab_root)
+        self.running = ready.state != "missing" and launcher.is_running(
             self.app, lab_root, table
         )
+        self._settle_pending_launch()
 
-        label, style = RUNNING_LABEL if self.running else STATE_LABELS[state]
+        label, style = self._state_label(ready)
         self.state.setText(label)
         self.state.setObjectName(style)
         # A changed objectName only takes effect after the style is re-applied.
         self.state.style().unpolish(self.state)
         self.state.style().polish(self.state)
 
-        self.detail.setText(detail)
-        self._update_button(state)
+        # A reason it cannot run beats a path it would have run from.
+        self.detail.setText(ready.problem or ready.detail)
+        self._update_button(ready)
 
-    def _update_button(self, state: str) -> None:
+    def _state_label(self, ready: launcher.Readiness) -> tuple[str, str]:
+        if self.running:
+            return RUNNING_LABEL
+        if self._pending_since is not None:
+            return STARTING_LABEL
+        if self._did_not_start:
+            return FAILED_LABEL
+        return STATE_LABELS[ready.state]
+
+    def _settle_pending_launch(self) -> None:
+        """Decide whether a launch we started has come up, or never will."""
+        if self.running:
+            self._pending_since = None
+            self._did_not_start = False
+            return
+        if self._pending_since is None:
+            return
+        if time.monotonic() - self._pending_since <= LAUNCH_CONFIRM_SECONDS:
+            return
+        self._pending_since = None
+        self._did_not_start = True
+        self.start_failed.emit(
+            f"{self.app.name} was started but never came up. "
+            f"Look in {launcher.startup_log_hint(self.app)}"
+        )
+
+    def _update_button(self, ready: launcher.Readiness) -> None:
+        if self._pending_since is not None and not self.running:
+            # Pressing again here would start a second copy of something that
+            # is already on its way up.
+            self.launch_button.setText("Starting…")
+            self.launch_button.setToolTip("Waiting for it to come up")
+            self.launch_button.setEnabled(False)
+            return
+
         if not self.running:
             self.launch_button.setText("Launch")
-            self.launch_button.setToolTip("")
-            self.launch_button.setEnabled(state != "missing")
+            # Checked before the press, not discovered during it: a checkout
+            # with no interpreter used to offer a working-looking button that
+            # could only ever produce a dialog.
+            self.launch_button.setToolTip(ready.problem or "")
+            self.launch_button.setEnabled(ready.ok)
             return
 
         if launcher.can_bring_to_front(self.app):
@@ -138,12 +196,20 @@ class AppCard(QWidget):
             self.launch_button.setEnabled(False)
 
     def _launch(self) -> None:
-        action = launcher.bring_to_front if self.running else launcher.launch
+        raising = self.running
+        action = launcher.bring_to_front if raising else launcher.launch
         try:
             message = action(self.app, self.lab_root)
         except launcher.LaunchError as error:
+            self._pending_since = None
             QMessageBox.warning(self, f"Could not launch {self.app.name}", str(error))
             return
+        if not raising:
+            # `launch` returning only means the app was started, not that it
+            # stayed up. The card watches for it to appear from here.
+            self._pending_since = time.monotonic()
+            self._did_not_start = False
+            self.refresh(self.lab_root)
         self.launched.emit(message)
 
 
@@ -158,6 +224,7 @@ class AppsTab(QWidget):
     """A page of launch cards. Used for the launchpad and for one-off apps."""
 
     launched = Signal(str)
+    start_failed = Signal(str)
 
     def __init__(
         self,
@@ -196,6 +263,7 @@ class AppsTab(QWidget):
             for app in group_apps:
                 card = AppCard(app)
                 card.launched.connect(self.launched)
+                card.start_failed.connect(self.start_failed)
                 self.cards.append(card)
                 self.grids[-1][1].append(card)
 

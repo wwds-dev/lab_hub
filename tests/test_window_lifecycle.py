@@ -15,7 +15,10 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 
-from ui.main_window import REOPEN_GRACE_MS, TRAY_SUPPRESS_S, _Reopener
+import pytest
+from PySide6.QtCore import QEvent
+
+from ui.main_window import REOPEN_GRACE_MS, TRAY_SUPPRESS_S, _QuitGuard, _Reopener
 
 
 def test_close_hides_the_window_when_there_is_a_tray(window, fake_tray):
@@ -329,3 +332,114 @@ def test_showing_the_window_also_brings_the_app_forward(window, fake_tray, monke
     window.present()
 
     assert order == ["promote", "activate"], "promote first, then bring forward"
+
+
+# ----------------------------------------------------------------------
+# Quitting from the Dock leaves the menu bar item alone
+# ----------------------------------------------------------------------
+@pytest.fixture
+def quit_guard(window, qapp):
+    """A guard on the shared QApplication, taken back off afterwards.
+
+    The QApplication is session-scoped, so a filter left installed would
+    outlive its window and every later test would be filtering events through
+    a deleted object.
+    """
+    guard = _QuitGuard(window, qapp)
+    yield guard
+    qapp.removeEventFilter(guard)
+
+
+def _quit_event():
+    return QEvent(QEvent.Type.Quit)
+
+
+def test_quitting_from_the_dock_hides_instead(window, fake_tray, qapp, quit_guard, monkeypatch):
+    """Dock > Quit means "off my screen", not "shut the whole thing down"."""
+    monkeypatch.setattr("ui.main_window.dock.hide_from_dock", lambda: True)
+    window.tray = fake_tray
+    window.show()
+
+    qapp.sendEvent(qapp, _quit_event())
+
+    assert not window.isVisible()
+    assert not window._quitting, "the process must stay up"
+    assert not fake_tray.hidden, "the menu bar item is the whole way back in"
+
+
+def test_the_dock_quit_is_actually_refused(window, fake_tray, qapp, quit_guard, monkeypatch):
+    """The subtle half: swallowing the event is not the same as refusing it.
+
+    A QEvent is accepted from the moment it is built, and filtering one out
+    leaves that flag set — which macOS reads as "yes, terminate". Only
+    ignore() turns applicationShouldTerminate: into NSTerminateCancel.
+    """
+    monkeypatch.setattr("ui.main_window.dock.hide_from_dock", lambda: True)
+    window.tray = fake_tray
+    window.show()
+    event = _quit_event()
+    assert event.isAccepted(), "precondition: events start out accepted"
+
+    qapp.sendEvent(qapp, event)
+
+    assert not event.isAccepted()
+
+
+def test_the_dock_quit_explains_itself_once(window, fake_tray, qapp, quit_guard, monkeypatch):
+    monkeypatch.setattr("ui.main_window.dock.hide_from_dock", lambda: True)
+    window.tray = fake_tray
+    window.show()
+
+    qapp.sendEvent(qapp, _quit_event())
+    window.show()
+    qapp.sendEvent(qapp, _quit_event())
+
+    assert len(fake_tray.notices) == 1
+    assert "menu bar" in fake_tray.notices[0][1].lower()
+
+
+def test_without_a_menu_bar_item_quitting_really_quits(window, qapp, quit_guard):
+    """Hiding here would leave a running app with no way to reach or stop it.
+
+    Called directly rather than sent: an unfiltered Quit would end the test
+    session's own QApplication.
+    """
+    window.tray = None
+
+    assert quit_guard.eventFilter(qapp, _quit_event()) is False
+
+
+def test_quitting_from_the_menu_bar_is_not_intercepted(window, fake_tray, qapp, quit_guard):
+    """MainWindow.quit is the one real exit; it must not be turned into a hide."""
+    window.tray = fake_tray
+    window._quitting = True
+
+    assert quit_guard.eventFilter(qapp, _quit_event()) is False
+
+
+def test_other_application_events_pass_through(window, fake_tray, qapp, quit_guard):
+    """The filter sits on every event the application object sees."""
+    window.tray = fake_tray
+
+    assert quit_guard.eventFilter(qapp, QEvent(QEvent.Type.ApplicationActivate)) is False
+
+
+def test_the_menu_bar_quit_still_ends_the_app(window, fake_tray, qapp, quit_guard):
+    """The safety net: with the Dock's Quit refused, this is the only way out.
+
+    Runs a real event loop, because the question is whether
+    `QApplication.quit()` ends it or is itself turned back into a
+    `QEvent.Quit` for the guard to swallow — which would leave an app that
+    cannot be quit at all. The failsafe timer is what turns that bug into a
+    failed assertion instead of a hung test run.
+    """
+    from PySide6.QtCore import QTimer
+
+    window.tray = fake_tray
+    QTimer.singleShot(0, window.quit)
+    QTimer.singleShot(2000, lambda: qapp.exit(99))
+
+    code = qapp.exec()
+
+    assert code == 0, "the menu bar's Quit did not end the event loop"
+    assert window._quitting

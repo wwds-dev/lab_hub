@@ -10,7 +10,7 @@ Tabs: **Apps** · **Backup and Sync** · **Tools** · **Settings**
 The projects behind this app do not want the same treatment, so they do not get
 it.
 
-**Launched, not embedded.** Sentinel Fork, Imprint, SONAR, Backup Control Center,
+**Launched, not embedded.** Sentinel, Imprint, SONAR, Backup Control Center,
 git_autosync and Unblock Tracker are complete PySide6 applications — own window,
 own settings, own background work, own lifecycle. Embedding them would mean
 nesting six apps' worth of UI and state inside a seventh, and every one of them is
@@ -30,18 +30,18 @@ being present — keep the two in step when either changes.
 
 **Narrator belongs here.** Its tab runs Lab Hub's bundled ebook-to-audiobook
 engine in a separate, stoppable worker process. It does not launch or import
-Sentinel Fork and works the same way from source and from the installed app.
+Sentinel and works the same way from source and from the installed app.
 
 ## Tabs
 
 ### Apps
-One tile per umbrella app: **Sentinel Fork**, **Imprint**, **SONAR**.
+One tile per umbrella app: **Sentinel**, **Imprint**, **SONAR**.
 
 **Agents and sub-modules are deliberately not here.** Tunnel and Bug Spray live
-inside Sentinel Fork (`sentinel_fork/agents/`), the video pipeline inside Imprint,
+inside Sentinel (`sentinel_fork/agents/`), the video pipeline inside Imprint,
 macro and Playmaker inside SONAR — and each is reached from its own app, never from
 Lab Hub. Two doors to the same feature is how you end up with a standalone VPN
-Agent window that knows nothing about the Sentinel Fork session that should own
+Agent window that knows nothing about the Sentinel session that should own
 it. The same rule covers the menu bar, which lists only these umbrella apps.
 
 A tile shows where its app will start from:
@@ -51,9 +51,32 @@ A tile shows where its app will start from:
 | Installed | found in `/Applications` — launched with `open` |
 | Source only | not installed, but the checkout is there — run with that project's own `.venv` |
 | Not found | neither; Launch is disabled |
+| Starting… | launched, waiting for it to appear |
+| Running | its process is in the table; the button raises it instead |
+| Did not start | it was launched and never came up |
 
 Source runs never use Lab Hub's own interpreter. Frozen, that is this app's
 binary, and it would run the other project inside this bundle's dependencies.
+
+**Whether an app *can* start is answered before the button is pressed**, by
+`launcher.readiness()` rather than by `launch()` failing into a dialog. It
+catches the two cases that used to look fine right up until the press: a
+checkout with no `.venv` and no `python3` on `PATH`, and a bundle that is still
+a directory but has lost the executable inside it. Either disables Launch and
+says why on the tile itself. The executable is read from `CFBundleExecutable`,
+not assumed to share the app's name — Sentinel is wrapped by an applet and
+its binary is called `applet`.
+
+**A launch is not believed until the app shows up.** `launch()` returning only
+means something was started. A source run is watched for a second and a half
+and reports its exit code and captured output if it dies, but an installed
+bundle is started through `open` and is not our child, so there is no code to
+read. The tile therefore says *Starting…* and waits for the process to appear
+in the table; if it has not within twenty seconds it says *Did not start* and
+the status bar names where the output went — the `log show` predicate for a
+bundle, the captured temp file for a source run. Before this, a child that died
+inside `QApplication()` was indistinguishable from one that started fine: the
+button greyed for a moment and nothing else ever happened.
 
 ### Backup and Sync
 
@@ -164,9 +187,23 @@ nine-item one and buried what is actually reached for.
 
 Because the app lives in the menu bar, **closing the window hides it** rather
 than quitting — a conversion left running would otherwise lose the log it is
-writing to. Quit from the menu bar item (or ⌘Q). The first time the window is
-hidden it says so, so nothing disappears silently. If no system tray is
-available the app falls back to quitting on window close.
+writing to. **Quitting from the Dock, or with ⌘Q, hides it as well.** The Dock
+icon only exists while a window does, so choosing Quit from it means "clear this
+off my screen", not "shut the whole thing down"; the menu bar item's own **Quit
+Lab Hub** is the single real exit. The first time the window is hidden it says
+so, so nothing disappears silently. If no system tray is available the app falls
+back to quitting on window close — hiding with nothing to retreat to would leave
+it running with no way to reach or stop it.
+
+macOS routes both the Dock's Quit and ⌘Q through `applicationShouldTerminate:`,
+which Qt delivers as a `QEvent.Quit` to the application object; `_QuitGuard` in
+`ui/main_window.py` filters it. The refusal is `event.ignore()` — **consuming
+the event by returning `True` is not enough**, because a `QEvent` is accepted
+from the moment it is constructed and filtering one out leaves that flag set,
+which macOS reads as "yes, terminate". `MainWindow.quit()` never goes through
+this event at all: it calls `QApplication.quit()`, which ends the event loop
+directly. A test runs a real event loop, with a failsafe timer, to prove that
+still works — the failure mode being guarded against is an app nobody can quit.
 
 When **Open Lab Hub at login** is enabled, Lab Hub starts hidden in the menu bar
 and quietly starts Backup Control Center and git_autosync the same way. After
@@ -184,6 +221,7 @@ occasionally. The Dock carries an icon only while there is a window behind it.
 | An app launched from the menu bar | no |
 | Lab Hub's own window opened | yes |
 | Window closed again | no |
+| Quit chosen from the Dock, or ⌘Q | no (it hides) |
 
 Three pieces, and leaving any one out breaks it in a way that looks like one of
 the others:
@@ -204,11 +242,14 @@ the others:
   `activateIgnoringOtherApps:` straight after the promotion; the order is pinned
   by a test.
 
-**Measure this with `--selftest`, never with `lsappinfo`.** `lsappinfo` reports the
-type *declared* in `Info.plist`, not the live policy, so it cannot see a runtime
-switch — steering by it produced two wrong conclusions in a row here, including
-one that had this feature reverted as impossible. The self-test prints the real
-reading via `dock.current_policy()`:
+**Measure this with `--selftest`.** Steering by `lsappinfo` produced two wrong
+conclusions in a row here, including one that had this feature reverted as
+impossible — but the tool was not the liar the note here used to call it. Its
+`ApplicationType` does follow the live policy: against one running pid it reads
+`Foreground` with the window up and `UIElement` once the window is hidden. What
+it could not show was a switch that was not happening, because the promotion was
+landing and the activation was missing. Read it if you like, but the self-test is
+the reading that comes from inside the process, via `dock.current_policy()`:
 
     dock policy:     starts Accessory (menu bar only); switchable at runtime: yes
 
@@ -277,13 +318,20 @@ is that hunt written down, and its regression test fails against the old code.
 
 `--selftest` covers what pytest structurally cannot. It runs against the built
 binary from `build_app.sh`, and beyond checking assets and paths it **starts a
-real PySide6 child** from a sibling project's venv. That is the one bug class
-this app is uniquely prone to — it exists only in the bundle, because from
+real PySide6 child under every registered app's own venv**. That is the one bug
+class this app is uniquely prone to — it exists only in the bundle, because from
 source there are no Qt paths to leak into a child — so no unit test can reach
 it. A build whose launched apps would die now fails before it installs.
+
+It probes each app's interpreter rather than running the app. The environment
+being scrubbed is shared, but the Qt build on the other side of it belongs to
+each project, so each venv is its own answer; running the apps themselves would
+open six windows on every build and would prove nothing extra, because the crash
+happens inside `QApplication()` before any of them reaches its own code. An app
+with no checkout or no venv is reported as skipped, not as a pass.
 
 ## What this does not do
 
 It does not replace any of the projects it launches. Each keeps its own repo,
 README, venv and build script; Lab Hub only points at them. Changing what
-Sentinel Fork does still means changing Sentinel Fork.
+Sentinel does still mean changing Sentinel.

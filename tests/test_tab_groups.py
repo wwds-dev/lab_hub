@@ -44,7 +44,7 @@ def test_the_apps_tab_lists_the_suites(window):
 def test_agents_are_not_separately_launchable(window):
     """Agents and sub-modules belong to their umbrella app.
 
-    Tunnel and Bug Spray live inside Sentinel Fork, the video pipeline inside
+    Tunnel and Bug Spray live inside Sentinel, the video pipeline inside
     Imprint, macro and Playmaker inside SONAR. Two doors to the same feature is how
     a standalone VPN Agent window ends up knowing nothing about the Sentinel
     Fork session that should own it.

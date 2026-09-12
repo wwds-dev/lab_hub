@@ -46,3 +46,21 @@ class RecordingReporter:
     @property
     def text(self) -> str:
         return "\n".join(self.lines)
+
+
+def make_bundle(root, name: str):
+    """A minimal but *real* .app: `Contents/MacOS/<name>` and an Info.plist.
+
+    A bare directory used to be enough, until `launcher.bundle_executable`
+    started checking that there is something inside to run — which is the
+    point: a gutted bundle still looks installed to `is_dir`.
+    """
+    import plistlib
+
+    bundle = root / f"{name}.app"
+    macos = bundle / "Contents" / "MacOS"
+    macos.mkdir(parents=True, exist_ok=True)
+    (macos / name).write_text("#!/bin/sh\n")
+    with (bundle / "Contents" / "Info.plist").open("wb") as handle:
+        plistlib.dump({"CFBundleExecutable": name}, handle)
+    return bundle

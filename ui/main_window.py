@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import QObject, Qt, QTimer
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QStatusBar, QTabWidget
 
@@ -93,6 +93,8 @@ class MainWindow(QMainWindow):
         self.apps_tab.launched.connect(self._on_launched)
         self.backup_sync_tab.launched.connect(self._on_launched)
         self.unblock_tracker_tab.launched.connect(self._on_launched)
+        for tab in (self.apps_tab, self.backup_sync_tab, self.unblock_tracker_tab):
+            tab.start_failed.connect(self._on_start_failed)
         self.settings_tab.settings_saved.connect(self._on_settings_saved)
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self.tools_tabs.currentChanged.connect(self._on_tool_tab_changed)
@@ -144,6 +146,11 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     def _on_launched(self, message: str) -> None:
         self.statusBar().showMessage(message, 8000)
+
+    def _on_start_failed(self, message: str) -> None:
+        # Left up far longer than a launch notice: this one names a log file,
+        # and it is only worth printing if there is time to read it.
+        self.statusBar().showMessage(message, 30000)
 
     def _on_launch_failed(self, name: str, message: str) -> None:
         # Raised first: a modal warning parented to a hidden window is a modal
@@ -230,6 +237,26 @@ class MainWindow(QMainWindow):
         if self.tray is not None:
             self.tray.hide()
 
+    def stays_resident(self) -> bool:
+        """Whether going away should mean hiding rather than quitting.
+
+        Without a menu bar item there is nothing to retreat *to*: hiding would
+        leave the app running with no way back to it, so it must really quit.
+        """
+        return self.tray is not None and not self._quitting
+
+    def retreat_to_menu_bar(self) -> None:
+        """Hide, and say so the first time — a window that vanishes without a
+        word looks like a crash."""
+        self._hide_to_menu_bar()
+        if self._warned_about_hiding or self.tray is None:
+            return
+        self._warned_about_hiding = True
+        self.tray.notify(
+            APP_NAME,
+            "Still running in the menu bar. Quit it from there.",
+        )
+
     def _hide_to_menu_bar(self) -> None:
         """Hide the window, leaving fullscreen first if it is in it.
 
@@ -278,15 +305,9 @@ class MainWindow(QMainWindow):
         # With a menu bar item present, the red button hides rather than quits —
         # otherwise closing the window would strand a still-running conversion
         # with no way back to its log.
-        if self.tray is not None and not self._quitting:
+        if self.stays_resident():
             event.ignore()
-            self._hide_to_menu_bar()
-            if not self._warned_about_hiding:
-                self._warned_about_hiding = True
-                self.tray.notify(
-                    APP_NAME,
-                    "Still running in the menu bar. Quit it from there.",
-                )
+            self.retreat_to_menu_bar()
             return
 
         running = self._running_panels()
@@ -343,6 +364,7 @@ def run() -> int:
     app.aboutToQuit.connect(guard.release)
 
     _Reopener(window, app)
+    _QuitGuard(window, app)
 
     # Started by the login agent: stay in the menu bar instead of opening a
     # window nobody asked for. Only honoured when there *is* a menu bar item to
@@ -398,3 +420,34 @@ class _Reopener(QObject):
             and self._window.reopen_allowed()
         ):
             self._window.present()
+
+
+class _QuitGuard(QObject):
+    """Turn quitting from the Dock into hiding, so the menu bar item survives.
+
+    macOS's Dock menu Quit and ⌘Q both go through `applicationShouldTerminate:`,
+    which Qt delivers as a `QEvent.Quit` to the application object. Whether the
+    process actually terminates is decided by whether that event comes back
+    accepted — so `ignore()` is what refuses it. Consuming the event by
+    returning True is *not* enough on its own: a QEvent is accepted from the
+    moment it is constructed, and filtering one out leaves that state untouched,
+    which macOS reads as "yes, terminate".
+
+    The menu bar item's own Quit is unaffected: `MainWindow.quit` calls
+    `QApplication.quit()`, which ends the event loop directly and never sends
+    this event. That leaves exactly one way out of the app, which is the point —
+    the Dock icon comes and goes with the window, so quitting from it means
+    "clear this off my screen", not "shut the whole thing down".
+    """
+
+    def __init__(self, window: MainWindow, app) -> None:
+        super().__init__(app)
+        self._window = window
+        app.installEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt override
+        if event.type() != QEvent.Type.Quit or not self._window.stays_resident():
+            return super().eventFilter(watched, event)
+        event.ignore()
+        self._window.retreat_to_menu_bar()
+        return True

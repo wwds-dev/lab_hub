@@ -26,7 +26,7 @@ Status: `IDEA` · `CONSIDERING` · `PLANNED` · `DONE` · `REJECTED`
 | Convert Files / Prepare Images / Unblock Tracker tabs (vendored tools) | Aug 2026 |
 | `--selftest` that starts a real PySide6 child from a sibling venv before installing | Aug 2026 |
 | Running-state on each card, with *Bring to front* instead of a duplicate launch | Aug 2026 |
-| Suites with companions nested under them (Sentinel Fork, Imprint) | Sep 2026 |
+| Suites with companions nested under them (Sentinel, Imprint) | Sep 2026 |
 | Dock icon only while a window is open; menu bar lists top-level apps only | Sep 2026 |
 | Start-at-login via LaunchAgent, plus auto-start Backup Control Center/git_autosync and a post-wake recheck | Aug 2026 |
 | Backup & Sync tab split out of Apps; Narrator tab added to Tools | Aug 2026 |

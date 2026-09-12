@@ -18,6 +18,7 @@ And never the inherited environment either — see `child_env`.
 from __future__ import annotations
 
 import os
+import plistlib
 import shutil
 import subprocess
 import tempfile
@@ -82,15 +83,15 @@ class ExternalApp:
 
 
 # One tile per umbrella app, and nothing else. The agents and sub-modules that
-# live inside these projects — Tunnel and Bug Spray inside Sentinel Fork, the
+# live inside these projects — Tunnel and Bug Spray inside Sentinel, the
 # video pipeline inside Imprint, macro and Playmaker inside SONAR — are reached
 # from their own app, never from here. Two doors to the same feature is how you
 # end up with a standalone VPN Agent window that knows nothing about the
-# Sentinel Fork session that should own it.
+# Sentinel session that should own it.
 SUITES: tuple[ExternalApp, ...] = (
     ExternalApp(
         key="sentinel_fork",
-        name="Sentinel Fork",
+        name="Sentinel",
         project="sentinel_fork",
         entry="main.py",
         summary="Security and investigation command centre. Its agents — Chat, "
@@ -158,6 +159,35 @@ def bundle_path(app: ExternalApp) -> Path | None:
     return path if path.is_dir() else None
 
 
+def bundle_executable(app: ExternalApp) -> Path | None:
+    """The binary inside the installed bundle, if there is one.
+
+    Read from `CFBundleExecutable` rather than assumed to be the app's name:
+    Sentinel is wrapped by an applet and its executable is called `applet`.
+    A bundle whose executable is gone still looks installed to `is_dir`, and
+    `open` on one fails with a LaunchServices number rather than a sentence.
+    """
+    bundle = bundle_path(app)
+    if bundle is None:
+        return None
+    macos = bundle / "Contents" / "MacOS"
+    try:
+        with (bundle / "Contents" / "Info.plist").open("rb") as handle:
+            name = plistlib.load(handle).get("CFBundleExecutable")
+    except (OSError, plistlib.InvalidFileException, AttributeError):
+        name = None
+    candidate = macos / (name or app.name)
+    if candidate.is_file():
+        return candidate
+    # No usable key: accept any single binary sitting in MacOS/ rather than
+    # calling a working bundle broken.
+    try:
+        binaries = [child for child in macos.iterdir() if child.is_file()]
+    except OSError:
+        return None
+    return binaries[0] if len(binaries) == 1 else None
+
+
 def source_dir(app: ExternalApp, lab_root: Path) -> Path | None:
     """The project checkout, if it has the entry script we expect."""
     project = lab_root / app.project
@@ -223,7 +253,7 @@ def can_bring_to_front(app: ExternalApp) -> bool:
 def is_launcher_bundle(bundle: Path) -> bool:
     """True when the .app only starts the real GUI in a separate process.
 
-    Sentinel Fork installs a compiled AppleScript applet that runs the project's
+    Sentinel installs a compiled AppleScript applet that runs the project's
     main.py, so edits go live without a rebuild. macOS then registers two apps:
     the applet, which owns no window, and the python process, which owns the
     window. `open -a` reaches the applet — blocked in `do shell script` and deaf
@@ -294,11 +324,71 @@ def status(app: ExternalApp, lab_root: Path) -> tuple[str, str]:
     return "missing", f"not in /Applications, and no checkout at {lab_root / app.project}"
 
 
+@dataclass(frozen=True)
+class Readiness:
+    """What can be said about an app *before* its Launch button is pressed.
+
+    `status` answers "where would this start from"; this answers "would it
+    start at all". They differ for the cases that used to fail only once the
+    button was pressed: a checkout with no venv and no python3 on PATH, and a
+    bundle that is still a directory but has lost its executable.
+    """
+
+    state: str  # installed | source | missing
+    detail: str  # where it would be started from
+    problem: str | None = None  # why it cannot be, if it cannot
+
+    @property
+    def ok(self) -> bool:
+        return self.problem is None
+
+
+def readiness(app: ExternalApp, lab_root: Path) -> Readiness:
+    """Check now what `launch` would otherwise only discover on the way."""
+    state, detail = status(app, lab_root)
+
+    if state == "installed":
+        if bundle_executable(app) is None:
+            return Readiness(
+                state,
+                detail,
+                "the installed bundle has no executable inside it — rebuild "
+                "and reinstall it.",
+            )
+        return Readiness(state, detail)
+
+    if state == "source":
+        project = source_dir(app, lab_root)
+        python = venv_python(project)
+        if python is not None:
+            return Readiness(state, f"{detail} ({python.parent.parent.name})")
+        if shutil.which("python3"):
+            return Readiness(state, f"{detail} (no venv — using python3 on PATH)")
+        return Readiness(
+            state,
+            detail,
+            f"{project} has no .venv and python3 is not on PATH, so there is "
+            "no interpreter to run it with.",
+        )
+
+    return Readiness(
+        state, detail, "not installed, and there is no source checkout to fall back on."
+    )
+
+
 def launch(app: ExternalApp, lab_root: Path, *, background: bool = False) -> str:
     """Start the app. Returns a line describing what was started."""
     extra_args = ["--background"] if background else []
     bundle = bundle_path(app)
     if bundle is not None:
+        if bundle_executable(app) is None:
+            # `open` on a gutted bundle fails with a LaunchServices number
+            # rather than a sentence, so say it plainly here instead.
+            raise LaunchError(
+                f"{bundle} has no executable inside it. Rebuild {app.name} and "
+                "reinstall it, or delete the bundle to fall back to its source "
+                "checkout."
+            )
         # -n so a second click brings up a new instance rather than silently
         # doing nothing when the app is already open but on another Space.
         command = ["open", "-a", str(bundle)]
@@ -335,7 +425,7 @@ def launch(app: ExternalApp, lab_root: Path, *, background: bool = False) -> str
     # Output goes to a file rather than DEVNULL. A child that dies during
     # startup is the case worth diagnosing, and discarding its stderr is what
     # turns "it crashed and here is why" into "nothing happened".
-    log = Path(tempfile.gettempdir()) / f"lab-hub-launch-{app.key}.log"
+    log = launch_log(app)
     try:
         handle = log.open("w")
     except OSError:
@@ -386,6 +476,27 @@ def _log_tail(log: Path, lines: int = 12) -> str:
     if not captured:
         return f"It produced no output (see {log})."
     return "\n".join(captured[-lines:])
+
+
+def launch_log(app: ExternalApp) -> Path:
+    """Where a source-launched app's own output is written."""
+    return Path(tempfile.gettempdir()) / f"lab-hub-launch-{app.key}.log"
+
+
+def startup_log_hint(app: ExternalApp) -> str:
+    """Where to look when an app was started but never came up.
+
+    A bundle launched through `open` is not our child, so its output goes to
+    the unified log rather than to us — naming the command is the difference
+    between a dead end and a diagnosis.
+    """
+    executable = bundle_executable(app)
+    if executable is not None:
+        return (
+            "Console.app, or: log show --predicate "
+            f"'process == \"{executable.name}\"' --last 5m"
+        )
+    return str(launch_log(app))
 
 
 def reveal(path: Path) -> None:
