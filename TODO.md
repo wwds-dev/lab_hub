@@ -6,7 +6,7 @@
 
 ---
 
-## v2 — current
+## v2 — complete (2026-09-14)
 
 - [x] `P1` `feature` `@ai` **Health check per app, before the button is pressed** —
   `launcher.readiness()` answers "would this start at all", where `status()` only
@@ -83,6 +83,21 @@
   `tests/test_tray.py`.
 - [x] `P3` `bug` `@ai` Tab read "Backup_Sync" — Qt treats `&` in a tab label as a
   mnemonic marker. Renamed to "Backup and Sync", with a test forbidding `&` in labels.
+- [x] `P1` `bug` `@ai` **Raising a launcher-bundle app did nothing.** Sentinel's
+  `/Applications/Sentinel.app` is a compiled AppleScript applet that starts the real GUI
+  as a separate process, so macOS registers two apps: the applet, which owns no window,
+  and the python process, which does. `open -a` reaches the applet — busy inside
+  `do shell script` and deaf to the reopen event — so *Bring to front* silently did
+  nothing. `is_launcher_bundle()` spots one (its executable is `applet` rather than the
+  app's name) and re-runs the entry script instead, letting the app's own
+  single-instance guard hand off, raise the running copy and exit 0. A non-zero exit is
+  reported with the tail of its output rather than swallowed.
+- [x] `P2` `bug` `@ai` **A rebuild is required after a launched app is renamed.** Sentinel
+  Fork became Sentinel on 2026-09-12 and its installer removed the legacy bundle by
+  design; the Lab Hub installed twenty-one minutes earlier still had the old name
+  compiled in, so the tile read *Source only* and looked like a fault in Sentinel.
+  Rebuilding fixed it. Second occurrence of this shape (`Create & Publish` → `Imprint`
+  was the first) — see SUGGESTIONS #11 for the structural fix.
 
 
 ## v3 — later
@@ -100,6 +115,9 @@
   Sentinel AI is archived but fully pushed to GitHub.
 - [ ] `P3` `feature` `@ai` Global search across every project's docs from the hub
 - [ ] `P3` `feature` `@ai` Per-app last-launched timestamp and crash count
+- [ ] `P2` `design` `@ai` Load the app registry from a file rather than compiling it into
+  the bundle, so renaming a launched app does not need a Lab Hub rebuild to stop the tile
+  reading *Source only*. SUGGESTIONS #11.
 
 ## Out of scope, deliberately
 

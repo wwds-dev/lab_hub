@@ -67,6 +67,25 @@ says why on the tile itself. The executable is read from `CFBundleExecutable`,
 not assumed to share the app's name — Sentinel is wrapped by an applet and
 its binary is called `applet`.
 
+**Two kinds of bundle, and *Bring to front* has to tell them apart.** A
+PyInstaller bundle owns its own window, so `open -a` raises it. Sentinel's does
+not: `/Applications/Sentinel.app` is a compiled AppleScript applet that starts
+the real GUI as a separate process, which edits go live in without a rebuild.
+macOS then registers two apps — the applet, which owns no window, and the
+python process, which does. `open -a` reaches the applet, which is sitting
+inside `do shell script` and deaf to the reopen event, so raising the app that
+way silently did nothing at all. `is_launcher_bundle()` recognises one by its
+`applet` executable and re-runs the entry script instead; the app's own
+single-instance guard hands off, brings the running copy forward and exits 0. A
+non-zero exit is reported with the tail of its output rather than swallowed.
+
+**Renaming a launched app means rebuilding Lab Hub.** The registry is compiled
+into this bundle, so until it is rebuilt the tile looks for a bundle name that
+no longer exists, falls back to the checkout, and reads *Source only* — which
+looks like a fault in the renamed app rather than a stale hub. This has now
+happened twice, with `Create & Publish` → `Imprint` and `Sentinel Fork` →
+`Sentinel`.
+
 **A launch is not believed until the app shows up.** `launch()` returning only
 means something was started. A source run is watched for a second and a half
 and reports its exit code and captured output if it dies, but an installed
