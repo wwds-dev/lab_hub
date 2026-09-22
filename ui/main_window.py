@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QMainWindow, QMessageBox, QStatusBar, QTabWidget
 
 from lab_hub import APP_NAME, asset_path, config, launcher, login_item, version
 
-from . import dock, theme, tray
+from . import appkit_guard, dock, theme, tray
 from .apps_tab import AppsTab
 from .convert_tab import ConvertTab
 from .images_tab import ImagesTab
@@ -337,6 +337,12 @@ def run() -> int:
     from PySide6.QtWidgets import QApplication
 
     from .single_instance import SingleInstance
+
+    # Before Qt exists, because Qt's cocoa plugin is the caller this protects:
+    # it asks a non-mouse event for its clickCount whenever a menu begins
+    # tracking, and on macOS 27 that raises and aborts the process. Opening the
+    # menu bar item's menu was enough to kill the app.
+    appkit_guard.install()
 
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_DontShowIconsInMenus, False)
     app = QApplication(sys.argv)

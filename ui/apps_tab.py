@@ -135,8 +135,10 @@ class AppCard(QWidget):
         self.service.setFixedHeight(SERVICE_HEIGHT)
         if app.service is not None:
             self.service.setToolTip(
-                f"{app.name}'s {app.service.lower()} runs with no window of its "
-                "own. Launching the app is separate from this."
+                f"{app.name} keeps working with no window open: a background "
+                "process that goes on collecting and settling its data around "
+                "the clock. It runs whether or not you open the app, and Launch "
+                "neither starts nor stops it — that is its launchd agent's job."
             )
 
         layout.addLayout(header)
@@ -490,14 +492,21 @@ class AppsTab(QWidget):
         # replaces an installed app and takes minutes; the terminal is where
         # you can see it working and stop it, and a copy button is the whole
         # distance between "there is a command" and "I have the command".
-        copy = (
-            box.addButton("Copy commands", QMessageBox.ButtonRole.ActionRole)
-            if commands
-            else None
-        )
+        copy = terminal = None
+        if commands:
+            copy = box.addButton("Copy commands", QMessageBox.ButtonRole.ActionRole)
+            terminal = box.addButton(
+                "Copy and open Terminal", QMessageBox.ButtonRole.ActionRole
+            )
         box.exec()
-        if copy is not None and box.clickedButton() is copy:
+        clicked = box.clickedButton()
+        if clicked is not None and clicked in (copy, terminal):
             self.copy_commands(commands)
+        if terminal is not None and clicked is terminal:
+            # The commands each begin with their own `cd`, so where the window
+            # opens does not change what they do — it only has to be somewhere
+            # sensible to land.
+            launcher.open_terminal(self.settings.resolved_lab_root())
 
     def copy_commands(self, commands: list[str]) -> None:
         """Put the rebuild commands on the clipboard, one per line."""

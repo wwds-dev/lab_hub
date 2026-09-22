@@ -340,7 +340,7 @@ def _sonar_card(tmp_path, monkeypatch):
     project.mkdir(exist_ok=True)
     (project / "main.py").write_text("")
     app = launcher.ExternalApp(
-        "sonar", "SONAR", "sonar", "main.py", "summary", service="Engine"
+        "sonar", "SONAR", "sonar", "main.py", "summary", service="Background engine"
     )
     return AppCard(app)
 
@@ -353,7 +353,7 @@ def test_the_engine_line_reports_a_running_daemon(qapp, tmp_path, monkeypatch):
         table=f"{tmp_path}/sonar/.venv/bin/python {tmp_path}/sonar/main.py --headless\n",
     )
 
-    assert card.service.text() == "Engine · running"
+    assert card.service.text() == "Background engine · running"
     assert card.state.text() == "Installed", "a daemon is not an open window"
     assert card.launch_button.text() == "Launch"
 
@@ -363,7 +363,7 @@ def test_the_engine_line_reports_a_stopped_daemon(qapp, tmp_path, monkeypatch):
 
     card.refresh(tmp_path, table="/bin/zsh\n")
 
-    assert card.service.text() == "Engine · stopped"
+    assert card.service.text() == "Background engine · stopped"
 
 
 def test_the_app_and_its_engine_are_reported_together(qapp, tmp_path, monkeypatch):
@@ -378,7 +378,7 @@ def test_the_app_and_its_engine_are_reported_together(qapp, tmp_path, monkeypatc
     )
 
     assert card.state.text() == "Running"
-    assert card.service.text() == "Engine · running"
+    assert card.service.text() == "Background engine · running"
 
 
 def test_an_app_without_a_service_says_nothing(qapp, tmp_path, monkeypatch):

@@ -83,6 +83,25 @@
   `tests/test_tray.py`.
 - [x] `P3` `bug` `@ai` Tab read "Backup_Sync" — Qt treats `&` in a tab label as a
   mnemonic marker. Renamed to "Backup and Sync", with a test forbidding `&` in labels.
+- [x] `P0` `bug` `@ai` **Lab Hub aborted whenever its menu bar menu opened.** SIGABRT,
+  and not this app's fault: Qt's cocoa plugin asks the current event for its `clickCount`
+  when a menu begins tracking, and on **macOS 27** that raises for a non-mouse event
+  instead of answering zero. The Objective-C exception unwinds through C++ frames that
+  catch nothing, into `terminate()`. Proven not to be ours: SONAR produced a byte-identical
+  stack on the same day the machine moved to 27, and PySide6 6.11.2 is the newest release
+  there is. Reproduced directly — building any non-mouse `NSEvent` and asking it for
+  `clickCount` aborts the interpreter. `ui/appkit_guard.py` swizzles that one selector to
+  answer 0 for the event types that have no click count and to call through for the ten
+  that do; `--selftest` fails the build if it does not install. Remove it when Qt ships a
+  fixed plugin. `tests/test_appkit_guard.py` runs against the real runtime.
+- [x] `P2` `design` `@ai` **"Engine · running" meant nothing to the reader.** It is now
+  "Background engine", and the tooltip says what it actually is: a process that goes on
+  collecting and settling data with no window, running whether or not the app is open, and
+  which Launch neither starts nor stops.
+- [x] `P2` `feature` `@ai` **Copy and open Terminal** beside Copy commands — the clipboard
+  plus a window to paste into. Not typed in for you: driving Terminal needs an Apple Events
+  grant, and a window that runs a command the instant it opens is the wrong shape for
+  something that replaces an installed app.
 - [x] `P2` `bug` `@ai` **The rebuild command it printed would not have installed.** The
   first cut of the build report printed `cd <project> && ./build_app.sh` for everything,
   but the scripts disagree silently: `sonar`, `unblock_tracker`, `lab_hub` and Sentinel

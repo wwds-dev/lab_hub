@@ -119,7 +119,7 @@ SUITES: tuple[ExternalApp, ...] = (
         entry="main.py",
         summary="Market scanner and paper-trading terminal: live prices, "
         "prediction-market odds and a probability model, traded with paper money.",
-        service="Engine",
+        service="Background engine",
     ),
 )
 
@@ -901,6 +901,19 @@ def startup_log_hint(app: ExternalApp) -> str:
             f"'process == \"{executable.name}\"' --last 5m"
         )
     return str(launch_log(app))
+
+
+def open_terminal(path: Path) -> None:
+    """Open a Terminal window at `path`.
+
+    Paired with the clipboard rather than typing the command in: driving
+    Terminal would need an Apple Events grant, and a window that runs something
+    the moment it opens is the wrong shape for a command that replaces an
+    installed app. Paste and read it first.
+    """
+    subprocess.run(
+        ["open", "-a", "Terminal", str(path)], check=False, env=child_env()
+    )
 
 
 def reveal(path: Path) -> None:

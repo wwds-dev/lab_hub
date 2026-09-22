@@ -128,8 +128,11 @@ but carrying no stamp), and names the build script for anything out of date.
 A launcher bundle is never out of date, and being dirty does not change that:
 it runs the source, so uncommitted edits are exactly what opens.
 
-It hands over the command rather than running it, with **Copy commands** to put
-it on the clipboard. The flag is read from each build script, because they
+It hands over the command rather than running it: **Copy commands** puts it on
+the clipboard, and **Copy and open Terminal** does that and opens a window to
+paste into. Not typed in for you — driving Terminal needs an Apple Events
+grant, and a window that runs something the instant it opens is the wrong shape
+for a command that replaces an installed app. The flag is read from each build script, because they
 disagree and do so silently: `sonar`, `unblock_tracker`, `lab_hub` and Sentinel
 build into `dist.noindex/` and copy into `/Applications` only when passed
 `--install`, while `backup_manager`, `git_autosync` and Imprint install by

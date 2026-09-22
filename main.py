@@ -151,6 +151,17 @@ def selftest() -> int:
 
     print(f"{APP_NAME} self-test")
     print(f"  version:         {version.version_string()} ({version.tooltip()})")
+
+    # Without this the app aborts the moment its menu bar menu opens.
+    from ui import appkit_guard
+
+    guarded = appkit_guard.install()
+    print(f"  clickCount guard: {'installed' if guarded else 'NOT INSTALLED'}")
+    if not guarded:
+        problems.append(
+            "the AppKit clickCount guard did not install — opening the menu bar "
+            "menu will abort the app on macOS 27"
+        )
     print(f"  frozen bundle:   {frozen}")
     print(f"  icon asset:      {icon} ({'found' if icon.exists() else 'MISSING'})")
     print(f"  menu bar icon:   {tray_icon} ({'found' if tray_icon.exists() else 'MISSING'})")

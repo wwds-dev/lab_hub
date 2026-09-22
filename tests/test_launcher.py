@@ -500,7 +500,7 @@ def test_only_sonar_declares_a_background_service():
     reporting; the others do not."""
     named = {app.key: app.service for app in launcher.APPS if app.service}
 
-    assert named == {"sonar": "Engine"}
+    assert named == {"sonar": "Background engine"}
 
 
 # ----------------------------------------------------------------------
