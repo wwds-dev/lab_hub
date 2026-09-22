@@ -161,6 +161,7 @@ class AppCard(QWidget):
             else launcher.Presence(window=False, service=False)
         )
         self.running = here.window
+        self.refresh_version(lab_root)
         self._update_service(here.service)
         self._settle_pending_launch()
 
@@ -184,6 +185,15 @@ class AppCard(QWidget):
             return FAILED_LABEL
         return STATE_LABELS[ready.state]
 
+    @staticmethod
+    def _restyle(widget, name: str) -> None:
+        """A changed objectName only takes effect once the style is re-applied."""
+        if widget.objectName() == name:
+            return
+        widget.setObjectName(name)
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+
     def refresh_version(self, lab_root: Path) -> None:
         """Re-read which build this tile would launch.
 
@@ -192,12 +202,29 @@ class AppCard(QWidget):
         is not the code that would open.
         """
         found = launcher.version(self.app, lab_root)
-        self.version.setText(found.text)
+        if not found.known:
+            self.version.setText("")
+            self.version.setToolTip(
+                f"Lab Hub cannot tell which build of {self.app.name} is installed."
+            )
+            self._restyle(self.version, "hint")
+            return
+
+        # An installed build older than its source is the answer to the question
+        # the number exists for. Saying only the number would be true and
+        # useless: the button would still open the old one without a word.
+        suffix = f" · {found.behind} behind" if found.stale else ""
+        self.version.setText(found.text + suffix)
         self.version.setToolTip(
-            f"{self.app.name} {found.text} — {found.detail}"
-            if found.known
-            else f"Lab Hub cannot tell which build of {self.app.name} is installed."
+            f"{self.app.name} {found.text} — {found.detail}."
+            + (
+                f" Its checkout is {found.behind} commits further on, so Launch "
+                "opens the older build until it is rebuilt and reinstalled."
+                if found.stale
+                else ""
+            )
         )
+        self._restyle(self.version, "stateWarn" if found.stale else "hint")
 
     def _update_service(self, running: bool) -> None:
         """Report the background copy, for the apps that have one."""
@@ -207,9 +234,7 @@ class AppCard(QWidget):
         self.service.setText(
             f"{self.app.service} · {'running' if running else 'stopped'}"
         )
-        self.service.setObjectName("stateOk" if running else "hint")
-        self.service.style().unpolish(self.service)
-        self.service.style().polish(self.service)
+        self._restyle(self.service, "stateOk" if running else "hint")
 
     def _showing_failure(self) -> bool:
         """Whether the last launch's failure notice is still worth showing."""

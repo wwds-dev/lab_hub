@@ -83,6 +83,15 @@
   `tests/test_tray.py`.
 - [x] `P3` `bug` `@ai` Tab read "Backup_Sync" — Qt treats `&` in a tab label as a
   mnemonic marker. Renamed to "Backup and Sync", with a test forbidding `&` in labels.
+- [x] `P2` `feature` `@ai` **Tiles say which build they would open, and whether it is
+  stale.** `launcher.version()` follows the launch path: a frozen bundle answers with the
+  `_build_info.json` stamped inside it, a launcher bundle (Sentinel, Imprint) with the
+  checkout it runs, and an unstamped frozen bundle answers nothing — the checkout's number
+  there would describe code that is not what opens. A frozen bundle behind its checkout
+  shows `· N behind`, which is the question the number exists for: committing to a project
+  does not rebuild it, and SONAR was five commits ahead of its installed app when this was
+  written. The commit count is cached on `HEAD`'s mtime so the poll can re-read it without
+  a subprocess per app per tick. `tests/test_launcher.py`, `tests/test_apps_tab.py`.
 - [x] `P1` `bug` `@ai` **SONAR's headless agent made its tile read *Running* forever.**
   Fallout from the fix below: once the checkout's entry script became a marker, SONAR's
   launchd agent — `main.py --headless`, running around the clock — matched it, so the tile

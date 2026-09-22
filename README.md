@@ -106,6 +106,18 @@ to the menu bar on close and quit only from there, so closing the window leaves
 the process up and the tile correctly says *Running*. That is not a stale tile;
 *Bring to front* will bring the window back.
 
+**An installed build older than its source says so.** A frozen bundle is only
+as new as its last build, and committing to a project does not rebuild it — so
+the tile reads `v2.104 · 5 behind`, and the tooltip says Launch will open the
+older build until it is rebuilt and reinstalled. Reporting only the number
+would be true and useless: the button would still open the old one without a
+word. A launcher bundle can never be behind, because it runs the checkout.
+
+The commit count is cached against the repository's `HEAD` (and the ref it
+points at), so the tile can re-read the version on every poll without a
+`git rev-list` per app every three seconds. A bundle's own number is a single
+small file read.
+
 **Renaming a launched app means rebuilding Lab Hub.** The registry is compiled
 into this bundle, so until it is rebuilt the tile looks for a bundle name that
 no longer exists, falls back to the checkout, and reads *Source only* — which

@@ -643,3 +643,106 @@ def test_this_project_reports_its_own_version():
 
     assert found.known
     assert found.text.startswith("v2."), found.text
+
+
+# ----------------------------------------------------------------------
+# An installed build older than its source
+# ----------------------------------------------------------------------
+def test_a_bundle_behind_its_checkout_says_how_far(tmp_path, monkeypatch):
+    """The question the number exists for. Committing to a project does not
+    rebuild it, so the installed app is routinely older than the source."""
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    bundle = make_bundle(tmp_path, "SONAR")
+    _stamp(bundle, build=104)
+    _checkout(tmp_path, "sonar", monkeypatch=monkeypatch, build=109)
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    found = launcher.version(app, tmp_path)
+
+    assert found.text == "v2.104", "the number still describes what opens"
+    assert found.stale and found.behind == 5
+
+
+def test_a_bundle_level_with_its_checkout_is_not_stale(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    bundle = make_bundle(tmp_path, "SONAR")
+    _stamp(bundle, build=109)
+    _checkout(tmp_path, "sonar", monkeypatch=monkeypatch, build=109)
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    assert not launcher.version(app, tmp_path).stale
+
+
+def test_a_bundle_ahead_of_its_checkout_is_not_reported_as_behind(tmp_path, monkeypatch):
+    """Possible after a branch switch. Negative staleness is not a thing."""
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    bundle = make_bundle(tmp_path, "SONAR")
+    _stamp(bundle, build=120)
+    _checkout(tmp_path, "sonar", monkeypatch=monkeypatch, build=109)
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    assert not launcher.version(app, tmp_path).stale
+
+
+def test_a_launcher_bundle_is_never_behind(tmp_path, monkeypatch):
+    """It runs the checkout, so it cannot lag it."""
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    bundle = make_bundle(tmp_path, "Sentinel")
+    (bundle / "Contents" / "Resources").mkdir(parents=True, exist_ok=True)
+    (bundle / "Contents" / "Resources" / "project_root.txt").write_text("/somewhere")
+    _stamp(bundle, build=1)
+    _checkout(tmp_path, "sentinel_fork", monkeypatch=monkeypatch, build=55)
+    app = launcher.ExternalApp("sf", "Sentinel", "sentinel_fork", "main.py", "")
+
+    found = launcher.version(app, tmp_path)
+
+    assert found.origin == "checkout"
+    assert not found.stale
+
+
+def test_the_commit_count_is_cached_against_head(tmp_path, monkeypatch):
+    """The tile re-reads the version on every poll, so this cannot shell out
+    to git each time."""
+    project = _project(tmp_path, "sonar")
+    (project / ".git").mkdir()
+    (project / ".git" / "HEAD").write_text("nothing that looks like a ref\n")
+    calls = []
+    real = launcher.subprocess.run
+
+    def counting(*args, **kwargs):
+        calls.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(launcher.subprocess, "run", counting)
+    launcher._COUNT_CACHE.clear()
+
+    launcher._commit_count(project)
+    launcher._commit_count(project)
+    launcher._commit_count(project)
+
+    assert len(calls) == 1, "git ran more than once for an unchanged HEAD"
+
+
+def test_a_new_commit_invalidates_the_cached_count(tmp_path, monkeypatch):
+    project = _project(tmp_path, "sonar")
+    (project / ".git").mkdir()
+    head = project / ".git" / "HEAD"
+    head.write_text("first\n")
+    launcher._COUNT_CACHE.clear()
+    monkeypatch.setattr(launcher, "subprocess", launcher.subprocess)
+
+    seen = []
+    monkeypatch.setattr(
+        launcher.subprocess,
+        "run",
+        lambda *a, **k: seen.append(1) or type("R", (), {"returncode": 1, "stdout": ""})(),
+    )
+    launcher._commit_count(project)
+    import os, time
+
+    time.sleep(0.01)
+    os.utime(head, None)
+    head.write_text("second\n")
+    launcher._commit_count(project)
+
+    assert len(seen) == 2, "a moved HEAD must be re-read"

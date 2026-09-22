@@ -24,7 +24,7 @@ import shutil
 import subprocess
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 APPLICATIONS = Path("/Applications")
@@ -411,10 +411,18 @@ class Version:
     text: str = ""
     origin: str = ""  # bundle | checkout
     detail: str = ""  # where the number came from, for the tooltip
+    # How many commits the installed build is behind its source, when both are
+    # known. Only ever non-zero for a frozen bundle: a launcher bundle runs the
+    # checkout, so it cannot be behind it.
+    behind: int = 0
 
     @property
     def known(self) -> bool:
         return bool(self.text)
+
+    @property
+    def stale(self) -> bool:
+        return self.behind > 0
 
 
 def bundle_runs_checkout(bundle: Path) -> bool:
@@ -433,6 +441,21 @@ def bundle_runs_checkout(bundle: Path) -> bool:
         return True
     executable = _bundle_executable_path(bundle)
     return executable is not None and executable.name == "applet"
+
+
+def _stamped_build(bundle: Path) -> int | None:
+    """The build number in a bundle's stamp, without the formatting."""
+    for holder in ("Resources", "Frameworks"):
+        try:
+            data = json.loads(
+                (bundle / "Contents" / holder / BUILD_INFO_NAME).read_text()
+            )
+        except (OSError, ValueError):
+            continue
+        build = data.get("build")
+        if isinstance(build, int):
+            return build
+    return None
 
 
 def _stamped_version(bundle: Path) -> Version | None:
@@ -454,15 +477,48 @@ def _stamped_version(bundle: Path) -> Version | None:
     return None
 
 
+# Keyed on the mtime of the repository's HEAD, so a commit invalidates it and
+# nothing else does. Without this the tile could not re-read the version on its
+# poll: a `git rev-list` per app every three seconds is a subprocess storm for a
+# number that changes when you commit.
+_COUNT_CACHE: dict[tuple[str, int], int | None] = {}
+
+
+def _head_stamp(project: Path) -> int | None:
+    """When this repository last moved. None when it is not a repository."""
+    head = project / ".git" / "HEAD"
+    try:
+        newest = head.stat().st_mtime_ns
+    except OSError:
+        return None
+    # A commit on a branch rewrites the ref, not HEAD itself, so check both.
+    try:
+        ref = head.read_text().strip()
+        if ref.startswith("ref: "):
+            target = project / ".git" / ref[5:]
+            newest = max(newest, target.stat().st_mtime_ns)
+    except OSError:
+        pass
+    return newest
+
+
 def _commit_count(project: Path) -> int | None:
+    stamp = _head_stamp(project)
+    if stamp is None:
+        return None
+    key = (str(project), stamp)
+    if key in _COUNT_CACHE:
+        return _COUNT_CACHE[key]
     try:
         result = subprocess.run(
             ["git", "rev-list", "--count", "HEAD"],
             cwd=project, capture_output=True, text=True, timeout=10,
         )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return int(result.stdout.strip()) if result.returncode == 0 else None
+        count = int(result.stdout.strip()) if result.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        count = None
+    _COUNT_CACHE[key] = count
+    return count
 
 
 def _major(project: Path) -> str | None:
@@ -514,7 +570,19 @@ def version(app: ExternalApp, lab_root: Path) -> Version:
     bundle = bundle_path(app)
     project = source_dir(app, lab_root)
     if bundle is not None and not bundle_runs_checkout(bundle):
-        return _stamped_version(bundle) or Version()
+        stamped = _stamped_version(bundle)
+        if stamped is None:
+            return Version()
+        # A frozen bundle is only as new as its last build. Saying so is the
+        # whole point of the number: "is the app I am about to open the one I
+        # built?" — and the answer here is often no, because committing to a
+        # project does not rebuild it.
+        if project is not None:
+            source = _commit_count(project)
+            built = _stamped_build(bundle)
+            if source is not None and built is not None and source > built:
+                return replace(stamped, behind=source - built)
+        return stamped
     if project is not None:
         return checkout_version(project)
     return Version()
