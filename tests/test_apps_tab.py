@@ -411,3 +411,21 @@ def test_the_launchpad_has_a_build_check_and_the_others_do_not(qapp, tmp_path, m
 
     assert "Check builds" in labels(with_button)
     assert "Check builds" not in labels(without)
+
+
+def test_copying_the_commands_puts_them_on_the_clipboard(qapp, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+
+    from lab_hub import config
+    from ui.apps_tab import AppsTab
+
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    apps = (launcher.ExternalApp("a", "A", "a", "main.py", "s"),)
+    tab = AppsTab(config.Settings(), apps, "Apps", "intro", check_builds=True)
+    said = []
+    tab.launched.connect(said.append)
+
+    tab.copy_commands(["cd /x && ./build_app.sh --install"])
+
+    assert QApplication.clipboard().text() == "cd /x && ./build_app.sh --install"
+    assert said and "clipboard" in said[0]

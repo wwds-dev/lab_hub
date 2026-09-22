@@ -473,12 +473,11 @@ class AppsTab(QWidget):
             version = row.version.text or "no version"
             lines.append(f"[{mark}] {row.app.name} — {version}\n      {row.note}")
 
-        if behind:
+        commands = [row.command for row in behind if row.command]
+        if commands:
             lines.append("")
-            lines.append("To bring one up to date, run its build script:")
-            for row in behind:
-                if row.script is not None:
-                    lines.append(f"  cd {row.script.parent}  &&  ./{row.script.name}")
+            lines.append("Run this to bring it up to date:")
+            lines.extend(f"  {command}" for command in commands)
 
         box = QMessageBox(self)
         box.setWindowTitle("Build check")
@@ -487,7 +486,28 @@ class AppsTab(QWidget):
         box.setIcon(
             QMessageBox.Icon.Warning if behind else QMessageBox.Icon.Information
         )
+        # Lab Hub hands over the command rather than running it. A rebuild
+        # replaces an installed app and takes minutes; the terminal is where
+        # you can see it working and stop it, and a copy button is the whole
+        # distance between "there is a command" and "I have the command".
+        copy = (
+            box.addButton("Copy commands", QMessageBox.ButtonRole.ActionRole)
+            if commands
+            else None
+        )
         box.exec()
+        if copy is not None and box.clickedButton() is copy:
+            self.copy_commands(commands)
+
+    def copy_commands(self, commands: list[str]) -> None:
+        """Put the rebuild commands on the clipboard, one per line."""
+        from PySide6.QtWidgets import QApplication
+
+        QApplication.clipboard().setText("\n".join(commands))
+        self.launched.emit(
+            f"Copied {len(commands)} rebuild command"
+            f"{'' if len(commands) == 1 else 's'} to the clipboard."
+        )
 
     def recheck(self) -> None:
         """What the Re-check button does: forget stale notices, then look."""

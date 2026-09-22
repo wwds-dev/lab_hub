@@ -83,6 +83,14 @@
   `tests/test_tray.py`.
 - [x] `P3` `bug` `@ai` Tab read "Backup_Sync" — Qt treats `&` in a tab label as a
   mnemonic marker. Renamed to "Backup and Sync", with a test forbidding `&` in labels.
+- [x] `P2` `bug` `@ai` **The rebuild command it printed would not have installed.** The
+  first cut of the build report printed `cd <project> && ./build_app.sh` for everything,
+  but the scripts disagree silently: `sonar`, `unblock_tracker`, `lab_hub` and Sentinel
+  only copy into `/Applications` when passed `--install`, while `backup_manager`,
+  `git_autosync` and Imprint install by default. Running the flagless version against
+  SONAR would have cost several minutes and left v2.104 installed. `install_command()`
+  reads the flag from the script itself — a table here would be a second place to be
+  wrong — and **Copy commands** puts the line on the clipboard. `tests/test_launcher.py`.
 - [x] `P2` `feature` `@ai` **Check builds** — one button on the launchpad, reporting for
   every registered app whether what Launch would open is the newest thing available. Adds
   the case the tile's counter cannot see: a checkout with **uncommitted** changes, where

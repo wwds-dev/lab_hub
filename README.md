@@ -128,6 +128,16 @@ but carrying no stamp), and names the build script for anything out of date.
 A launcher bundle is never out of date, and being dirty does not change that:
 it runs the source, so uncommitted edits are exactly what opens.
 
+It hands over the command rather than running it, with **Copy commands** to put
+it on the clipboard. The flag is read from each build script, because they
+disagree and do so silently: `sonar`, `unblock_tracker`, `lab_hub` and Sentinel
+build into `dist.noindex/` and copy into `/Applications` only when passed
+`--install`, while `backup_manager`, `git_autosync` and Imprint install by
+default. A command without the flag where it is needed costs several minutes of
+build and leaves the old app exactly where it was — the thing the report exists
+to warn about. Reading it from the script beats a table here, which would be a
+second place to be wrong.
+
 **Renaming a launched app means rebuilding Lab Hub.** The registry is compiled
 into this bundle, so until it is rebuilt the tile looks for a bundle name that
 no longer exists, falls back to the checkout, and reads *Source only* — which

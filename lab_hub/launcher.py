@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import plistlib
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -601,6 +602,35 @@ def build_script(project: Path) -> Path | None:
     return None
 
 
+INSTALL_FLAG = "--install"
+
+
+def install_command(project: Path, script: Path) -> str:
+    """The shell line that rebuilds this project **and installs it**.
+
+    The build scripts disagree, and silently: `sonar`, `unblock_tracker`,
+    `lab_hub` and Sentinel build into `dist.noindex/` and only copy into
+    /Applications when passed `--install`, while `backup_manager`,
+    `git_autosync` and Imprint install by default. Handing over a command
+    without the flag where it is needed costs several minutes of build and
+    leaves the old app exactly where it was — the very thing the report exists
+    to warn about.
+
+    The flag is read from the script rather than kept in a table here. A table
+    would be a second place to be wrong, and it would go stale the first time
+    one of seven scripts changed its mind.
+    """
+    needs_flag = False
+    try:
+        text = script.read_text()
+        needs_flag = f'== "{INSTALL_FLAG}"' in text or f"{INSTALL_FLAG})" in text
+    except OSError:
+        pass
+    relative = script.relative_to(project)
+    suffix = f" {INSTALL_FLAG}" if needs_flag else ""
+    return f"cd {shlex.quote(str(project))} && ./{relative}{suffix}"
+
+
 def dirty_checkout(project: Path) -> bool:
     """Whether the checkout has changes that are not committed.
 
@@ -629,6 +659,7 @@ class BuildStatus:
     verdict: str  # current | behind | uncommitted | unknown | missing
     note: str
     script: Path | None = None
+    command: str | None = None  # the shell line that would bring it up to date
 
     @property
     def needs_rebuild(self) -> bool:
@@ -640,6 +671,11 @@ def build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
     found = version(app, lab_root)
     project = source_dir(app, lab_root)
     script = build_script(project) if project is not None else None
+    command = (
+        install_command(project, script)
+        if project is not None and script is not None
+        else None
+    )
 
     if project is None:
         return BuildStatus(
@@ -650,7 +686,7 @@ def build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
         return BuildStatus(
             app, found, "unknown",
             "installed, but it carries no build stamp — rebuild it once and it "
-            "will start reporting.", script,
+            "will start reporting.", script, command,
         )
     if found.origin == "checkout":
         # It runs the source, so it opens whatever the source says right now —
@@ -658,21 +694,21 @@ def build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
         return BuildStatus(
             app, found, "current",
             "runs the checkout directly, so it is always what the source says.",
-            script,
+            script, command,
         )
     if found.stale:
         return BuildStatus(
             app, found, "behind",
             f"built at {found.text}, but the source is {found.behind} commits "
-            "further on.", script,
+            "further on.", script, command,
         )
     if dirty_checkout(project):
         return BuildStatus(
             app, found, "uncommitted",
             "level with the last commit, but the checkout has uncommitted "
-            "changes that are not in this build.", script,
+            "changes that are not in this build.", script, command,
         )
-    return BuildStatus(app, found, "current", "matches its source.", script)
+    return BuildStatus(app, found, "current", "matches its source.", script, command)
 
 
 def build_report(

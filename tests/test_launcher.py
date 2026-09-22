@@ -838,3 +838,64 @@ def test_the_report_covers_every_registered_app(tmp_path, monkeypatch):
     report = launcher.build_report(tmp_path)
 
     assert len(report) == len(launcher.APPS)
+
+
+# ----------------------------------------------------------------------
+# The command handed over has to actually install
+# ----------------------------------------------------------------------
+def _script(project, relative, body):
+    target = project / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(body)
+    return target
+
+
+def test_a_script_that_needs_the_flag_gets_it(tmp_path):
+    """sonar, unblock_tracker, lab_hub and Sentinel build into dist.noindex/
+    and only copy into /Applications when passed --install. Without the flag
+    you pay for the whole build and the old app stays exactly where it was."""
+    project = tmp_path / "sonar"
+    script = _script(
+        project, "build_app.sh",
+        '#!/bin/bash\nif [[ "${1:-}" == "--install" ]]; then cp -R x /Applications/; fi\n',
+    )
+
+    command = launcher.install_command(project, script)
+
+    assert command.endswith("./build_app.sh --install")
+
+
+def test_a_script_that_installs_by_default_is_left_alone(tmp_path):
+    """backup_manager, git_autosync and Imprint install without a flag."""
+    project = tmp_path / "backup_manager"
+    script = _script(project, "build_app.sh", "#!/bin/bash\ncp -R x /Applications/\n")
+
+    command = launcher.install_command(project, script)
+
+    assert command.endswith("./build_app.sh")
+    assert "--install" not in command
+
+
+def test_a_nested_script_is_named_from_the_project_root(tmp_path):
+    """`cd <project> && ./scripts/build_app.sh`, not a cd into scripts/ — the
+    script resolves its own paths relative to the project."""
+    project = tmp_path / "sentinel_fork"
+    script = _script(project, "scripts/build_app.sh", "#!/bin/bash\n")
+
+    command = launcher.install_command(project, script)
+
+    assert command == f"cd {project} && ./scripts/build_app.sh"
+
+
+def test_the_report_carries_the_command(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    bundle = make_bundle(tmp_path, "SONAR")
+    _stamp(bundle, build=104)
+    project = _checkout(tmp_path, "sonar", monkeypatch=monkeypatch, build=109)
+    _script(project, "build_app.sh", '#!/bin/bash\n"${1:-}" == "--install"\n')
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    row = launcher.build_status(app, tmp_path)
+
+    assert row.needs_rebuild
+    assert row.command.startswith(f"cd {project} && ./build_app.sh")
