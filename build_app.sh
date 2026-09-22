@@ -20,6 +20,9 @@ uv pip install -q pyinstaller
 # Regenerate the icon so the bundle never ships a stale one.
 python assets/make_icon.py
 
+# A frozen bundle has no .git, so record the build it was made from.
+python scripts/stamp_version.py
+
 rm -rf build dist "$DIST"
 
 pyinstaller --noconfirm --clean --windowed \
@@ -28,6 +31,8 @@ pyinstaller --noconfirm --clean --windowed \
   --osx-bundle-identifier "$BUNDLE_ID" \
   --distpath "$DIST" \
   --add-data "assets/icon.icns:assets" \
+  --add-data "VERSION:." \
+  --add-data "_build_info.json:." \
   --add-data "assets/tray.png:assets" \
   --add-data "assets/tray@2x.png:assets" \
   --hidden-import lab_hub.tools.narrator.converter \

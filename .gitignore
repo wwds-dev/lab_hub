@@ -19,6 +19,10 @@ config.json
 .claude/settings.local.json
 .DS_Store
 
+# Build metadata, written by scripts/stamp_version.py on every build. It is
+# output, not source: the checkout reads live git instead.
+_build_info.json
+
 # Run artifacts
 *.log
 *.csv

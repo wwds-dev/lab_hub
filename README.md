@@ -386,3 +386,22 @@ with no checkout or no venv is reported as skipped, not as a pass.
 It does not replace any of the projects it launches. Each keeps its own repo,
 README, venv and build script; Lab Hub only points at them. Changing what
 Sentinel does still mean changing Sentinel.
+
+## Version
+
+`v<MAJOR>.<BUILD>` — e.g. `v2.025`. **MAJOR** is the product arc, the only
+hand-edited part, in the `VERSION` file at the project root. **BUILD** is
+`git rev-list --count HEAD`, zero-padded to three digits, so it is derived and
+cannot be forgotten: a hand-maintained build number is wrong the first time
+someone ships without remembering it, and then silently wrong forever.
+
+The number is shown in the window title and on the Settings tab. A frozen `.app` has no `.git`, so
+`scripts/stamp_version.py` writes `_build_info.json` at package time and
+`lab_hub/version.py` reads it back; a checkout prefers live git, so an edit shows up on
+the next launch without re-stamping. With neither, it says `v2.???` rather than
+inventing a number — claiming a version with no evidence is a lie told in
+exactly the moment someone is asking.
+
+This is the lab-wide scheme, shared with `imprint`, `sonar` and `lab_hub`, and
+the Lab Project Monitor computes the same string from the same two inputs, so
+the dashboard and the running app cannot disagree.

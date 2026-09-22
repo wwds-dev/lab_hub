@@ -125,6 +125,14 @@
   was the first) — see SUGGESTIONS #11 for the structural fix.
 
 
+- [x] `P2` `infra` `@ai` **Versioned `v<MAJOR>.<BUILD>`, shown in the app.** The arc
+  lives in `VERSION`; the build is `git rev-list --count HEAD`, so it cannot be forgotten.
+  `lab_hub/version.py` reads live git from a checkout and a `_build_info.json` stamped by
+  `scripts/stamp_version.py` from a frozen bundle, and says `v2.???` rather than guessing
+  when it has neither. Shown in the window title and on the Settings tab, and read by Lab Hub's tile so you can see which
+  build its Launch button would open. Lab-wide scheme, same two inputs as the Lab Project
+  Monitor.
+
 ## v3 — later
 
 - [ ] `P2` `feature` `@ai` Read each project's `TODO.md` and show an open-item count next to its launch button

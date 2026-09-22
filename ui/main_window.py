@@ -8,7 +8,7 @@ from PySide6.QtCore import QEvent, QObject, Qt, QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QStatusBar, QTabWidget
 
-from lab_hub import APP_NAME, asset_path, config, launcher, login_item
+from lab_hub import APP_NAME, asset_path, config, launcher, login_item, version
 
 from . import dock, theme, tray
 from .apps_tab import AppsTab
@@ -38,7 +38,10 @@ class MainWindow(QMainWindow):
         self._hidden_at = 0.0
         self._suppress_reopen_until = 0.0
 
-        self.setWindowTitle(APP_NAME)
+        # The build is part of the app's identity, not a detail hidden in an
+        # About box: the question "is the window I am looking at the one I just
+        # built" is asked far more often than it is answered.
+        self.setWindowTitle(f"{APP_NAME} {version.version_string()}")
         self.resize(1020, 820)
         self.setMinimumSize(760, 580)
 

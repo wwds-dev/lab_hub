@@ -459,3 +459,187 @@ def test_a_flag_on_one_line_does_not_discount_another(tmp_path, monkeypatch):
     )
 
     assert launcher.is_running(app, tmp_path, table)
+
+
+# ----------------------------------------------------------------------
+# Window and background service are separate answers
+# ----------------------------------------------------------------------
+def test_presence_separates_the_window_from_the_daemon(tmp_path, monkeypatch):
+    app = _sonar(tmp_path, monkeypatch)
+    table = f"{tmp_path}/sonar/.venv/bin/python {tmp_path}/sonar/main.py --headless\n"
+
+    here = launcher.presence(app, tmp_path, table)
+
+    assert here.service, "the engine is up"
+    assert not here.window, "but there is no window to raise"
+
+
+def test_presence_sees_both_at_once(tmp_path, monkeypatch):
+    app = _sonar(tmp_path, monkeypatch)
+    table = (
+        f"{tmp_path}/sonar/.venv/bin/python {tmp_path}/sonar/main.py --headless\n"
+        f"{tmp_path}/SONAR.app/Contents/MacOS/SONAR\n"
+    )
+
+    here = launcher.presence(app, tmp_path, table)
+
+    assert here.window and here.service
+
+
+def test_presence_of_something_nowhere_is_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    app = launcher.ExternalApp("ghost", "Ghost", "ghost", "main.py", "")
+
+    here = launcher.presence(app, tmp_path, "anything\n")
+
+    assert not here.window and not here.service
+
+
+def test_only_sonar_declares_a_background_service():
+    """Naming one is a claim that the app has a windowless copy worth
+    reporting; the others do not."""
+    named = {app.key: app.service for app in launcher.APPS if app.service}
+
+    assert named == {"sonar": "Engine"}
+
+
+# ----------------------------------------------------------------------
+# Which build would actually open
+# ----------------------------------------------------------------------
+def _stamp(bundle, major="2", build=103):
+    import json
+
+    target = bundle / "Contents" / "Resources"
+    target.mkdir(parents=True, exist_ok=True)
+    (target / launcher.BUILD_INFO_NAME).write_text(
+        json.dumps({"major": major, "build": build})
+    )
+
+
+def _checkout(tmp_path, name, major="2", monkeypatch=None, build=55):
+    """A project with an arc. The commit count is stubbed: these tests are
+    about *which* source is consulted, not about git — one further down runs
+    the real thing against this repository."""
+    project = _project(tmp_path, name)
+    (project / "VERSION").write_text(f"{major}\n")
+    if monkeypatch is not None:
+        monkeypatch.setattr(launcher, "_commit_count", lambda _project: build)
+    return project
+
+
+def test_a_frozen_bundle_answers_with_its_own_stamp(tmp_path, monkeypatch):
+    """The bundle is what opens, so the bundle's build is the answer — even
+    with a checkout sitting right beside it."""
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    bundle = make_bundle(tmp_path, "SONAR")
+    _stamp(bundle, build=103)
+    _checkout(tmp_path, "sonar")
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    found = launcher.version(app, tmp_path)
+
+    assert found.text == "v2.103"
+    assert found.origin == "bundle"
+
+
+def test_an_unstamped_frozen_bundle_says_nothing(tmp_path, monkeypatch):
+    """The checkout's number would describe code that is not what opens.
+
+    AGENTS.md's rule: say unknown rather than claim current with no evidence —
+    a lie told in exactly the moment someone is asking.
+    """
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    make_bundle(tmp_path, "SONAR")
+    _checkout(tmp_path, "sonar")
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    found = launcher.version(app, tmp_path)
+
+    assert not found.known
+    assert found.text == ""
+
+
+def test_a_launcher_bundle_answers_with_the_checkout(tmp_path, monkeypatch):
+    """Sentinel's stub runs the project's source, so the source is the answer.
+
+    Its own Info.plist says 2.0, hand-typed once and never touched since.
+    """
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    bundle = make_bundle(tmp_path, "Sentinel")
+    (bundle / "Contents" / "Resources").mkdir(parents=True, exist_ok=True)
+    (bundle / "Contents" / "Resources" / "project_root.txt").write_text("/somewhere")
+    _stamp(bundle, build=999)  # even a stamp must not win here
+    _checkout(tmp_path, "sentinel_fork", monkeypatch=monkeypatch)
+    app = launcher.ExternalApp("sf", "Sentinel", "sentinel_fork", "main.py", "")
+
+    found = launcher.version(app, tmp_path)
+
+    assert found.origin == "checkout"
+    assert found.text.startswith("v2.")
+    assert found.text != "v2.999"
+
+
+def test_an_applet_bundle_also_answers_with_the_checkout(tmp_path, monkeypatch):
+    import plistlib
+
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    macos = tmp_path / "Imprint.app" / "Contents" / "MacOS"
+    macos.mkdir(parents=True)
+    (macos / "applet").write_text("#!/bin/sh\n")
+    with (tmp_path / "Imprint.app" / "Contents" / "Info.plist").open("wb") as f:
+        plistlib.dump({"CFBundleExecutable": "applet"}, f)
+    _checkout(tmp_path, "imprint", monkeypatch=monkeypatch)
+    app = launcher.ExternalApp("imprint", "Imprint", "imprint", "main.py", "")
+
+    assert launcher.version(app, tmp_path).origin == "checkout"
+
+
+def test_a_source_only_app_answers_with_the_checkout(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    _checkout(tmp_path, "sonar", monkeypatch=monkeypatch)
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    assert launcher.version(app, tmp_path).origin == "checkout"
+
+
+def test_a_version_file_holding_a_whole_version_yields_the_arc(tmp_path, monkeypatch):
+    """`sentinel_fork/VERSION` holds `2.001` against a convention that says the
+    build half is derived. Take the arc; derive the rest."""
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    project = _project(tmp_path, "sentinel_fork")
+    (project / "VERSION").write_text("2.001\n")
+    monkeypatch.setattr(launcher, "_commit_count", lambda _project: 55)
+    app = launcher.ExternalApp("sf", "Sentinel", "sentinel_fork", "main.py", "")
+
+    text = launcher.version(app, tmp_path).text
+
+    assert text.startswith("v2."), text
+    assert not text.startswith("v2.001."), "the hand-written build must not stack up"
+
+
+def test_nothing_anywhere_is_an_empty_version(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    app = launcher.ExternalApp("ghost", "Ghost", "ghost", "main.py", "")
+
+    assert not launcher.version(app, tmp_path).known
+
+
+def test_the_commit_count_is_read_from_a_real_repository():
+    """The stubs above would keep passing if git were never called at all."""
+    from pathlib import Path as _Path
+
+    here = _Path(__file__).resolve().parents[1]
+
+    count = launcher._commit_count(here)
+
+    assert isinstance(count, int) and count > 0
+
+
+def test_this_project_reports_its_own_version():
+    """End to end against the real checkout, arc and git history."""
+    from pathlib import Path as _Path
+
+    found = launcher.checkout_version(_Path(__file__).resolve().parents[1])
+
+    assert found.known
+    assert found.text.startswith("v2."), found.text

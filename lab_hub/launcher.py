@@ -17,6 +17,7 @@ And never the inherited environment either — see `child_env`.
 
 from __future__ import annotations
 
+import json
 import os
 import plistlib
 import shutil
@@ -80,6 +81,11 @@ class ExternalApp:
     project: str  # folder path under the lab root
     entry: str  # entry script, relative to the project folder
     summary: str
+    # What this app's windowless background copy is called, for apps that have
+    # one. SONAR's launchd agent keeps settling hours with no window open, and
+    # that is the point of it — worth reporting, but never as "the app is
+    # open", which is the question the Launch button answers.
+    service: str | None = None
 
 
 # One tile per umbrella app, and nothing else. The agents and sub-modules that
@@ -112,6 +118,7 @@ SUITES: tuple[ExternalApp, ...] = (
         entry="main.py",
         summary="Market scanner and paper-trading terminal: live prices, "
         "prediction-market odds and a probability model, traded with paper money.",
+        service="Engine",
     ),
 )
 
@@ -159,26 +166,18 @@ def bundle_path(app: ExternalApp) -> Path | None:
     return path if path.is_dir() else None
 
 
-def bundle_executable(app: ExternalApp) -> Path | None:
-    """The binary inside the installed bundle, if there is one.
-
-    Read from `CFBundleExecutable` rather than assumed to be the app's name:
-    Sentinel is wrapped by an applet and its executable is called `applet`.
-    A bundle whose executable is gone still looks installed to `is_dir`, and
-    `open` on one fails with a LaunchServices number rather than a sentence.
-    """
-    bundle = bundle_path(app)
-    if bundle is None:
-        return None
+def _bundle_executable_path(bundle: Path) -> Path | None:
+    """The binary inside a bundle, read from `CFBundleExecutable`."""
     macos = bundle / "Contents" / "MacOS"
     try:
         with (bundle / "Contents" / "Info.plist").open("rb") as handle:
             name = plistlib.load(handle).get("CFBundleExecutable")
     except (OSError, plistlib.InvalidFileException, AttributeError):
         name = None
-    candidate = macos / (name or app.name)
-    if candidate.is_file():
-        return candidate
+    if name:
+        candidate = macos / name
+        if candidate.is_file():
+            return candidate
     # No usable key: accept any single binary sitting in MacOS/ rather than
     # calling a working bundle broken.
     try:
@@ -186,6 +185,19 @@ def bundle_executable(app: ExternalApp) -> Path | None:
     except OSError:
         return None
     return binaries[0] if len(binaries) == 1 else None
+
+
+def bundle_executable(app: ExternalApp) -> Path | None:
+    """The binary inside the installed bundle, if there is one.
+
+    Read from `CFBundleExecutable` rather than assumed to be the app's name:
+    Sentinel's is `SentinelLauncher`, and an `osacompile` launcher's is always
+    `applet`. A bundle whose executable is gone still looks installed to
+    `is_dir`, and `open` on one fails with a LaunchServices number rather than
+    a sentence.
+    """
+    bundle = bundle_path(app)
+    return None if bundle is None else _bundle_executable_path(bundle)
 
 
 def source_dir(app: ExternalApp, lab_root: Path) -> Path | None:
@@ -260,24 +272,47 @@ def running_markers(app: ExternalApp, lab_root: Path) -> tuple[str, ...]:
 NO_WINDOW_FLAGS = ("--headless",)
 
 
-def is_running(app: ExternalApp, lab_root: Path, table: str | None = None) -> bool:
-    """Whether a copy with a window is up — line by line, not table-wide.
+@dataclass(frozen=True)
+class Presence:
+    """What of this app is up: a window, a headless background copy, or both.
 
-    Matched against each command line separately so a flag on one process
-    cannot be read off another's: a substring search over the whole snapshot
-    would see `--headless` anywhere in it and discount every app at once.
+    They are different answers to different questions and must not be folded
+    together. *Window* decides whether Launch would start a duplicate; SONAR's
+    engine running under launchd says nothing about that, and treating it as
+    "the app is open" offered to raise a window that did not exist.
+    """
+
+    window: bool
+    service: bool
+
+
+def presence(app: ExternalApp, lab_root: Path, table: str | None = None) -> Presence:
+    """Classify every matching command line in one pass.
+
+    Matched line by line rather than against the whole snapshot, so a flag on
+    one process cannot be read off another's: a substring search over the
+    joined table would see `--headless` somewhere in it and discount every app
+    at once.
     """
     markers = running_markers(app, lab_root)
     if not markers:
-        return False
+        return Presence(window=False, service=False)
+
     snapshot = process_table() if table is None else table
+    window = service = False
     for line in snapshot.splitlines():
         if not any(marker in line for marker in markers):
             continue
         if any(flag in line for flag in NO_WINDOW_FLAGS):
-            continue
-        return True
-    return False
+            service = True
+        else:
+            window = True
+    return Presence(window=window, service=service)
+
+
+def is_running(app: ExternalApp, lab_root: Path, table: str | None = None) -> bool:
+    """Whether a copy *with a window* is up. The tile's button acts on this."""
+    return presence(app, lab_root, table).window
 
 
 def can_bring_to_front(app: ExternalApp) -> bool:
@@ -356,6 +391,133 @@ def bring_to_front(app: ExternalApp, lab_root: Path) -> str:
     if result.returncode != 0:
         raise LaunchError(result.stderr.strip() or f"'open' failed for {bundle}")
     return f"Brought {app.name} to the front"
+
+
+# The lab-wide scheme: v<MAJOR>.<BUILD>, the arc hand-set in a VERSION file and
+# the build derived from `git rev-list --count HEAD`. A frozen bundle has no
+# git, so its build is stamped into this file when it is packaged.
+BUILD_INFO_NAME = "_build_info.json"
+
+
+@dataclass(frozen=True)
+class Version:
+    """Which version the Launch button would actually start.
+
+    `text` is empty when there is no evidence. That is deliberate: the question
+    being answered is "is the app I am about to open the one I built", and an
+    answer invented from the nearest number to hand is worse than none.
+    """
+
+    text: str = ""
+    origin: str = ""  # bundle | checkout
+    detail: str = ""  # where the number came from, for the tooltip
+
+    @property
+    def known(self) -> bool:
+        return bool(self.text)
+
+
+def bundle_runs_checkout(bundle: Path) -> bool:
+    """True when the .app is a stub that runs the project's own source.
+
+    Two shapes in the lab: Sentinel's compiled C launcher, which records the
+    checkout it runs in `Resources/project_root.txt`, and an `osacompile`
+    launcher, whose executable is always `applet`. Either way the bundle holds
+    no application code, so its own version — Sentinel's Info.plist says 2.0,
+    hand-typed once — describes nothing. The checkout is the answer.
+
+    Deliberately separate from `is_launcher_bundle`, which asks whether `open`
+    can raise the app. Same two bundles today, different questions.
+    """
+    if (bundle / "Contents" / "Resources" / "project_root.txt").is_file():
+        return True
+    executable = _bundle_executable_path(bundle)
+    return executable is not None and executable.name == "applet"
+
+
+def _stamped_version(bundle: Path) -> Version | None:
+    """The build a frozen bundle was packaged from, if it recorded one."""
+    for holder in ("Resources", "Frameworks"):
+        stamp = bundle / "Contents" / holder / BUILD_INFO_NAME
+        try:
+            data = json.loads(stamp.read_text())
+        except (OSError, ValueError):
+            continue
+        major, build = data.get("major"), data.get("build")
+        if major is None or build is None:
+            continue
+        return Version(
+            text=f"v{major}.{int(build):03d}",
+            origin="bundle",
+            detail=f"stamped into {bundle.name} when it was built",
+        )
+    return None
+
+
+def _commit_count(project: Path) -> int | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-list", "--count", "HEAD"],
+            cwd=project, capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return int(result.stdout.strip()) if result.returncode == 0 else None
+
+
+def _major(project: Path) -> str | None:
+    """The product arc: the VERSION file, else the `## vN` heading in TODO.md.
+
+    Split on the first dot because `sentinel_fork/VERSION` holds `2.001` — the
+    whole version, hand-written, against a convention that says the build half
+    is derived. Taking the arc and deriving the rest keeps that file honest
+    without editing another project's tree.
+    """
+    try:
+        raw = (project / "VERSION").read_text().strip()
+        if raw:
+            return raw.split(".")[0]
+    except OSError:
+        pass
+    try:
+        for line in (project / "TODO.md").read_text().splitlines():
+            if line.startswith("## v") and line[4:5].isdigit() is False:
+                continue
+            if line.startswith("## v"):
+                return line[4:].split()[0].split("—")[0].strip()
+    except OSError:
+        pass
+    return None
+
+
+def checkout_version(project: Path) -> Version:
+    major = _major(project)
+    build = _commit_count(project)
+    if major is None or build is None:
+        return Version()
+    return Version(
+        text=f"v{major}.{build:03d}",
+        origin="checkout",
+        detail=f"from the checkout at {project}",
+    )
+
+
+def version(app: ExternalApp, lab_root: Path) -> Version:
+    """The version of whatever this tile would launch.
+
+    Follows the launch path rather than guessing: a frozen bundle answers with
+    the build stamped into it, a launcher bundle answers with the checkout it
+    runs, and a tile with no bundle answers with the checkout it would start.
+    A frozen bundle that carries no stamp answers *nothing* — borrowing the
+    checkout's number there would describe code that is not what opens.
+    """
+    bundle = bundle_path(app)
+    project = source_dir(app, lab_root)
+    if bundle is not None and not bundle_runs_checkout(bundle):
+        return _stamped_version(bundle) or Version()
+    if project is not None:
+        return checkout_version(project)
+    return Version()
 
 
 def status(app: ExternalApp, lab_root: Path) -> tuple[str, str]:

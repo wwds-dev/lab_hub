@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from lab_hub import APP_NAME, config, launcher, login_item
+from lab_hub import APP_NAME, config, launcher, login_item, version
 
 from . import theme
 from .widgets import FolderField, scroll_column
@@ -84,6 +84,15 @@ class SettingsTab(QWidget):
 
         # --- where things are stored ------------------------------------
         paths_card, paths_layout = theme.card()
+        about_frame, about_layout = theme.card()
+        about_layout.addWidget(theme.section_title("This build"))
+        build = QLabel(f"{APP_NAME} {version.version_string()}")
+        build.setToolTip(version.tooltip())
+        build.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        about_layout.addWidget(build)
+        about_layout.addWidget(theme.hint(version.tooltip()))
+        column.addWidget(about_frame)
+
         paths_layout.addWidget(theme.section_title("Files"))
         paths_layout.addWidget(
             theme.hint(

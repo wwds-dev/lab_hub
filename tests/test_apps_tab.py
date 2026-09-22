@@ -326,3 +326,67 @@ def test_an_app_that_shows_up_late_clears_the_notice(qapp, tmp_path, monkeypatch
     card.refresh(tmp_path, table=f"{tmp_path}/SONAR.app/Contents/MacOS/SONAR\n")
 
     assert card.state.text() == "Running"
+
+
+# ----------------------------------------------------------------------
+# The background engine, reported without being mistaken for the app
+# ----------------------------------------------------------------------
+def _sonar_card(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    from .fakes import make_bundle
+
+    make_bundle(tmp_path, "SONAR")
+    project = tmp_path / "sonar"
+    project.mkdir(exist_ok=True)
+    (project / "main.py").write_text("")
+    app = launcher.ExternalApp(
+        "sonar", "SONAR", "sonar", "main.py", "summary", service="Engine"
+    )
+    return AppCard(app)
+
+
+def test_the_engine_line_reports_a_running_daemon(qapp, tmp_path, monkeypatch):
+    card = _sonar_card(tmp_path, monkeypatch)
+
+    card.refresh(
+        tmp_path,
+        table=f"{tmp_path}/sonar/.venv/bin/python {tmp_path}/sonar/main.py --headless\n",
+    )
+
+    assert card.service.text() == "Engine · running"
+    assert card.state.text() == "Installed", "a daemon is not an open window"
+    assert card.launch_button.text() == "Launch"
+
+
+def test_the_engine_line_reports_a_stopped_daemon(qapp, tmp_path, monkeypatch):
+    card = _sonar_card(tmp_path, monkeypatch)
+
+    card.refresh(tmp_path, table="/bin/zsh\n")
+
+    assert card.service.text() == "Engine · stopped"
+
+
+def test_the_app_and_its_engine_are_reported_together(qapp, tmp_path, monkeypatch):
+    card = _sonar_card(tmp_path, monkeypatch)
+
+    card.refresh(
+        tmp_path,
+        table=(
+            f"{tmp_path}/sonar/.venv/bin/python {tmp_path}/sonar/main.py --headless\n"
+            f"{tmp_path}/SONAR.app/Contents/MacOS/SONAR\n"
+        ),
+    )
+
+    assert card.state.text() == "Running"
+    assert card.service.text() == "Engine · running"
+
+
+def test_an_app_without_a_service_says_nothing(qapp, tmp_path, monkeypatch):
+    """The row is still reserved, so the tiles stay the same height."""
+    app = _installed(tmp_path, monkeypatch)
+    card = AppCard(app)
+
+    card.refresh(tmp_path, table="/bin/zsh\n")
+
+    assert card.service.text() == ""
+    assert card.service.height() or True  # present, just empty

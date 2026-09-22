@@ -147,7 +147,10 @@ def selftest() -> int:
     settings = config.load()
     lab_root = settings.resolved_lab_root()
 
+    from lab_hub import version
+
     print(f"{APP_NAME} self-test")
+    print(f"  version:         {version.version_string()} ({version.tooltip()})")
     print(f"  frozen bundle:   {frozen}")
     print(f"  icon asset:      {icon} ({'found' if icon.exists() else 'MISSING'})")
     print(f"  menu bar icon:   {tray_icon} ({'found' if tray_icon.exists() else 'MISSING'})")

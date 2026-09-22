@@ -58,6 +58,10 @@ POLL_MS = 3000
 # single words, so the grid drops a column instead of going narrower.
 TILE_MIN_WIDTH = 380
 SUMMARY_HEIGHT = 52
+# Reserved on every tile, even where there is nothing to say. A line that
+# appeared on one card only would push its Launch button out of line with the
+# rest of the row, and the tiles sit side by side in a grid.
+SERVICE_HEIGHT = 18
 GRID_MAX_WIDTH = 1500
 
 
@@ -89,6 +93,13 @@ class AppCard(QWidget):
         name = QLabel(app.name)
         name.setObjectName("appName")
 
+        # Which build the button would actually open. Resolved once here and on
+        # Re-check, never on the poll: it shells out to `git rev-list`, and a
+        # subprocess every three seconds to restate a number that changes on
+        # rebuild would be pure waste.
+        self.version = QLabel()
+        self.version.setObjectName("hint")
+
         self.state = QLabel()
         self.state.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
@@ -100,6 +111,7 @@ class AppCard(QWidget):
         # the tiles are too narrow to keep all three on one row without the
         # summary being squeezed into a column of single words.
         header.addWidget(name)
+        header.addWidget(self.version)
         header.addStretch(1)
         header.addWidget(self.state)
 
@@ -114,22 +126,42 @@ class AppCard(QWidget):
         self.detail.setWordWrap(True)
         self.detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
+        # An app's windowless background copy, reported separately from the app
+        # itself. SONAR's engine runs under launchd around the clock and is the
+        # data the app exists to collect, but it is not an open window and the
+        # button above must not act as though it were.
+        self.service = QLabel()
+        self.service.setObjectName("hint")
+        self.service.setFixedHeight(SERVICE_HEIGHT)
+        if app.service is not None:
+            self.service.setToolTip(
+                f"{app.name}'s {app.service.lower()} runs with no window of its "
+                "own. Launching the app is separate from this."
+            )
+
         layout.addLayout(header)
         layout.addWidget(summary)
         layout.addWidget(self.detail)
+        layout.addWidget(self.service)
         layout.addWidget(self.launch_button)
 
         # Spare room at the bottom keeps every tile's Launch button on the same
         # line, whatever the summary length.
         layout.addStretch(1)
 
+        self.refresh_version(self.lab_root)
+
     # ------------------------------------------------------------------
     def refresh(self, lab_root: Path, table: str | None = None) -> None:
         self.lab_root = lab_root
         ready = launcher.readiness(self.app, lab_root)
-        self.running = ready.state != "missing" and launcher.is_running(
-            self.app, lab_root, table
+        here = (
+            launcher.presence(self.app, lab_root, table)
+            if ready.state != "missing"
+            else launcher.Presence(window=False, service=False)
         )
+        self.running = here.window
+        self._update_service(here.service)
         self._settle_pending_launch()
 
         label, style = self._state_label(ready)
@@ -151,6 +183,33 @@ class AppCard(QWidget):
         if self._showing_failure():
             return FAILED_LABEL
         return STATE_LABELS[ready.state]
+
+    def refresh_version(self, lab_root: Path) -> None:
+        """Re-read which build this tile would launch.
+
+        Says nothing at all when there is no evidence — a frozen bundle with no
+        stamp in it cannot be described by the checkout's number, because that
+        is not the code that would open.
+        """
+        found = launcher.version(self.app, lab_root)
+        self.version.setText(found.text)
+        self.version.setToolTip(
+            f"{self.app.name} {found.text} — {found.detail}"
+            if found.known
+            else f"Lab Hub cannot tell which build of {self.app.name} is installed."
+        )
+
+    def _update_service(self, running: bool) -> None:
+        """Report the background copy, for the apps that have one."""
+        if self.app.service is None:
+            self.service.setText("")
+            return
+        self.service.setText(
+            f"{self.app.service} · {'running' if running else 'stopped'}"
+        )
+        self.service.setObjectName("stateOk" if running else "hint")
+        self.service.style().unpolish(self.service)
+        self.service.style().polish(self.service)
 
     def _showing_failure(self) -> bool:
         """Whether the last launch's failure notice is still worth showing."""
@@ -342,12 +401,17 @@ class AppsTab(QWidget):
 
     def apply_settings(self, settings: config.Settings) -> None:
         self.settings = settings
+        lab_root = settings.resolved_lab_root()
+        for card in self.cards:
+            card.refresh_version(lab_root)
         self.refresh()
 
     def recheck(self) -> None:
         """What the Re-check button does: forget stale notices, then look."""
+        lab_root = self.settings.resolved_lab_root()
         for card in self.cards:
             card.forget_failure()
+            card.refresh_version(lab_root)
         self.refresh()
 
     def refresh(self) -> None:
