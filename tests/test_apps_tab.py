@@ -390,3 +390,24 @@ def test_an_app_without_a_service_says_nothing(qapp, tmp_path, monkeypatch):
 
     assert card.service.text() == ""
     assert card.service.height() or True  # present, just empty
+
+
+def test_the_launchpad_has_a_build_check_and_the_others_do_not(qapp, tmp_path, monkeypatch):
+    """One button, reporting every app. The question it answers is not per-tab,
+    so three copies of it would be noise."""
+    from PySide6.QtWidgets import QPushButton
+
+    from lab_hub import config
+    from ui.apps_tab import AppsTab
+
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    apps = (launcher.ExternalApp("a", "A", "a", "main.py", "s"),)
+
+    with_button = AppsTab(config.Settings(), apps, "Apps", "intro", check_builds=True)
+    without = AppsTab(config.Settings(), apps, "Apps", "intro")
+
+    def labels(tab):
+        return {b.text() for b in tab.findChildren(QPushButton)}
+
+    assert "Check builds" in labels(with_button)
+    assert "Check builds" not in labels(without)

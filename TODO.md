@@ -83,6 +83,13 @@
   `tests/test_tray.py`.
 - [x] `P3` `bug` `@ai` Tab read "Backup_Sync" — Qt treats `&` in a tab label as a
   mnemonic marker. Renamed to "Backup and Sync", with a test forbidding `&` in labels.
+- [x] `P2` `feature` `@ai` **Check builds** — one button on the launchpad, reporting for
+  every registered app whether what Launch would open is the newest thing available. Adds
+  the case the tile's counter cannot see: a checkout with **uncommitted** changes, where
+  the commit count still matches the build because it only moves on commit. Names the
+  build script for anything out of date. A launcher bundle is never out of date and being
+  dirty does not change that — it runs the source, so the edits are what opens.
+  `tests/test_launcher.py`, `tests/test_apps_tab.py`.
 - [x] `P2` `feature` `@ai` **Tiles say which build they would open, and whether it is
   stale.** `launcher.version()` follows the launch path: a frozen bundle answers with the
   `_build_info.json` stamped inside it, a launcher bundle (Sentinel, Imprint) with the

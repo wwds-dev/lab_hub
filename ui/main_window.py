@@ -52,6 +52,7 @@ class MainWindow(QMainWindow):
         self.apps_tab = AppsTab(
             self.settings,
             apps=launcher.SUITES,
+            check_builds=True,
             intro=(
                 "These run in their own window, as their own process — quitting "
                 "Lab Hub leaves them running. An app listed under a suite lives "

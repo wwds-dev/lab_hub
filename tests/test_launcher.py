@@ -746,3 +746,95 @@ def test_a_new_commit_invalidates_the_cached_count(tmp_path, monkeypatch):
     launcher._commit_count(project)
 
     assert len(seen) == 2, "a moved HEAD must be re-read"
+
+
+# ----------------------------------------------------------------------
+# The build report: is what I would open the newest thing there is?
+# ----------------------------------------------------------------------
+def test_a_frozen_bundle_behind_its_source_needs_a_rebuild(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    bundle = make_bundle(tmp_path, "SONAR")
+    _stamp(bundle, build=104)
+    project = _checkout(tmp_path, "sonar", monkeypatch=monkeypatch, build=109)
+    (project / "build_app.sh").write_text("#!/bin/sh\n")
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    row = launcher.build_status(app, tmp_path)
+
+    assert row.verdict == "behind"
+    assert row.needs_rebuild
+    assert row.script.name == "build_app.sh"
+
+
+def test_uncommitted_changes_also_make_a_frozen_build_old(tmp_path, monkeypatch):
+    """The gap the commit count cannot see: it only moves on commit, so a
+    bundle built from the last commit looks level while the source has since
+    been edited."""
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    bundle = make_bundle(tmp_path, "SONAR")
+    _stamp(bundle, build=109)
+    _checkout(tmp_path, "sonar", monkeypatch=monkeypatch, build=109)
+    monkeypatch.setattr(launcher, "dirty_checkout", lambda _project: True)
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    row = launcher.build_status(app, tmp_path)
+
+    assert row.verdict == "uncommitted"
+    assert row.needs_rebuild
+
+
+def test_a_launcher_bundle_is_never_out_of_date(tmp_path, monkeypatch):
+    """It runs the source, so uncommitted edits are what opens — being dirty
+    does not make it stale, it makes it current."""
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    bundle = make_bundle(tmp_path, "Sentinel")
+    (bundle / "Contents" / "Resources").mkdir(parents=True, exist_ok=True)
+    (bundle / "Contents" / "Resources" / "project_root.txt").write_text("/x")
+    _checkout(tmp_path, "sentinel_fork", monkeypatch=monkeypatch, build=55)
+    monkeypatch.setattr(launcher, "dirty_checkout", lambda _project: True)
+    app = launcher.ExternalApp("sf", "Sentinel", "sentinel_fork", "main.py", "")
+
+    row = launcher.build_status(app, tmp_path)
+
+    assert row.verdict == "current"
+    assert not row.needs_rebuild
+
+
+def test_a_clean_frozen_build_is_current(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    bundle = make_bundle(tmp_path, "SONAR")
+    _stamp(bundle, build=109)
+    _checkout(tmp_path, "sonar", monkeypatch=monkeypatch, build=109)
+    monkeypatch.setattr(launcher, "dirty_checkout", lambda _project: False)
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    assert launcher.build_status(app, tmp_path).verdict == "current"
+
+
+def test_an_unstamped_bundle_is_reported_as_uncheckable(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    make_bundle(tmp_path, "Unblock Tracker")
+    _checkout(tmp_path, "unblock", monkeypatch=monkeypatch)
+    app = launcher.ExternalApp("ub", "Unblock Tracker", "unblock", "main.py", "")
+
+    row = launcher.build_status(app, tmp_path)
+
+    assert row.verdict == "unknown"
+    assert not row.needs_rebuild, "unknown is not a claim that it is old"
+
+
+def test_no_checkout_means_nothing_to_compare(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    bundle = make_bundle(tmp_path, "SONAR")
+    _stamp(bundle, build=104)
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    assert launcher.build_status(app, tmp_path).verdict == "missing"
+
+
+def test_the_report_covers_every_registered_app(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+
+    report = launcher.build_report(tmp_path)
+
+    assert len(report) == len(launcher.APPS)

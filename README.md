@@ -118,6 +118,16 @@ points at), so the tile can re-read the version on every poll without a
 `git rev-list` per app every three seconds. A bundle's own number is a single
 small file read.
 
+**Check builds** on the launchpad answers the whole question at once: for every
+registered app, is what the button would open the newest thing there is? It
+reports `behind` (commits since the build), `uncommitted` (edits the commit
+count cannot see — it only moves on commit, so a bundle built from the last
+commit looks level while the source has since been edited), `unknown` (installed
+but carrying no stamp), and names the build script for anything out of date.
+
+A launcher bundle is never out of date, and being dirty does not change that:
+it runs the source, so uncommitted edits are exactly what opens.
+
 **Renaming a launched app means rebuilding Lab Hub.** The registry is compiled
 into this bundle, so until it is rebuilt the tile looks for a bundle name that
 no longer exists, falls back to the checkout, and reads *Source only* — which

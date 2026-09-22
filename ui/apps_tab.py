@@ -336,6 +336,7 @@ class AppsTab(QWidget):
         title: str = "Standalone apps",
         intro: str = LAUNCHPAD_INTRO,
         sections: tuple[tuple[str, str, tuple[launcher.ExternalApp, ...]], ...] | None = None,
+        check_builds: bool = False,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -380,6 +381,16 @@ class AppsTab(QWidget):
         refresh.clicked.connect(self.recheck)
         row = QHBoxLayout()
         row.addWidget(refresh)
+        # One button, on the launchpad only, reporting every registered app.
+        # Three identical copies of it would be noise, and the question it
+        # answers — "am I opening the newest of everything?" — is not per-tab.
+        if check_builds:
+            check = QPushButton("Check builds")
+            check.setToolTip(
+                "Compare every installed app against its source checkout"
+            )
+            check.clicked.connect(self.show_build_report)
+            row.addWidget(check)
         row.addStretch(1)
         column.addLayout(row)
         column.addStretch(1)
@@ -430,6 +441,53 @@ class AppsTab(QWidget):
         for card in self.cards:
             card.refresh_version(lab_root)
         self.refresh()
+
+    def show_build_report(self) -> None:
+        """Say, for every registered app, whether it is the newest available.
+
+        A frozen bundle is only as new as its last build, and two different
+        things can leave it behind: commits since the build, and edits never
+        committed. The commit count sees the first and cannot see the second,
+        so both are checked here.
+        """
+        report = launcher.build_report(self.settings.resolved_lab_root())
+        behind = [row for row in report if row.needs_rebuild]
+        unknown = [row for row in report if row.verdict == "unknown"]
+
+        if behind:
+            headline = (
+                f"{len(behind)} of {len(report)} apps would open something older "
+                "than their source."
+            )
+        elif unknown:
+            headline = (
+                f"Nothing is out of date, but {len(unknown)} could not be checked."
+            )
+        else:
+            headline = "Every app is the newest build of itself."
+
+        lines = []
+        for row in report:
+            mark = {"current": "ok", "behind": "OLD", "uncommitted": "OLD",
+                    "unknown": "??", "missing": "--"}[row.verdict]
+            version = row.version.text or "no version"
+            lines.append(f"[{mark}] {row.app.name} — {version}\n      {row.note}")
+
+        if behind:
+            lines.append("")
+            lines.append("To bring one up to date, run its build script:")
+            for row in behind:
+                if row.script is not None:
+                    lines.append(f"  cd {row.script.parent}  &&  ./{row.script.name}")
+
+        box = QMessageBox(self)
+        box.setWindowTitle("Build check")
+        box.setText(headline)
+        box.setInformativeText("\n".join(lines))
+        box.setIcon(
+            QMessageBox.Icon.Warning if behind else QMessageBox.Icon.Information
+        )
+        box.exec()
 
     def recheck(self) -> None:
         """What the Re-check button does: forget stale notices, then look."""

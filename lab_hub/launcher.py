@@ -588,6 +588,99 @@ def version(app: ExternalApp, lab_root: Path) -> Version:
     return Version()
 
 
+# Where a project keeps the script that rebuilds and installs it. Checked in
+# order; the first that exists is the one to name in the report.
+BUILD_SCRIPTS = ("build_app.sh", "scripts/build_app.sh", "scripts/install_app.sh")
+
+
+def build_script(project: Path) -> Path | None:
+    for name in BUILD_SCRIPTS:
+        candidate = project / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def dirty_checkout(project: Path) -> bool:
+    """Whether the checkout has changes that are not committed.
+
+    The commit count cannot see these — it only moves on commit — so a bundle
+    built from the last commit looks level with its source while the source has
+    since been edited. For a frozen app that is a real gap: those edits are not
+    in what opens. For a launcher bundle it is not, because the edits *are*
+    what opens.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=project, capture_output=True, text=True, timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
+@dataclass(frozen=True)
+class BuildStatus:
+    """One line of the build report."""
+
+    app: ExternalApp
+    version: Version
+    verdict: str  # current | behind | uncommitted | unknown | missing
+    note: str
+    script: Path | None = None
+
+    @property
+    def needs_rebuild(self) -> bool:
+        return self.verdict in ("behind", "uncommitted")
+
+
+def build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
+    """Whether what this tile would open is the newest thing available."""
+    found = version(app, lab_root)
+    project = source_dir(app, lab_root)
+    script = build_script(project) if project is not None else None
+
+    if project is None:
+        return BuildStatus(
+            app, found, "missing",
+            "no checkout here, so there is nothing to compare it against.",
+        )
+    if not found.known:
+        return BuildStatus(
+            app, found, "unknown",
+            "installed, but it carries no build stamp — rebuild it once and it "
+            "will start reporting.", script,
+        )
+    if found.origin == "checkout":
+        # It runs the source, so it opens whatever the source says right now —
+        # uncommitted edits included. It cannot be out of date.
+        return BuildStatus(
+            app, found, "current",
+            "runs the checkout directly, so it is always what the source says.",
+            script,
+        )
+    if found.stale:
+        return BuildStatus(
+            app, found, "behind",
+            f"built at {found.text}, but the source is {found.behind} commits "
+            "further on.", script,
+        )
+    if dirty_checkout(project):
+        return BuildStatus(
+            app, found, "uncommitted",
+            "level with the last commit, but the checkout has uncommitted "
+            "changes that are not in this build.", script,
+        )
+    return BuildStatus(app, found, "current", "matches its source.", script)
+
+
+def build_report(
+    lab_root: Path, apps: tuple[ExternalApp, ...] | None = None
+) -> tuple[BuildStatus, ...]:
+    return tuple(build_status(app, lab_root) for app in (apps or APPS))
+
+
 def status(app: ExternalApp, lab_root: Path) -> tuple[str, str]:
     """A (state, detail) pair for the UI. State is installed/source/missing."""
     bundle = bundle_path(app)
