@@ -53,6 +53,7 @@ A tile shows where its app will start from:
 | Not found | neither; Launch is disabled |
 | Starting… | launched, waiting for it to appear |
 | Running | its process is in the table; the button raises it instead |
+| Did not start | it was launched and never came up — a notice, and it expires |
 | Did not start | it was launched and never came up |
 
 Source runs never use Lab Hub's own interpreter. Frozen, that is this app's
@@ -79,6 +80,17 @@ way silently did nothing at all. `is_launcher_bundle()` recognises one by its
 single-instance guard hands off, brings the running copy forward and exits 0. A
 non-zero exit is reported with the tail of its output rather than swallowed.
 
+**A running app is matched on two paths, not one.** `running_markers()`
+returns the installed bundle's `Contents/MacOS` *and* the checkout's entry
+script, and a hit on either counts. The bundle is not reliably the thing that
+keeps running: Sentinel's is a one-shot launcher that execs the project's own
+python and exits, so moments after a good launch nothing in the process table
+mentions the bundle at all. Matching the bundle alone reported a running
+Sentinel as *Did not start* and went on reporting it for as long as the window
+stayed open. Checking both is also what survives the next change of launcher —
+this one bundle has been a PyInstaller build, an AppleScript applet and a
+compiled C stub inside a month, while the checkout path stayed put.
+
 **Renaming a launched app means rebuilding Lab Hub.** The registry is compiled
 into this bundle, so until it is rebuilt the tile looks for a bundle name that
 no longer exists, falls back to the checkout, and reads *Source only* — which
@@ -96,6 +108,11 @@ the status bar names where the output went — the `log show` predicate for a
 bundle, the captured temp file for a source run. Before this, a child that died
 inside `QApplication()` was indistinguishable from one that started fine: the
 button greyed for a moment and nothing else ever happened.
+
+*Did not start* is a notice about one launch rather than a property of the app,
+so it expires after a minute, and **Re-check** clears it outright. It used to
+persist: a tile could still be reading *Did not start* long after the app had
+been opened and closed again by hand.
 
 ### Backup and Sync
 

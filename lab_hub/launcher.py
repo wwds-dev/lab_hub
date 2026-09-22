@@ -216,28 +216,41 @@ def process_table() -> str:
         return ""
 
 
-def running_marker(app: ExternalApp, lab_root: Path) -> str | None:
-    """The absolute path that appears in the command line of a running copy.
+def running_markers(app: ExternalApp, lab_root: Path) -> tuple[str, ...]:
+    """Absolute paths that identify a running copy on a `ps` command line.
 
-    Installed apps are their bundle executable. Source runs are the entry
-    script, which is why `launch` hands the interpreter an absolute path — with
-    a relative one every project shows up as a bare `python main.py` and they
-    cannot be told apart.
+    Both the bundle and the checkout, and a match on **either** counts —
+    because an installed bundle is not necessarily the process that keeps
+    running. Sentinel's is a one-shot launcher: it execs the project's own
+    python and exits, so moments after a successful launch nothing in the
+    process table mentions the bundle at all, only `<project>/main.py`.
+    Matching the bundle alone reported a running app as *Did not start*, and
+    went on reporting it for as long as the window stayed open.
+
+    Checking both is also what survives the next change of launcher. This
+    bundle has been a PyInstaller build, an AppleScript applet and a compiled
+    C stub inside one month; the checkout path is the stable half.
+
+    Source runs are the entry script, which is why `launch` hands the
+    interpreter an absolute path — with a relative one every project shows up
+    as a bare `python main.py` and they cannot be told apart.
     """
+    markers = []
     bundle = bundle_path(app)
     if bundle is not None:
-        return str(bundle / "Contents" / "MacOS")
+        markers.append(str(bundle / "Contents" / "MacOS"))
     project = source_dir(app, lab_root)
     if project is not None:
-        return str(project / app.entry)
-    return None
+        markers.append(str(project / app.entry))
+    return tuple(markers)
 
 
 def is_running(app: ExternalApp, lab_root: Path, table: str | None = None) -> bool:
-    marker = running_marker(app, lab_root)
-    if marker is None:
+    markers = running_markers(app, lab_root)
+    if not markers:
         return False
-    return marker in (process_table() if table is None else table)
+    snapshot = process_table() if table is None else table
+    return any(marker in snapshot for marker in markers)
 
 
 def can_bring_to_front(app: ExternalApp) -> bool:
@@ -253,14 +266,19 @@ def can_bring_to_front(app: ExternalApp) -> bool:
 def is_launcher_bundle(bundle: Path) -> bool:
     """True when the .app only starts the real GUI in a separate process.
 
-    Sentinel installs a compiled AppleScript applet that runs the project's
-    main.py, so edits go live without a rebuild. macOS then registers two apps:
-    the applet, which owns no window, and the python process, which owns the
-    window. `open -a` reaches the applet — blocked in `do shell script` and deaf
-    to the reopen event — so raising the app that way silently does nothing.
+    An AppleScript applet that runs a project's main.py stays alive inside
+    `do shell script` while the real GUI runs beside it, and it owns no window:
+    `open -a` reaches the applet, which is deaf to the reopen event, so raising
+    the app that way silently does nothing. Self-contained PyInstaller bundles
+    name their executable after the app, so an executable called "applet" is
+    the reliable tell for that shape.
 
-    Self-contained PyInstaller bundles name their executable after the app, so
-    an executable called "applet" is the reliable tell.
+    Sentinel used to be one. As of its V2 installer it is a compiled C stub
+    (`SentinelLauncher`) that execs the project's python and **exits**, leaving
+    no bundle process at all — so `open -a` runs the stub again, the second
+    copy hands off to the running one and quits, and raising works without this
+    path. Verified against the installed app: the pid does not change. Kept for
+    the applets that remain, notably Bug Spray's.
     """
     plist = bundle / "Contents" / "Info.plist"
     try:

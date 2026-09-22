@@ -44,6 +44,12 @@ FAILED_LABEL = ("Did not start", "stateBad")
 # `launcher.launch`, which reports the exit code outright.
 LAUNCH_CONFIRM_SECONDS = 20.0
 
+# How long *Did not start* stays on the tile. It is a notice about one launch,
+# not a property of the app, so it has to expire: leaving it up meant a tile
+# still reading "Did not start" long after the app had been opened and closed
+# again by hand. Pressing Re-check clears it outright.
+FAILURE_NOTICE_SECONDS = 60.0
+
 # Slow enough to be invisible in Activity Monitor, quick enough that the card
 # is right by the time you have finished reading it.
 POLL_MS = 3000
@@ -67,9 +73,9 @@ class AppCard(QWidget):
         self.lab_root = config.DEFAULT_LAB_ROOT
         self.running = False
         # Set while a launch is in flight, cleared the moment the app shows up
-        # in the process table — or turned into `_did_not_start` if it never does.
+        # in the process table — or turned into a failure notice if it never does.
         self._pending_since: float | None = None
-        self._did_not_start = False
+        self._failed_at: float | None = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -142,22 +148,35 @@ class AppCard(QWidget):
             return RUNNING_LABEL
         if self._pending_since is not None:
             return STARTING_LABEL
-        if self._did_not_start:
+        if self._showing_failure():
             return FAILED_LABEL
         return STATE_LABELS[ready.state]
+
+    def _showing_failure(self) -> bool:
+        """Whether the last launch's failure notice is still worth showing."""
+        if self._failed_at is None:
+            return False
+        if time.monotonic() - self._failed_at > FAILURE_NOTICE_SECONDS:
+            self._failed_at = None
+            return False
+        return True
+
+    def forget_failure(self) -> None:
+        """Drop the failure notice. Re-check asks for the state as it is now."""
+        self._failed_at = None
 
     def _settle_pending_launch(self) -> None:
         """Decide whether a launch we started has come up, or never will."""
         if self.running:
             self._pending_since = None
-            self._did_not_start = False
+            self._failed_at = None
             return
         if self._pending_since is None:
             return
         if time.monotonic() - self._pending_since <= LAUNCH_CONFIRM_SECONDS:
             return
         self._pending_since = None
-        self._did_not_start = True
+        self._failed_at = time.monotonic()
         self.start_failed.emit(
             f"{self.app.name} was started but never came up. "
             f"Look in {launcher.startup_log_hint(self.app)}"
@@ -208,7 +227,7 @@ class AppCard(QWidget):
             # `launch` returning only means the app was started, not that it
             # stayed up. The card watches for it to appear from here.
             self._pending_since = time.monotonic()
-            self._did_not_start = False
+            self._failed_at = None
             self.refresh(self.lab_root)
         self.launched.emit(message)
 
@@ -274,7 +293,7 @@ class AppsTab(QWidget):
 
         refresh = QPushButton("Re-check")
         refresh.setToolTip("Look again for installed apps and source checkouts")
-        refresh.clicked.connect(self.refresh)
+        refresh.clicked.connect(self.recheck)
         row = QHBoxLayout()
         row.addWidget(refresh)
         row.addStretch(1)
@@ -323,6 +342,12 @@ class AppsTab(QWidget):
 
     def apply_settings(self, settings: config.Settings) -> None:
         self.settings = settings
+        self.refresh()
+
+    def recheck(self) -> None:
+        """What the Re-check button does: forget stale notices, then look."""
+        for card in self.cards:
+            card.forget_failure()
         self.refresh()
 
     def refresh(self) -> None:

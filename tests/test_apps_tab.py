@@ -241,3 +241,88 @@ def test_an_app_with_no_interpreter_cannot_be_launched(qapp, tmp_path, monkeypat
     assert not card.launch_button.isEnabled()
     assert "no interpreter" in card.launch_button.toolTip()
     assert "no interpreter" in card.detail.text(), "say why, where it is read"
+
+
+# ----------------------------------------------------------------------
+# "Did not start" is a notice about one launch, not a permanent verdict
+# ----------------------------------------------------------------------
+def test_the_failure_notice_expires(qapp, tmp_path, monkeypatch):
+    """It outlived its subject: the tile still said *Did not start* after the
+    app had been opened and closed again by hand."""
+    import time
+
+    from ui.apps_tab import FAILURE_NOTICE_SECONDS, LAUNCH_CONFIRM_SECONDS
+
+    app = _installed(tmp_path, monkeypatch)
+    card = AppCard(app)
+    card._pending_since = time.monotonic() - LAUNCH_CONFIRM_SECONDS - 1
+    card.refresh(tmp_path, table="/bin/zsh\n")
+    assert card.state.text() == "Did not start"
+
+    card._failed_at -= FAILURE_NOTICE_SECONDS + 1
+    card.refresh(tmp_path, table="/bin/zsh\n")
+
+    assert card.state.text() == "Installed"
+
+
+def test_the_notice_stays_up_long_enough_to_read(qapp, tmp_path, monkeypatch):
+    import time
+
+    from ui.apps_tab import LAUNCH_CONFIRM_SECONDS
+
+    app = _installed(tmp_path, monkeypatch)
+    card = AppCard(app)
+    card._pending_since = time.monotonic() - LAUNCH_CONFIRM_SECONDS - 1
+
+    card.refresh(tmp_path, table="/bin/zsh\n")
+    card.refresh(tmp_path, table="/bin/zsh\n")
+
+    assert card.state.text() == "Did not start", "one poll must not clear it"
+
+
+def test_forgetting_the_failure_restores_the_real_state(qapp, tmp_path, monkeypatch):
+    import time
+
+    from ui.apps_tab import LAUNCH_CONFIRM_SECONDS
+
+    app = _installed(tmp_path, monkeypatch)
+    card = AppCard(app)
+    card._pending_since = time.monotonic() - LAUNCH_CONFIRM_SECONDS - 1
+    card.refresh(tmp_path, table="/bin/zsh\n")
+
+    card.forget_failure()
+    card.refresh(tmp_path, table="/bin/zsh\n")
+
+    assert card.state.text() == "Installed"
+
+
+def test_re_check_clears_the_notices(qapp, tmp_path, monkeypatch):
+    """Re-check means "tell me what is true now"."""
+    import time
+
+    from ui.apps_tab import LAUNCH_CONFIRM_SECONDS
+
+    tab = _tab(qapp, tmp_path, monkeypatch)
+    for card in tab.cards:
+        card._pending_since = time.monotonic() - LAUNCH_CONFIRM_SECONDS - 1
+    tab.refresh()
+    assert all(card.state.text() == "Did not start" for card in tab.cards)
+
+    tab.recheck()
+
+    assert not any(card.state.text() == "Did not start" for card in tab.cards)
+
+
+def test_an_app_that_shows_up_late_clears_the_notice(qapp, tmp_path, monkeypatch):
+    import time
+
+    from ui.apps_tab import LAUNCH_CONFIRM_SECONDS
+
+    app = _installed(tmp_path, monkeypatch)
+    card = AppCard(app)
+    card._pending_since = time.monotonic() - LAUNCH_CONFIRM_SECONDS - 1
+    card.refresh(tmp_path, table="/bin/zsh\n")
+
+    card.refresh(tmp_path, table=f"{tmp_path}/SONAR.app/Contents/MacOS/SONAR\n")
+
+    assert card.state.text() == "Running"

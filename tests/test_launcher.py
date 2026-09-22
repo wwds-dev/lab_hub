@@ -336,3 +336,68 @@ def test_the_log_hint_for_a_source_run_is_the_captured_file(tmp_path, monkeypatc
     app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
 
     assert launcher.startup_log_hint(app) == str(launcher.launch_log(app))
+
+
+# ----------------------------------------------------------------------
+# Spotting a running copy when the bundle is not the process
+# ----------------------------------------------------------------------
+def test_an_installed_app_running_from_its_checkout_counts_as_running(
+    tmp_path, monkeypatch
+):
+    """The *Did not start* bug, in one assertion.
+
+    Sentinel's bundle is a one-shot launcher: it execs the project's python and
+    exits, so seconds after a good launch the only thing in the process table
+    is `<project>/main.py`. Matching the bundle alone called a running app
+    dead, and kept saying so until the window was closed.
+    """
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    make_bundle(tmp_path, "Sentinel")
+    _project(tmp_path, "sentinel_fork")
+    app = launcher.ExternalApp("sf", "Sentinel", "sentinel_fork", "main.py", "")
+    table = (
+        "/bin/zsh\n"
+        f"{tmp_path}/sentinel_fork/.venv/bin/python {tmp_path}/sentinel_fork/main.py\n"
+    )
+
+    assert launcher.is_running(app, tmp_path, table)
+
+
+def test_the_bundle_still_counts_on_its_own(tmp_path, monkeypatch):
+    """A self-contained bundle keeps its own process; that must still match."""
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    make_bundle(tmp_path, "SONAR")
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    assert launcher.is_running(
+        app, tmp_path, f"{tmp_path}/SONAR.app/Contents/MacOS/SONAR\n"
+    )
+
+
+def test_both_markers_are_offered_when_both_exist(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    make_bundle(tmp_path, "Sentinel")
+    _project(tmp_path, "sentinel_fork")
+    app = launcher.ExternalApp("sf", "Sentinel", "sentinel_fork", "main.py", "")
+
+    markers = launcher.running_markers(app, tmp_path)
+
+    assert str(tmp_path / "Sentinel.app" / "Contents" / "MacOS") in markers
+    assert str(tmp_path / "sentinel_fork" / "main.py") in markers
+
+
+def test_an_unrelated_process_is_not_mistaken_for_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    make_bundle(tmp_path, "Sentinel")
+    _project(tmp_path, "sentinel_fork")
+    app = launcher.ExternalApp("sf", "Sentinel", "sentinel_fork", "main.py", "")
+
+    assert not launcher.is_running(app, tmp_path, "/bin/zsh\n/usr/bin/python main.py\n")
+
+
+def test_nothing_to_match_means_not_running(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    app = launcher.ExternalApp("ghost", "Ghost", "ghost", "main.py", "")
+
+    assert launcher.running_markers(app, tmp_path) == ()
+    assert not launcher.is_running(app, tmp_path, "anything at all\n")

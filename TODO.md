@@ -83,6 +83,19 @@
   `tests/test_tray.py`.
 - [x] `P3` `bug` `@ai` Tab read "Backup_Sync" — Qt treats `&` in a tab label as a
   mnemonic marker. Renamed to "Backup and Sync", with a test forbidding `&` in labels.
+- [x] `P0` `bug` `@ai` **A running Sentinel showed as *Did not start*, and stayed that
+  way.** Two faults, reported together. `running_marker()` matched the installed bundle's
+  `Contents/MacOS` and nothing else, but Sentinel's bundle is a one-shot C stub
+  (`SentinelLauncher`) that execs the project's python and exits — so moments after a good
+  launch the only thing in the process table is `<project>/main.py`, and the tile called a
+  visibly running app dead. `running_markers()` now returns bundle *and* entry script and
+  matches either, which is also what survives the next change of launcher: this bundle has
+  been a PyInstaller build, an applet and a C stub inside one month. Second fault: *Did not
+  start* never cleared, because it only cleared on seeing the app run — so it outlived the
+  app being opened and closed by hand. It is a notice about one launch, not a property of
+  the app, so it expires after `FAILURE_NOTICE_SECONDS` and **Re-check** now clears it
+  outright. Verified against the real `ps` table with Sentinel up.
+  `tests/test_launcher.py`, `tests/test_apps_tab.py`.
 - [x] `P1` `bug` `@ai` **Raising a launcher-bundle app did nothing.** Sentinel's
   `/Applications/Sentinel.app` is a compiled AppleScript applet that starts the real GUI
   as a separate process, so macOS registers two apps: the applet, which owns no window,
