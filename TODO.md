@@ -83,6 +83,18 @@
   `tests/test_tray.py`.
 - [x] `P3` `bug` `@ai` Tab read "Backup_Sync" — Qt treats `&` in a tab label as a
   mnemonic marker. Renamed to "Backup and Sync", with a test forbidding `&` in labels.
+- [x] `P1` `bug` `@ai` **SONAR's headless agent made its tile read *Running* forever.**
+  Fallout from the fix below: once the checkout's entry script became a marker, SONAR's
+  launchd agent — `main.py --headless`, running around the clock — matched it, so the tile
+  claimed the app was open even when it had been properly quit, and offered to raise a
+  window that did not exist. Command lines carrying a `NO_WINDOW_FLAGS` flag are now
+  skipped, and matching is per line rather than across the whole `ps` snapshot so one
+  process's flag cannot discount another's. `--background` is deliberately excluded from
+  that list: it is the whole app with its window hidden, which is how Lab Hub starts
+  Backup Control Center and git_autosync, and calling those stopped would offer a Launch
+  button that starts a second copy. Verified live, before and after, against the real
+  agent. Note the *reported* symptom was not this: SONAR's close button hides to the menu
+  bar, so the app genuinely was still running at the time. `tests/test_launcher.py`.
 - [x] `P0` `bug` `@ai` **A running Sentinel showed as *Did not start*, and stayed that
   way.** Two faults, reported together. `running_marker()` matched the installed bundle's
   `Contents/MacOS` and nothing else, but Sentinel's bundle is a one-shot C stub

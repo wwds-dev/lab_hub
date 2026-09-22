@@ -401,3 +401,61 @@ def test_nothing_to_match_means_not_running(tmp_path, monkeypatch):
 
     assert launcher.running_markers(app, tmp_path) == ()
     assert not launcher.is_running(app, tmp_path, "anything at all\n")
+
+
+# ----------------------------------------------------------------------
+# A headless daemon is not an open app
+# ----------------------------------------------------------------------
+def _sonar(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    make_bundle(tmp_path, "SONAR")
+    _project(tmp_path, "sonar")
+    return launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+
+def test_a_headless_daemon_does_not_count_as_running(tmp_path, monkeypatch):
+    """SONAR's launchd agent runs `main.py --headless` around the clock.
+
+    It matches the entry script, so once the checkout became a marker it made
+    the tile read *Running* permanently — offering to raise a window that does
+    not exist, even with the app properly quit.
+    """
+    app = _sonar(tmp_path, monkeypatch)
+    table = f"{tmp_path}/sonar/.venv/bin/python {tmp_path}/sonar/main.py --headless --port 8787\n"
+
+    assert not launcher.is_running(app, tmp_path, table)
+
+
+def test_the_real_app_still_counts_beside_the_daemon(tmp_path, monkeypatch):
+    app = _sonar(tmp_path, monkeypatch)
+    table = (
+        f"{tmp_path}/sonar/.venv/bin/python {tmp_path}/sonar/main.py --headless\n"
+        f"{tmp_path}/SONAR.app/Contents/MacOS/SONAR\n"
+    )
+
+    assert launcher.is_running(app, tmp_path, table)
+
+
+def test_a_background_start_is_running(tmp_path, monkeypatch):
+    """`--background` is the whole app with its window hidden, not a daemon.
+
+    It is how Lab Hub starts Backup Control Center and git_autosync itself, and
+    they live in the menu bar and can be raised. Calling them stopped would
+    offer a Launch button that starts a second copy.
+    """
+    app = _sonar(tmp_path, monkeypatch)
+    table = f"{tmp_path}/SONAR.app/Contents/MacOS/SONAR --background\n"
+
+    assert launcher.is_running(app, tmp_path, table)
+
+
+def test_a_flag_on_one_line_does_not_discount_another(tmp_path, monkeypatch):
+    """Matching is per command line; a table-wide search would see the flag
+    anywhere in the snapshot and discount every app at once."""
+    app = _sonar(tmp_path, monkeypatch)
+    table = (
+        "/usr/bin/something --headless\n"
+        f"{tmp_path}/SONAR.app/Contents/MacOS/SONAR\n"
+    )
+
+    assert launcher.is_running(app, tmp_path, table)

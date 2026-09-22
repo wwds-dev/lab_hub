@@ -91,6 +91,21 @@ stayed open. Checking both is also what survives the next change of launcher —
 this one bundle has been a PyInstaller build, an AppleScript applet and a
 compiled C stub inside a month, while the checkout path stayed put.
 
+**A headless daemon is not an open app.** A command line carrying a flag in
+`NO_WINDOW_FLAGS` (`--headless`) is skipped: SONAR ships a launchd agent running
+`main.py --headless` around the clock, and once the checkout became a marker
+that agent alone made the tile read *Running* permanently — offering to raise a
+window that does not exist. `--background` is deliberately not in that list; it
+is the whole app started with its window hidden, which is how Lab Hub starts
+Backup Control Center and git_autosync, and those can be raised. Matching is
+done per command line rather than across the whole snapshot, so a flag on one
+process cannot discount another.
+
+**"Running" can outlive the window, legitimately.** SONAR and Lab Hub both hide
+to the menu bar on close and quit only from there, so closing the window leaves
+the process up and the tile correctly says *Running*. That is not a stale tile;
+*Bring to front* will bring the window back.
+
 **Renaming a launched app means rebuilding Lab Hub.** The registry is compiled
 into this bundle, so until it is rebuilt the tile looks for a bundle name that
 no longer exists, falls back to the checkout, and reads *Source only* — which

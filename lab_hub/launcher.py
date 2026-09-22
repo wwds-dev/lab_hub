@@ -245,12 +245,39 @@ def running_markers(app: ExternalApp, lab_root: Path) -> tuple[str, ...]:
     return tuple(markers)
 
 
+# A process started with one of these has no window and never will, so it is
+# not an answer to "is this app open?" — the tile's button raises a window.
+# SONAR ships a launchd agent running `main.py --headless`, which keeps settling
+# hours around the clock; matching the entry script alone meant that agent made
+# the tile read *Running* permanently, offering to raise a window that does not
+# exist even when the app had been properly quit.
+#
+# `--background` is deliberately NOT in this list. That is the whole app started
+# without showing its window — it lives in the menu bar and can be raised, and
+# it is how Lab Hub itself starts Backup Control Center and git_autosync. Those
+# are running, and calling them stopped would offer a Launch button that starts
+# a second copy.
+NO_WINDOW_FLAGS = ("--headless",)
+
+
 def is_running(app: ExternalApp, lab_root: Path, table: str | None = None) -> bool:
+    """Whether a copy with a window is up — line by line, not table-wide.
+
+    Matched against each command line separately so a flag on one process
+    cannot be read off another's: a substring search over the whole snapshot
+    would see `--headless` anywhere in it and discount every app at once.
+    """
     markers = running_markers(app, lab_root)
     if not markers:
         return False
     snapshot = process_table() if table is None else table
-    return any(marker in snapshot for marker in markers)
+    for line in snapshot.splitlines():
+        if not any(marker in line for marker in markers):
+            continue
+        if any(flag in line for flag in NO_WINDOW_FLAGS):
+            continue
+        return True
+    return False
 
 
 def can_bring_to_front(app: ExternalApp) -> bool:
