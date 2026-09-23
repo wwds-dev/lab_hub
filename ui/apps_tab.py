@@ -498,6 +498,12 @@ class AppsTab(QWidget):
             terminal = box.addButton(
                 "Copy and open Terminal", QMessageBox.ButtonRole.ActionRole
             )
+        # A QMessageBox whose only buttons are ActionRole has nothing to map the
+        # red close button or Escape onto, so both become dead and the dialog
+        # cannot be dismissed at all. Give it an explicit way out.
+        close = box.addButton("Close", QMessageBox.ButtonRole.RejectRole)
+        box.setEscapeButton(close)
+        box.setDefaultButton(close)
         box.exec()
         clicked = box.clickedButton()
         if clicked is not None and clicked in (copy, terminal):

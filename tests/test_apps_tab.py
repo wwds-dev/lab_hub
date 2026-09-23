@@ -429,3 +429,22 @@ def test_copying_the_commands_puts_them_on_the_clipboard(qapp, tmp_path, monkeyp
 
     assert QApplication.clipboard().text() == "cd /x && ./build_app.sh --install"
     assert said and "clipboard" in said[0]
+
+
+def test_build_check_dialog_can_be_dismissed(qapp_or_none=None):
+    """A QMessageBox whose only buttons are ActionRole has nothing to map the
+    red close button or Escape onto — it becomes impossible to dismiss."""
+    from PySide6.QtWidgets import QApplication, QMessageBox
+
+    app = QApplication.instance() or QApplication([])
+    box = QMessageBox()
+    box.addButton("Copy commands", QMessageBox.ButtonRole.ActionRole)
+    box.addButton("Copy and open Terminal", QMessageBox.ButtonRole.ActionRole)
+    close = box.addButton("Close", QMessageBox.ButtonRole.RejectRole)
+    box.setEscapeButton(close)
+
+    box.show()
+    app.processEvents()
+    assert box.close(), "dialog refused to close"
+    app.processEvents()
+    assert not box.isVisible()
