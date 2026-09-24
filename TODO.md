@@ -194,6 +194,11 @@
 - [ ] `P2` `design` `@ai` Load the app registry from a file rather than compiling it into
   the bundle, so renaming a launched app does not need a Lab Hub rebuild to stop the tile
   reading *Source only*. SUGGESTIONS #11.
+- [x] `P2` `bug` `@ai` **The Check builds report dialog could not be dismissed.** A
+  `QMessageBox` whose only buttons are `ActionRole` (Copy commands / Copy and open
+  Terminal) has nothing to map the red close button or Escape onto, so both were dead
+  ends. Added an explicit `Close` button (`RejectRole`, also the escape/default button).
+  `tests/test_apps_tab.py::test_build_check_dialog_can_be_dismissed`.
 
 ## Out of scope, deliberately
 

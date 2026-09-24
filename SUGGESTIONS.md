@@ -30,3 +30,4 @@ Status: `IDEA` · `CONSIDERING` · `PLANNED` · `DONE` · `REJECTED`
 | Backup & Sync tab split out of Apps; Narrator tab added to Tools | Aug 2026 |
 | Narrator Library sub-tab — browse the ebook catalogue, mark read/queued, filter to narrated books, load straight into Convert | Sep 2026 |
 | Dock icon follows the window (hidden while no window is open); tray-menu and app-launch reopen suppression so using the menu bar doesn't reactivate Lab Hub's own window | Sep 2026 |
+| Fixed the Check builds report dialog being impossible to dismiss (no Escape/close-button route when every button was ActionRole) | Sep 2026 |
