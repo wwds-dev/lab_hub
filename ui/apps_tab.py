@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtCore import QProcess, QProcessEnvironment, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
+    QDialog,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -325,6 +328,135 @@ LAUNCHPAD_INTRO = (
 )
 
 
+class RebuildDialog(QDialog):
+    """Run the rebuild commands in-app, one after another, showing their output.
+
+    The build report used to only *hand over* the commands, on the reasoning
+    that a rebuild takes minutes and you want somewhere to watch it and stop it.
+    This keeps both of those — a live log and a Cancel button that kills the
+    running build — without leaving Lab Hub, which is the whole point of a
+    button that says "Update now". The Terminal handoff stays for anyone who
+    would rather drive it themselves.
+
+    Each command is its own `cd … && ./build_app.sh`, so they are independent;
+    one that fails stops the run rather than rebuilding on top of a broken
+    build. They run through a login shell (`$SHELL -lc`) because that is the
+    environment the Terminal handoff always assumed — the build scripts reach
+    for `pyinstaller`, `uv` and friends that a bundle's bare PATH would miss —
+    and with `child_env()` so a rebuild is not poisoned by our own Qt runtime,
+    exactly as a real launch is.
+    """
+
+    def __init__(self, commands: list[str], parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Update apps")
+        self._commands = list(commands)
+        self._index = 0
+        self._cancelled = False
+        self._failed = False
+
+        layout = QVBoxLayout(self)
+        self._status = QLabel()
+        layout.addWidget(self._status)
+        self._log = QPlainTextEdit()
+        self._log.setReadOnly(True)
+        self._log.setMinimumSize(560, 320)
+        self._log.setObjectName("hint")
+        layout.addWidget(self._log)
+        self._button = QPushButton("Cancel")
+        self._button.clicked.connect(self._on_button)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        row.addWidget(self._button)
+        layout.addLayout(row)
+
+        self._proc = QProcess(self)
+        env = QProcessEnvironment()
+        for name, value in launcher.child_env().items():
+            env.insert(name, value)
+        self._proc.setProcessEnvironment(env)
+        self._proc.setProcessChannelMode(
+            QProcess.ProcessChannelMode.MergedChannels
+        )
+        self._proc.readyReadStandardOutput.connect(self._read)
+        self._proc.finished.connect(self._finished)
+
+        # Start once the dialog is actually on screen, so the first line of
+        # output has somewhere to land.
+        QTimer.singleShot(0, self._start_next)
+
+    @property
+    def succeeded(self) -> bool:
+        return not self._cancelled and not self._failed and self._index >= len(
+            self._commands
+        )
+
+    def _shell(self) -> str:
+        return os.environ.get("SHELL", "/bin/zsh")
+
+    def _start_next(self) -> None:
+        if self._cancelled or self._index >= len(self._commands):
+            self._all_done()
+            return
+        command = self._commands[self._index]
+        self._append(f"$ {command}\n")
+        self._status.setText(
+            f"Rebuilding {self._index + 1} of {len(self._commands)}… "
+            "this takes a few minutes."
+        )
+        self._proc.start(self._shell(), ["-lc", command])
+
+    def _read(self) -> None:
+        chunk = bytes(self._proc.readAllStandardOutput()).decode(errors="replace")
+        self._append(chunk)
+
+    def _append(self, text: str) -> None:
+        self._log.moveCursor(self._log.textCursor().MoveOperation.End)
+        self._log.insertPlainText(text)
+        bar = self._log.verticalScrollBar()
+        bar.setValue(bar.maximum())
+
+    def _finished(self, code: int, _status: object) -> None:
+        if self._cancelled:
+            self._all_done()
+            return
+        if code != 0:
+            self._failed = True
+            self._append(f"\n[stopped — a rebuild exited with code {code}]\n")
+            self._all_done()
+            return
+        self._index += 1
+        self._start_next()
+
+    def _on_button(self) -> None:
+        # One button, two jobs: it cancels a running build and closes a
+        # finished one. There is never a moment where both apply.
+        if self._proc.state() != QProcess.ProcessState.NotRunning:
+            self._cancelled = True
+            self._append("\n[cancelled — the running build was stopped]\n")
+            self._proc.kill()
+        else:
+            self.accept()
+
+    def _all_done(self) -> None:
+        if self._cancelled:
+            self._status.setText("Cancelled. Some apps may still be out of date.")
+        elif self._failed:
+            self._status.setText("A rebuild failed — see the log above.")
+        else:
+            self._status.setText("Done. Every app was rebuilt and reinstalled.")
+        self._button.setText("Close")
+
+    def closeEvent(self, event: object) -> None:  # noqa: N802 (Qt override)
+        # Closing the window mid-build must not leave a detached rebuild
+        # running with nothing watching it.
+        if self._proc.state() != QProcess.ProcessState.NotRunning:
+            self._cancelled = True
+            self._proc.kill()
+            self._proc.waitForFinished(3000)
+        super().closeEvent(event)
+
+
 class AppsTab(QWidget):
     """A page of launch cards. Used for the launchpad and for one-off apps."""
 
@@ -488,12 +620,15 @@ class AppsTab(QWidget):
         box.setIcon(
             QMessageBox.Icon.Warning if behind else QMessageBox.Icon.Information
         )
-        # Lab Hub hands over the command rather than running it. A rebuild
-        # replaces an installed app and takes minutes; the terminal is where
-        # you can see it working and stop it, and a copy button is the whole
-        # distance between "there is a command" and "I have the command".
-        copy = terminal = None
+        # Update now runs the rebuilds here; the two copy buttons still hand the
+        # commands off for anyone who would rather drive them in a terminal. A
+        # rebuild replaces an installed app and takes minutes — the difference
+        # the buttons make is between "there is a command" and "it is running".
+        update = copy = terminal = None
         if commands:
+            update = box.addButton(
+                "Update now", QMessageBox.ButtonRole.AcceptRole
+            )
             copy = box.addButton("Copy commands", QMessageBox.ButtonRole.ActionRole)
             terminal = box.addButton(
                 "Copy and open Terminal", QMessageBox.ButtonRole.ActionRole
@@ -503,7 +638,7 @@ class AppsTab(QWidget):
         # cannot be dismissed at all. Give it an explicit way out.
         close = box.addButton("Close", QMessageBox.ButtonRole.RejectRole)
         box.setEscapeButton(close)
-        box.setDefaultButton(close)
+        box.setDefaultButton(update or close)
         box.exec()
         clicked = box.clickedButton()
         if clicked is not None and clicked in (copy, terminal):
@@ -513,6 +648,24 @@ class AppsTab(QWidget):
             # opens does not change what they do — it only has to be somewhere
             # sensible to land.
             launcher.open_terminal(self.settings.resolved_lab_root())
+        if update is not None and clicked is update:
+            self.run_updates(commands)
+
+    def run_updates(self, commands: list[str]) -> None:
+        """Rebuild and reinstall the out-of-date apps without leaving Lab Hub.
+
+        Whatever the outcome, re-check versions afterwards so the tiles stop
+        saying "behind" the moment a rebuild lands — a cancelled or partial run
+        simply leaves the ones it did not reach still saying so, which is true.
+        """
+        dialog = RebuildDialog(commands, self)
+        dialog.exec()
+        self.recheck()
+        if dialog.succeeded:
+            self.launched.emit(
+                f"Rebuilt and reinstalled {len(commands)} app"
+                f"{'' if len(commands) == 1 else 's'}."
+            )
 
     def copy_commands(self, commands: list[str]) -> None:
         """Put the rebuild commands on the clipboard, one per line."""

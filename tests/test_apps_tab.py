@@ -431,6 +431,96 @@ def test_copying_the_commands_puts_them_on_the_clipboard(qapp, tmp_path, monkeyp
     assert said and "clipboard" in said[0]
 
 
+def _pump_until(qapp, predicate, timeout_ms=15000):
+    """Run the event loop until `predicate()` is true or the timeout elapses."""
+    import time as _time
+
+    from PySide6.QtWidgets import QApplication
+
+    deadline = _time.monotonic() + timeout_ms / 1000
+    while not predicate() and _time.monotonic() < deadline:
+        QApplication.processEvents()
+        _time.sleep(0.01)
+    return predicate()
+
+
+def test_the_update_button_shows_only_when_something_is_behind(
+    qapp, tmp_path, monkeypatch
+):
+    """Nothing to rebuild, no rebuild button — the same reason the copy buttons
+    only appear when there is a command to copy."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from lab_hub import config
+    from ui.apps_tab import AppsTab
+
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    apps = (launcher.ExternalApp("a", "A", "a", "main.py", "s"),)
+    tab = AppsTab(config.Settings(), apps, "Apps", "intro", check_builds=True)
+
+    seen = {}
+
+    def capture(box):
+        seen["labels"] = {b.text() for b in box.buttons()}
+
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: capture(self))
+
+    # A checkout that is level with its source: no command, so no Update now.
+    monkeypatch.setattr(
+        launcher,
+        "build_report",
+        lambda root: (
+            launcher.BuildStatus(
+                apps[0], launcher.Version(), "current", "matches its source.",
+            ),
+        ),
+    )
+    tab.show_build_report()
+    assert "Update now" not in seen["labels"]
+
+    # One behind, with a command to run: Update now appears.
+    monkeypatch.setattr(
+        launcher,
+        "build_report",
+        lambda root: (
+            launcher.BuildStatus(
+                apps[0], launcher.Version(), "behind", "built older.",
+                None, "cd /x && ./build_app.sh",
+            ),
+        ),
+    )
+    tab.show_build_report()
+    assert "Update now" in seen["labels"]
+
+
+def test_the_rebuild_dialog_runs_the_commands_in_order(qapp):
+    """Two commands, both succeed, both show up in the log — and `succeeded`
+    reports the run as clean."""
+    from ui.apps_tab import RebuildDialog
+
+    dialog = RebuildDialog(["echo first-command", "echo second-command"])
+    dialog.show()
+    assert _pump_until(qapp, lambda: dialog._button.text() == "Close")
+    log = dialog._log.toPlainText()
+    assert "first-command" in log and "second-command" in log
+    assert dialog.succeeded
+    dialog.close()
+
+
+def test_a_failed_rebuild_stops_the_run(qapp):
+    """A command that exits non-zero halts the run rather than rebuilding on top
+    of a broken build — the later command never runs."""
+    from ui.apps_tab import RebuildDialog
+
+    dialog = RebuildDialog(["false", "echo should-not-run"])
+    dialog.show()
+    assert _pump_until(qapp, lambda: dialog._button.text() == "Close")
+    log = dialog._log.toPlainText()
+    assert "should-not-run" not in log
+    assert not dialog.succeeded
+    dialog.close()
+
+
 def test_build_check_dialog_can_be_dismissed(qapp_or_none=None):
     """A QMessageBox whose only buttons are ActionRole has nothing to map the
     red close button or Escape onto — it becomes impossible to dismiss."""
