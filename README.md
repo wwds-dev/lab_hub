@@ -440,3 +440,9 @@ exactly the moment someone is asking.
 This is the lab-wide scheme, shared with `imprint`, `sonar` and `lab_hub`, and
 the Lab Project Monitor computes the same string from the same two inputs, so
 the dashboard and the running app cannot disagree.
+## Housekeeping
+
+`_to_delete/` holds a stray, empty `.git/index.lock` file quarantined from an
+earlier device-bridge session (the bridge's shell can create a transient lock
+during a read-only `git status`/`git diff` call but cannot delete it
+afterward). It is 0 bytes and safe to delete by hand.
