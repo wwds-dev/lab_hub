@@ -153,12 +153,27 @@ UTILITIES: tuple[ExternalApp, ...] = (
     ),
 )
 
+# Launched from their own card at the end of the Tools tab and nowhere else:
+# no Apps tile and no menu bar entry. That is the user's call (2026-09-27) —
+# a standalone app kept off the front page, not a sub-module of anything.
+TOOLS_ONLY_APPS: tuple[ExternalApp, ...] = (
+    ExternalApp(
+        key="backstage",
+        name="Backstage",
+        project="backstage",
+        entry="main.py",
+        summary="Venture analytics: market signals, bounded pricing tests and "
+        "the records behind them.",
+    ),
+)
+
 # Every launchable app. There is no nesting any more, so this is simply the
-# three groups in order — the menu bar and the self-test both read it.
+# groups in order. The menu bar reads MENU_BAR_APPS; the self-test, the build
+# report and Settings read APPS, which also covers the Tools-only apps.
 PRIMARY_APPS: tuple[ExternalApp, ...] = SUITES
 MENU_BAR_APPS: tuple[ExternalApp, ...] = SUITES + BACKUP_SYNC_APPS + UTILITIES
 LAUNCHPAD: tuple[ExternalApp, ...] = MENU_BAR_APPS
-APPS: tuple[ExternalApp, ...] = LAUNCHPAD
+APPS: tuple[ExternalApp, ...] = LAUNCHPAD + TOOLS_ONLY_APPS
 
 
 def bundle_path(app: ExternalApp) -> Path | None:

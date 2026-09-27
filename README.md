@@ -11,9 +11,9 @@ The projects behind this app do not want the same treatment, so they do not get
 it.
 
 **Launched, not embedded.** Sentinel, Imprint, SONAR, Backup Control Center,
-git_autosync and Unblock Tracker are complete PySide6 applications — own window,
-own settings, own background work, own lifecycle. Embedding them would mean
-nesting six apps' worth of UI and state inside a seventh, and every one of them is
+git_autosync, Unblock Tracker and Backstage are complete PySide6 applications — own
+window, own settings, own background work, own lifecycle. Embedding them would mean
+nesting seven apps' worth of UI and state inside an eighth, and every one of them is
 something you leave running. Lab Hub starts them as separate processes: quit it
 and they keep going. Their internal agents are *their* business, not Lab Hub's.
 
@@ -173,7 +173,8 @@ renders "Backup & Sync" as "Backup _Sync".
 ### Tools
 
 The built-in utilities and occasional standalone tools are grouped under one
-tab: **Convert Files**, **Narrator**, **Prepare Images**, and **Unblock Tracker**.
+tab: **Convert Files**, **Narrator**, **Prepare Images**, **Unblock Tracker** and
+**Backstage**.
 
 #### Convert Files
 Any document format Calibre reads into any format it writes — **47 in, 19 out**.
@@ -250,6 +251,14 @@ Three tools sharing one log:
 
 An occasional standalone tool, kept with the other tools rather than competing
 with the main launchpad apps.
+
+#### Backstage
+
+A standalone app with its own repository, launched from its card at the end of
+Tools and **nowhere else**: no Apps tile and no menu bar entry, by the user's
+choice (2026-09-27). It lives in `launcher.TOOLS_ONLY_APPS`, which the menu bar
+does not read and `launcher.APPS` — the self-test, the build report, Settings —
+does; `tests/test_tab_groups.py` pins both halves.
 
 ### Settings
 Only the lab folder, and only because it cannot always be inferred: launching an
