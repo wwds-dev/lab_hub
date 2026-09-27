@@ -28,8 +28,18 @@ def test_backup_and_sync_apps_have_their_own_tab(window):
 def test_tools_include_built_in_tools_and_unblock_tracker(window):
     assert [
         window.tools_tabs.tabText(i) for i in range(window.tools_tabs.count())
-    ] == ["Convert Files", "Narrator", "Prepare Images", "Unblock Tracker"]
+    ] == ["Convert Files", "Narrator", "Prepare Images", "Unblock Tracker", "Backstage"]
     assert _keys(window.unblock_tracker_tab) == ["unblock_tracker"]
+
+
+def test_backstage_lives_only_at_the_end_of_tools(window):
+    """Backstage is a standalone app kept off the front page (the user's call,
+    2026-09-27): its own card at the end of Tools, no Apps tile, no menu bar
+    entry."""
+    assert _keys(window.backstage_tab) == ["backstage"]
+    assert "backstage" not in _keys(window.apps_tab)
+    assert "backstage" not in {app.key for app in launcher.MENU_BAR_APPS}
+    assert "backstage" in {app.key for app in launcher.APPS}
 
 
 def test_the_apps_tab_lists_the_suites(window):
@@ -62,8 +72,9 @@ def test_every_launchable_app_is_reachable(window):
     on_screen = {c.app.key for c in window.apps_tab.cards}
     on_screen |= {c.app.key for c in window.backup_sync_tab.cards}
     on_screen |= {c.app.key for c in window.unblock_tracker_tab.cards}
+    on_screen |= {c.app.key for c in window.backstage_tab.cards}
 
-    assert on_screen == {app.key for app in launcher.LAUNCHPAD}
+    assert on_screen == {app.key for app in launcher.APPS}
 
 
 def test_no_tab_label_hides_an_accelerator(window):

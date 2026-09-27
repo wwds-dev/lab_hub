@@ -77,6 +77,12 @@ class MainWindow(QMainWindow):
             title="Unblock Tracker",
             intro="Open the tracker to monitor an Instagram profile's block status.",
         )
+        self.backstage_tab = AppsTab(
+            self.settings,
+            apps=launcher.TOOLS_ONLY_APPS,
+            title="Backstage",
+            intro="Open Backstage in its own window.",
+        )
         self.settings_tab = SettingsTab(self.settings)
 
         self.tools_tabs = QTabWidget()
@@ -85,6 +91,7 @@ class MainWindow(QMainWindow):
         self.tools_tabs.addTab(self.narrator_tab, "Narrator")
         self.tools_tabs.addTab(self.images_tab, "Prepare Images")
         self.tools_tabs.addTab(self.unblock_tracker_tab, "Unblock Tracker")
+        self.tools_tabs.addTab(self.backstage_tab, "Backstage")
 
         self.tabs.addTab(self.apps_tab, "Apps")
         self.tabs.addTab(self.backup_sync_tab, "Backup and Sync")
@@ -97,7 +104,9 @@ class MainWindow(QMainWindow):
         self.apps_tab.launched.connect(self._on_launched)
         self.backup_sync_tab.launched.connect(self._on_launched)
         self.unblock_tracker_tab.launched.connect(self._on_launched)
-        for tab in (self.apps_tab, self.backup_sync_tab, self.unblock_tracker_tab):
+        self.backstage_tab.launched.connect(self._on_launched)
+        for tab in (self.apps_tab, self.backup_sync_tab, self.unblock_tracker_tab,
+                    self.backstage_tab):
             tab.start_failed.connect(self._on_start_failed)
         self.settings_tab.settings_saved.connect(self._on_settings_saved)
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -166,6 +175,7 @@ class MainWindow(QMainWindow):
         self.apps_tab.apply_settings(self.settings)
         self.backup_sync_tab.apply_settings(self.settings)
         self.unblock_tracker_tab.apply_settings(self.settings)
+        self.backstage_tab.apply_settings(self.settings)
         self.statusBar().showMessage("Settings saved.", 4000)
 
     def _on_tab_changed(self, index: int) -> None:
@@ -183,7 +193,7 @@ class MainWindow(QMainWindow):
     def _refresh_tool_tab(self, widget) -> None:
         if widget is self.convert_tab:
             self.convert_tab.refresh_calibre()
-        elif widget is self.unblock_tracker_tab:
+        elif widget in (self.unblock_tracker_tab, self.backstage_tab):
             widget.refresh()
 
     def _check_for_wake(self) -> None:
