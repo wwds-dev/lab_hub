@@ -37,6 +37,8 @@ def test_backstage_lives_only_at_the_end_of_tools(window):
     2026-09-27): its own card at the end of Tools, no Apps tile, no menu bar
     entry."""
     assert _keys(window.backstage_tab) == ["backstage"]
+    # Rebuild from here, like the launchpad apps.
+    assert window.backstage_tab.check_button.text() == "Check build"
     assert "backstage" not in _keys(window.apps_tab)
     assert "backstage" not in {app.key for app in launcher.MENU_BAR_APPS}
     assert "backstage" in {app.key for app in launcher.APPS}
