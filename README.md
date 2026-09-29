@@ -258,7 +258,10 @@ A standalone app with its own repository, launched from its card at the end of
 Tools and **nowhere else**: no Apps tile and no menu bar entry, by the user's
 choice (2026-09-27). It lives in `launcher.TOOLS_ONLY_APPS`, which the menu bar
 does not read and `launcher.APPS` — the self-test, the build report, Settings —
-does; `tests/test_tab_groups.py` pins both halves.
+does; `tests/test_tab_groups.py` pins both halves. Its card carries a **Check build**
+button — the launchpad's Check builds and Update now, scoped to Backstage alone
+(`AppsTab(check_own_builds=True)`), since a Tools-only app has no launchpad tile to be
+rebuilt from.
 
 ### Settings
 Only the lab folder, and only because it cannot always be inferred: launching an

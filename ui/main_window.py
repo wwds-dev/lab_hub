@@ -82,6 +82,7 @@ class MainWindow(QMainWindow):
             apps=launcher.TOOLS_ONLY_APPS,
             title="Backstage",
             intro="Open Backstage in its own window.",
+            check_own_builds=True,
         )
         self.settings_tab = SettingsTab(self.settings)
 

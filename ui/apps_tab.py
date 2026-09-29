@@ -471,6 +471,7 @@ class AppsTab(QWidget):
         intro: str = LAUNCHPAD_INTRO,
         sections: tuple[tuple[str, str, tuple[launcher.ExternalApp, ...]], ...] | None = None,
         check_builds: bool = False,
+        check_own_builds: bool = False,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -507,6 +508,12 @@ class AppsTab(QWidget):
 
         # Tests and the resize logic reach for the first grid by name.
         self.grid = self.grids[0][0]
+        # Which apps the build check reports: None is every registered app (the
+        # launchpad's question), a tuple is only this tab's own.
+        self._build_apps: tuple[launcher.ExternalApp, ...] | None = (
+            None if check_builds or not check_own_builds
+            else tuple(app for _t, _i, group in groups for app in group)
+        )
         self._columns = 0
         self._arrange(1)
 
@@ -515,6 +522,7 @@ class AppsTab(QWidget):
         refresh.clicked.connect(self.recheck)
         row = QHBoxLayout()
         row.addWidget(refresh)
+        self.check_button: QPushButton | None = None
         # One button, on the launchpad only, reporting every registered app.
         # Three identical copies of it would be noise, and the question it
         # answers — "am I opening the newest of everything?" — is not per-tab.
@@ -525,6 +533,20 @@ class AppsTab(QWidget):
             )
             check.clicked.connect(self.show_build_report)
             row.addWidget(check)
+            self.check_button = check
+        elif check_own_builds:
+            # A Tools-only app has no tile on the launchpad, so its own tab
+            # carries the same check and Update now — scoped to it alone, so the
+            # launchpad's all-apps report is still the only one of those.
+            count = len(self._build_apps)
+            check = QPushButton("Check build" if count == 1 else "Check builds")
+            check.setToolTip(
+                "Compare the installed app against its source checkout, and "
+                "rebuild it if it is behind"
+            )
+            check.clicked.connect(self.show_build_report)
+            row.addWidget(check)
+            self.check_button = check
         row.addStretch(1)
         column.addLayout(row)
         column.addStretch(1)
@@ -584,11 +606,17 @@ class AppsTab(QWidget):
         committed. The commit count sees the first and cannot see the second,
         so both are checked here.
         """
-        report = launcher.build_report(self.settings.resolved_lab_root())
+        root = self.settings.resolved_lab_root()
+        report = (launcher.build_report(root) if self._build_apps is None
+                  else launcher.build_report(root, self._build_apps))
         behind = [row for row in report if row.needs_rebuild]
         unknown = [row for row in report if row.verdict == "unknown"]
 
-        if behind:
+        if behind and len(report) == 1:
+            headline = (
+                f"{report[0].app.name} would open something older than its source."
+            )
+        elif behind:
             headline = (
                 f"{len(behind)} of {len(report)} apps would open something older "
                 "than their source."

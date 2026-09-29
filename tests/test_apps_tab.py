@@ -413,6 +413,44 @@ def test_the_launchpad_has_a_build_check_and_the_others_do_not(qapp, tmp_path, m
     assert "Check builds" not in labels(without)
 
 
+def test_a_tools_only_tab_checks_its_own_build(qapp, tmp_path, monkeypatch):
+    """A Tools-only app has no launchpad tile, so its tab carries the same
+    check and Update now — asking about its own apps, never every app."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from lab_hub import config
+    from ui.apps_tab import AppsTab
+
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    apps = (launcher.ExternalApp("b", "B", "b", "main.py", "s"),)
+    tab = AppsTab(config.Settings(), apps, "B", "intro", check_own_builds=True)
+    assert tab.check_button.text() == "Check build"
+
+    asked = []
+
+    def report(root, scope=None):
+        asked.append(scope)
+        return (launcher.BuildStatus(apps[0], launcher.Version(), "behind",
+                                     "built older.", None, "cd /b && ./build_app.sh"),)
+
+    seen = {}
+    monkeypatch.setattr(launcher, "build_report", report)
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: seen.update(
+        text=self.text(), labels={b.text() for b in self.buttons()}))
+    tab.show_build_report()
+
+    assert asked == [apps]
+    assert seen["text"] == "B would open something older than its source."
+    assert "Update now" in seen["labels"]
+
+    # Delete the tab now rather than leaving it to the garbage collector, which
+    # would free it mid-way through a later test's window construction.
+    import shiboken6
+
+    tab._poll.stop()
+    shiboken6.delete(tab)
+
+
 def test_copying_the_commands_puts_them_on_the_clipboard(qapp, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QApplication
 

@@ -59,3 +59,24 @@ def window(qapp, isolated_config):
     win._quitting = True
     win.close()
     win.deleteLater()
+
+
+@pytest.fixture(autouse=True)
+def _collect_qt_garbage():
+    """Destroy each test's abandoned Qt objects before the next test starts.
+
+    Tests build widgets and drop them. Left to the garbage collector, they piled
+    up across tests and were destroyed together whenever an allocation happened
+    to trigger a collection — sometimes in the middle of a later test — and on
+    runs where that timing lined up (reliably, the first run after a test file
+    was edited) the interpreter died with SIGSEGV. Collecting after every test
+    destroys them one test's worth at a time, in a known place.
+    """
+    yield
+    import gc
+
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    if QCoreApplication.instance() is not None:
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    gc.collect()
