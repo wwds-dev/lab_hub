@@ -20,26 +20,36 @@ So: until the converter becomes one installable package, this test makes
 divergence loud. It compares the files line by line after normalising the
 handful of differences each copy is *allowed* to have, listed in LOCAL below.
 
-It skips when a sibling checkout is not present, because that is a normal
-state for a clone — the test is for this machine, which is where drift
-happens.
+It skips when a sibling checkout is not present beside this repository,
+because that is a normal state for a clone — the test is for this machine,
+which is where drift happens. This repository's own copy is never looked
+up: it is at a fixed place relative to this file, and a worktree or second
+clone checks its own copy, not the main checkout's.
 
 **If this fails**, do not edit the normaliser to make it pass. Port the
 change to the other copies, or add a genuinely local difference to LOCAL
 with a comment saying why it is local.
 """
 
+import difflib
+import itertools
 import re
 from pathlib import Path
 
 import pytest
 
-# Every copy, relative to the lab root.
 SELF = "lab_hub"
 
-COPIES = {
+_HERE = Path(__file__).resolve()
+
+# This repository's copy: <repo>/lab_hub/tools/narrator/converter.py.
+MINE = _HERE.parents[1] / "lab_hub" / "tools" / "narrator" / "converter.py"
+
+# The other copies, relative to the directory the repositories sit in side by
+# side — `active/` on the lab machine, whatever holds the clones elsewhere.
+ROOT = _HERE.parents[2]
+SIBLINGS = {
     "imprint": "imprint/services/narrator/converter.py",
-    "lab_hub": "lab_hub/lab_hub/tools/narrator/converter.py",
     "audiobook_studio": "audiobook_studio/audiobook_studio/converter.py",
 }
 
@@ -60,16 +70,6 @@ LOCAL = (
 )
 
 
-def _lab_root() -> Path:
-    """The workspace root, found by walking up to the directory holding the copies."""
-    for parent in Path(__file__).resolve().parents:
-        if (parent / "active").is_dir() and (parent / "AGENTS.md").is_file():
-            return parent / "active"
-        if all((parent / rel).is_file() for rel in COPIES.values()):
-            return parent
-    return Path(__file__).resolve().parents[3]
-
-
 def _normalised(path: Path) -> list[str]:
     text = path.read_text(encoding="utf-8")
     for pattern, placeholder in LOCAL:
@@ -77,25 +77,18 @@ def _normalised(path: Path) -> list[str]:
     return [line for line in text.splitlines() if line.strip()]
 
 
-@pytest.mark.parametrize("other", [name for name in COPIES if name != "SELF"])
+@pytest.mark.parametrize("other", list(SIBLINGS))
 def test_converter_copies_have_not_drifted(other):
-    root = _lab_root()
-    mine = root / COPIES[SELF]
-    theirs = root / COPIES[other]
-    if other == SELF:
-        pytest.skip("same copy")
+    theirs = ROOT / SIBLINGS[other]
     if not theirs.is_file():
         pytest.skip(f"{other} is not checked out beside this repository")
-    if not mine.is_file():
-        pytest.skip("this copy moved; update COPIES")
 
-    a, b = _normalised(mine), _normalised(theirs)
+    a, b = _normalised(MINE), _normalised(theirs)
     if a == b:
         return
 
-    import difflib
-    diff = "\n".join(list(difflib.unified_diff(
-        a, b, fromfile=SELF, tofile=other, lineterm="", n=1))[:60])
+    diff = "\n".join(itertools.islice(difflib.unified_diff(
+        a, b, fromfile=SELF, tofile=other, lineterm="", n=1), 60))
     pytest.fail(
         f"{SELF} and {other} converters have drifted.\n\n{diff}\n\n"
         "Port the change to every copy, or add a genuinely local difference "
