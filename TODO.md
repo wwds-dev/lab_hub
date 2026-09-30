@@ -176,6 +176,80 @@
   build its Launch button would open. Lab-wide scheme, same two inputs as the Lab Project
   Monitor.
 
+## Narrator converter — open (2026-09-30)
+
+What the review of df9c356 found and 1dc265b (wwds-dev/lab_hub#1) did not close: the
+port the fix now demands, three pre-existing faults noticed on the way, one decision, one
+check that needs the real machine, and the tidying that would let the three copies be one.
+
+- [ ] `P1` `infra` `@me` **Review and merge wwds-dev/lab_hub#1** — the converter fixes and the
+  corrected drift guard, one commit on `claude/code-review-ultra-lab-hub-adsk4b`. Sourcery is
+  green and there are no review threads; it is waiting on a human.
+  https://github.com/wwds-dev/lab_hub/pull/1
+- [ ] `P1` `infra` `@ai` **Port 1dc265b to Imprint and Audiobook Studio.** This copy of
+  `converter.py` now differs from `imprint/services/narrator/converter.py` and
+  `audiobook_studio/audiobook_studio/converter.py`, so `tests/test_converter_drift.py` fails
+  on the lab machine until both match — the test doing its job. Copy the file wholesale and
+  keep each copy's own `OUTPUT_ROOT`, `DEFAULT_FORMAT`, `ON_SETTINGS_CHANGE` and CLI docstring
+  path (the `LOCAL` list). Check two things in each sibling first: `text_to_audio()` now
+  takes `chapters` and no `text`, so a direct caller there needs the new call, and
+  `write_chapter_metadata()` takes a title and no `total_chunks`.
+- [ ] `P1` `bug` `@ai` **A chunk cut off mid-stream is stitched into the finished book.**
+  Pre-existing, noticed in the review. Stop in the Narrator tab terminates the worker; if
+  `response.stream_to_file` was half way through `chunk_57.mp3`, a partial file stays behind.
+  `sync_manifest_with_files` trusts any non-empty file, so the next run marks it done, skips
+  it, and merges a mid-sentence cut into a book it then reports as finished. Nothing says so
+  — the same shape as the stale-chunk bug the drift guard exists for. Write each chunk to a
+  temp name and rename on completion, so a cut leaves nothing a resume can mistake for done.
+  All three copies.
+- [ ] `P2` `feature` `@me` **Decide whether the Narrator tab should offer M4B.** The converter
+  makes chaptered M4B behind `--format m4b`; the tab never passes `--format`, so Lab Hub is
+  MP3-only by choice (df9c356). If yes: a format picker in `ui/narrator_tab.py`, `_validate`
+  checking `ffprobe` as well as `ffmpeg`, the README's Narrator section saying so, and the
+  argv covered in `tests/test_narrator_tab.py`. If no, nothing to do.
+- [ ] `P3` `testing` `@me` **Check the chapter marks on one real M4B.** The review could not
+  run ffmpeg. The marks are the summed `ffprobe` durations of the MP3 chunks, which is what
+  the concat demuxer places each file by too; the one way they could drift is TTS chunks
+  carrying LAME gapless tags, which trim audio the duration does not count. Narrate one short
+  book to M4B and open it in Apple Books: the last chapter should start where its text does.
+- [ ] `P3` `bug` `@ai` **MOBI and AZW3 leave `<stem>.converted.epub` beside the audiobook.**
+  `convert_mobi_to_epub` writes into `book_out_dir`; neither `cleanup_after_success` nor
+  `wipe_book_state` removes it. Write it into `temp_dir`, which both already clear.
+  Pre-existing. All three copies.
+- [ ] `P3` `bug` `@ai` **Inside the frozen app, the converter's subprocesses inherit
+  PyInstaller's environment.** `lab_hub/tools/convert/calibre.py` exists for this: its
+  `subprocess_env()` restores the `DYLD_*` variables from `*_ORIG` (or drops them when
+  frozen) and adds Homebrew to `PATH`, and its `find_ebook_convert()` searches
+  `/opt/homebrew/bin`, `/Applications` and `~/Applications`. The converter's
+  `ensure_ebook_convert_available()` checks `PATH` and `/Applications` only, and its three
+  `subprocess.run` calls (ebook-convert, ffprobe, ffmpeg) pass no env — so a MOBI, or the
+  merge itself, can fail in the bundle for a tool that is installed. The converter is
+  vendored and cannot import `lab_hub.*`, so the same logic goes into `converter.py` and
+  travels with the port. While there, the three copies of run-a-subprocess-and-raise
+  (`convert_mobi_to_epub`, `get_audio_duration_seconds`, `merge_chunks_with_ffmpeg`), each
+  with its own error shape, want one `_run_checked(cmd, what)` helper.
+- [ ] `P3` `design` `@ai` **The resume policy as an argument, not a per-copy constant.**
+  `ON_SETTINGS_CHANGE` is the one line of real code the drift test has to be taught to look
+  away from, and the `REFUSE` branch ships in this copy dead. An
+  `--on-settings-change {rebuild,refuse}` flag (default `refuse`; the Narrator tab passes
+  `rebuild`) makes all three files identical. Cost: both sibling front-ends must pass it.
+  Do it with the port above, or not at all.
+- [ ] `P3` `testing` `@ai` **The drift guard is itself a vendored copy, and guards one pair.**
+  `SELF` is hand-set and `LOCAL` hand-kept, so copied into the siblings there are three of it
+  that can drift. Derive `SELF` from `__file__`, and turn `_normalised` and the compare into
+  a table of `(mine, theirs, local)` so the other vendored pair the docstring names —
+  `lab_hub/tools/convert/{calibre,formats,jobs,runner}.py` against `toolbox/convert_epub` —
+  is guarded the same way. Those four headers say "keep the two in step"; nothing checks.
+- [ ] `P3` `feature` `@ai` **A format switch could remux instead of re-narrating.** M4B is an
+  AAC re-encode of the same MP3 chunks, so an existing `Book.mp3` could become `Book.m4b` for
+  no TTS spend — if the chunk durations survived `cleanup_after_success` (keep
+  `chapters.ffmeta`, or the durations in a retained manifest). Today the run warns and
+  narrates the book again.
+- [ ] `P3` `infra` `@ai` **Four pre-existing lint warnings in `converter.py`** — two
+  f-strings without placeholders (`F541`, lines 371 and 528 as of 1dc265b), one long line
+  (`E501`, 527) and one missing blank line before `def convert` (`E302`, 829). Left alone so
+  the review diff stayed minimal. Fix them in the port, so the copies stay identical.
+
 ## v3 — later
 
 - [ ] `P2` `feature` `@ai` Read each project's `TODO.md` and show an open-item count next to its launch button
