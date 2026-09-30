@@ -42,7 +42,12 @@ FFMPEG_CONCAT_FILENAME = "ffmpeg_concat.txt"
 
 USD_PER_1M_INPUT_TOKENS = 0.60
 USD_PER_1M_OUTPUT_AUDIO_TOKENS = 12.00
-EUR_PER_USD_FALLBACK = 0.855
+# Aligned with Imprint's services/per_unit_pricing.DEFAULT_EUR_PER_USD — the
+# fallbacks had drifted (0.855 here vs 0.92 there), so the same conversion
+# priced differently depending on which copy estimated it. This module stays
+# import-side-effect-free (it runs as a bundled subprocess), so it keeps a
+# constant rather than importing a live rate; callers that know one pass it in.
+EUR_PER_USD_FALLBACK = 0.92
 
 # Lazy OpenAI client: importing this module must have NO side effects so it can
 # be bundled into the host app (and PyInstaller) without needing a key at import time.
@@ -388,7 +393,8 @@ def load_or_create_manifest(
     manifest_path: Path,
     book_name: str,
     source_file: Path,
-    chunks: list[str]
+    chunks: list[str],
+    temp_dir: Path | None = None,
 ) -> dict:
     expected = build_manifest(book_name, source_file, chunks)
 
@@ -411,6 +417,18 @@ def load_or_create_manifest(
     if not compatible:
         print("  ⚠️ Existing manifest does not match current run.")
         print("  Rebuilding manifest from scratch.")
+        # The cached chunk files were made under the OLD chunking/voice.
+        # sync_manifest_with_files trusts file existence alone, so leaving
+        # them here would stitch mispositioned, possibly different-voice
+        # audio into a "completed" book. Stale caches are wiped with the
+        # manifest they belonged to.
+        if temp_dir is not None and temp_dir.exists():
+            stale = sorted(temp_dir.glob("chunk_*.mp3"))
+            for chunk_file in stale:
+                chunk_file.unlink()
+            if stale:
+                print(f"  Cleared {len(stale)} stale chunk file(s) from the "
+                      "previous settings.")
         json_dump(manifest_path, expected)
         return expected
 
@@ -537,7 +555,8 @@ def text_to_audio(
 
     temp_dir.mkdir(parents=True, exist_ok=True)
 
-    manifest = load_or_create_manifest(manifest_path, book_name, source_file, chunks)
+    manifest = load_or_create_manifest(
+        manifest_path, book_name, source_file, chunks, temp_dir=temp_dir)
     manifest = sync_manifest_with_files(manifest, temp_dir)
     json_dump(manifest_path, manifest)
 
