@@ -186,14 +186,15 @@ check that needs the real machine, and the tidying that would let the three copi
   corrected drift guard, one commit on `claude/code-review-ultra-lab-hub-adsk4b`. Sourcery is
   green and there are no review threads; it is waiting on a human.
   https://github.com/wwds-dev/lab_hub/pull/1
-- [ ] `P1` `infra` `@ai` **Port 1dc265b to Imprint and Audiobook Studio.** This copy of
-  `converter.py` now differs from `imprint/services/narrator/converter.py` and
-  `audiobook_studio/audiobook_studio/converter.py`, so `tests/test_converter_drift.py` fails
-  on the lab machine until both match — the test doing its job. Copy the file wholesale and
-  keep each copy's own `OUTPUT_ROOT`, `DEFAULT_FORMAT`, `ON_SETTINGS_CHANGE` and CLI docstring
-  path (the `LOCAL` list). Check two things in each sibling first: `text_to_audio()` now
-  takes `chapters` and no `text`, so a direct caller there needs the new call, and
-  `write_chapter_metadata()` takes a title and no `total_chunks`.
+- [ ] `P1` `infra` `@me` **Merge the port of 1dc265b into Imprint and Audiobook Studio** —
+  wwds-dev/imprint#1 and wwds-dev/audiobook_studio#1, one commit each on
+  `claude/port-narrator-converter-fixes`. Until both are merged this copy of `converter.py`
+  differs from theirs and `tests/test_converter_drift.py` fails on the lab machine — the test
+  doing its job. Each copy keeps its own `OUTPUT_ROOT`, `DEFAULT_FORMAT`, `ON_SETTINGS_CHANGE`
+  and CLI docstring path (the `LOCAL` list); both siblings' own drift tests got the same fix,
+  and Imprint's converter tests follow the two signature changes (`text_to_audio()` takes
+  `chapters` and no `text`; `write_chapter_metadata()` a title and no `total_chunks`). With
+  the three checkouts side by side, all three drift tests pass.
 - [ ] `P1` `bug` `@ai` **A chunk cut off mid-stream is stitched into the finished book.**
   Pre-existing, noticed in the review. Stop in the Narrator tab terminates the worker; if
   `response.stream_to_file` was half way through `chunk_57.mp3`, a partial file stays behind.
