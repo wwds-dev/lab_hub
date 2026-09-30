@@ -40,6 +40,25 @@ MAX_INPUT_TOKENS_PER_CHUNK = 1500
 MANIFEST_FILENAME = "manifest.json"
 TEMP_DIRNAME = "temp_audio"
 FFMPEG_CONCAT_FILENAME = "ffmpeg_concat.txt"
+CHAPTER_METADATA_FILENAME = "chapters.ffmeta"
+
+# Output formats. MP3 is a lossless stream copy of the chunks and plays
+# anywhere; M4B re-encodes to AAC and carries chapter marks, which is what
+# Apple Books and most audiobook players navigate by.
+FORMAT_MP3 = "mp3"
+FORMAT_M4B = "m4b"
+AUDIO_FORMATS = (FORMAT_MP3, FORMAT_M4B)
+DEFAULT_FORMAT = FORMAT_MP3
+
+# What a resume does when the manifest no longer matches the run — different
+# text, chunk size or voice. Either way the cached audio is unusable, so
+# neither choice saves the money already spent; they differ in who decides.
+# REBUILD clears the stale chunks and carries on, which is what a GUI with no
+# force-rebuild control needs. REFUSE stops and asks for --force-rebuild,
+# which suits a CLI where the operator is present.
+REBUILD_ON_CHANGE = "rebuild"
+REFUSE_ON_CHANGE = "refuse"
+ON_SETTINGS_CHANGE = REBUILD_ON_CHANGE
 
 USD_PER_1M_INPUT_TOKENS = 0.60
 USD_PER_1M_OUTPUT_AUDIO_TOKENS = 12.00
@@ -429,6 +448,12 @@ def load_or_create_manifest(
     )
 
     if not compatible:
+        if ON_SETTINGS_CHANGE == REFUSE_ON_CHANGE:
+            raise RuntimeError(
+                "Source text or settings changed since this run began. The "
+                "audio generated so far cannot be reused safely. Use "
+                "--force-rebuild to start a new run."
+            )
         print("  ⚠️ Existing manifest does not match current run.")
         print("  Rebuilding manifest from scratch.")
         # The cached chunk files were made under the OLD chunking/voice.
@@ -509,41 +534,95 @@ def ffmpeg_escape_concat_path(path: Path) -> str:
     return str(path.resolve()).replace("'", r"'\''")
 
 
-def merge_mp3s_with_ffmpeg(temp_dir: Path, output_path: Path, total_chunks: int):
+def ffmetadata_escape(value: str) -> str:
+    """Escape a chapter title for an ffmetadata file."""
+    for source, target in (("\\", "\\\\"), ("=", "\\="), (";", "\\;"),
+                           ("#", "\\#"), ("\n", " ")):
+        value = value.replace(source, target)
+    return value
+
+
+def merge_chunks_with_ffmpeg(
+    temp_dir: Path,
+    output_path: Path,
+    total_chunks: int,
+    chapter_starts: list[tuple[str, int]] | None = None,
+    audio_format: str = DEFAULT_FORMAT,
+):
+    """Stitch the finished chunks into one file.
+
+    MP3 is a stream copy: the chunks are already MP3, so nothing is re-encoded
+    and the merge is fast and lossless. M4B re-encodes to AAC because the
+    container needs it, and carries chapter marks built from the measured
+    duration of each chunk — which is why it costs a probe per chunk and MP3
+    does not.
+    """
     ffmpeg = ensure_ffmpeg_available()
 
     concat_file = temp_dir / FFMPEG_CONCAT_FILENAME
-    lines = []
-
+    chunk_paths = []
     for i in range(total_chunks):
         chunk_path = temp_dir / f"chunk_{i}.mp3"
         if not chunk_path.exists() or chunk_path.stat().st_size == 0:
             raise RuntimeError(f"Missing or empty chunk during merge: {chunk_path.name}")
-        lines.append(f"file '{ffmpeg_escape_concat_path(chunk_path)}'")
+        chunk_paths.append(chunk_path)
 
-    concat_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    concat_file.write_text(
+        "".join(f"file '{ffmpeg_escape_concat_path(path)}'\n" for path in chunk_paths),
+        encoding="utf-8",
+    )
 
-    temp_output = output_path.with_suffix(".tmp.mp3")
-
-    cmd = [
-        ffmpeg,
-        "-y",
-        "-f", "concat",
-        "-safe", "0",
-        "-i", str(concat_file),
-        "-c", "copy",
-        str(temp_output),
-    ]
+    if audio_format == FORMAT_MP3:
+        temp_output = output_path.with_suffix(".tmp.mp3")
+        cmd = [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file),
+               "-c", "copy", str(temp_output)]
+    else:
+        metadata_file = write_chapter_metadata(
+            temp_dir, output_path, chunk_paths, chapter_starts or [], total_chunks)
+        temp_output = output_path.with_suffix(".tmp.m4b")
+        cmd = [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file),
+               "-i", str(metadata_file), "-map", "0:a:0", "-map_metadata", "1",
+               "-map_chapters", "1", "-c:a", "aac", "-b:a", "64k",
+               "-movflags", "+faststart", str(temp_output)]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.returncode != 0:
         raise RuntimeError(
-            "ffmpeg merge failed.\n"
+            f"ffmpeg {audio_format.upper()} merge failed.\n"
             f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
         )
 
     temp_output.replace(output_path)
+
+
+def write_chapter_metadata(
+    temp_dir: Path,
+    output_path: Path,
+    chunk_paths: list[Path],
+    chapter_starts: list[tuple[str, int]],
+    total_chunks: int,
+) -> Path:
+    """An ffmetadata file placing each chapter at its measured offset."""
+    durations_ms = [round(get_audio_duration_seconds(path) * 1000)
+                    for path in chunk_paths]
+    offsets = [0]
+    for duration in durations_ms:
+        offsets.append(offsets[-1] + duration)
+
+    metadata = [";FFMETADATA1", f"title={ffmetadata_escape(output_path.stem)}"]
+    for index, (title, first_chunk) in enumerate(chapter_starts):
+        end_chunk = (chapter_starts[index + 1][1]
+                     if index + 1 < len(chapter_starts) else total_chunks)
+        metadata += [
+            "[CHAPTER]", "TIMEBASE=1/1000",
+            f"START={offsets[first_chunk]}", f"END={offsets[end_chunk]}",
+            f"title={ffmetadata_escape(title)}",
+        ]
+
+    metadata_file = temp_dir / CHAPTER_METADATA_FILENAME
+    metadata_file.write_text("\n".join(metadata) + "\n", encoding="utf-8")
+    return metadata_file
 
 
 # ------------------------------------------------------
@@ -556,10 +635,23 @@ def text_to_audio(
     book_name: str,
     output_path: Path,
     temp_dir: Path,
-    manifest_path: Path
+    manifest_path: Path,
+    chapters: list[tuple[str, str]] | None = None,
+    audio_format: str = DEFAULT_FORMAT,
 ) -> bool:
     print("  Preparing text chunks...")
-    chunks = chunk_text(text, MAX_INPUT_TOKENS_PER_CHUNK)
+    # Chunking per chapter rather than over the whole book keeps every chapter
+    # starting on a chunk boundary, which is what lets a chapter mark point at
+    # a real offset. With no chapters the whole book is one of them, and the
+    # chunking is identical to what it was before.
+    chapters = chapters or [(book_name, text)]
+    chunks: list[str] = []
+    chapter_starts: list[tuple[str, int]] = []
+    for title, chapter_text in chapters:
+        chapter_chunks = chunk_text(chapter_text, MAX_INPUT_TOKENS_PER_CHUNK)
+        if chapter_chunks:
+            chapter_starts.append((title, len(chunks)))
+            chunks.extend(chapter_chunks)
     total_chunks = len(chunks)
     print(f"  Total chunks needed: {total_chunks}")
 
@@ -628,7 +720,8 @@ def text_to_audio(
         return False
 
     print("  Merging chunks into final audiobook with ffmpeg...")
-    merge_mp3s_with_ffmpeg(temp_dir, output_path, total_chunks)
+    merge_chunks_with_ffmpeg(temp_dir, output_path, total_chunks,
+                             chapter_starts, audio_format)
     print(f"  Audiobook finished: {output_path}")
 
     return True
@@ -641,6 +734,7 @@ def cleanup_after_success(temp_dir: Path, manifest_path: Path):
 
     concat_file = temp_dir / FFMPEG_CONCAT_FILENAME
     concat_file.unlink(missing_ok=True)
+    (temp_dir / CHAPTER_METADATA_FILENAME).unlink(missing_ok=True)
 
     manifest_path.unlink(missing_ok=True)
 
@@ -692,14 +786,29 @@ def parse_args():
         help="Wipe old manifest/temp data for one book. Use original filename stem or cleaned book name."
     )
 
+    parser.add_argument(
+        "--format",
+        dest="audio_format",
+        choices=list(AUDIO_FORMATS),
+        default=DEFAULT_FORMAT,
+        help=("Output container. mp3 copies the chunks losslessly and plays "
+              "anywhere; m4b re-encodes to AAC and carries chapter marks. "
+              f"Default: {DEFAULT_FORMAT}")
+    )
+
     return parser.parse_args()
 
 # ------------------------------------------------------
 # MAIN
 # ------------------------------------------------------
 
-def convert(input=None, output=None, voice=None, chunk_tokens=None, force_rebuild=None):
-    """Convert one ebook file, or a folder of ebooks, into MP3 audiobook(s).
+def convert(input=None, output=None, voice=None, chunk_tokens=None,
+            force_rebuild=None, audio_format=None):
+    """Convert one ebook file, or a folder of ebooks, into audiobook(s).
+
+    `audio_format` is "mp3" (default: a lossless stream copy that plays
+    anywhere) or "m4b" (AAC with chapter marks, which audiobook players
+    navigate by).
 
     Importable in-process entry point used by the app's ToolRunner and GUI.
     Returns True on full success, False if it failed / paused / found nothing.
@@ -714,10 +823,17 @@ def convert(input=None, output=None, voice=None, chunk_tokens=None, force_rebuil
     if chunk_tokens:
         MAX_INPUT_TOKENS_PER_CHUNK = chunk_tokens  # override chunk token size
 
+    audio_format = (audio_format or DEFAULT_FORMAT).lower()
+    if audio_format not in AUDIO_FORMATS:
+        print(f"❌ Unknown audio format: {audio_format!r}. "
+              f"Expected one of {', '.join(AUDIO_FORMATS)}.")
+        return False
+
     print(f"\n📚 Input path: {input_path}")  # show chosen input path
     print(f"🎧 Output root: {output_root}")  # show chosen output folder
     print(f"🗣️ Voice: {TTS_VOICE}")  # show chosen voice
     print(f"🧩 Chunk token limit: {MAX_INPUT_TOKENS_PER_CHUNK}")  # show chunk token limit
+    print(f"📦 Format: {audio_format}")  # show chosen output format
 
     output_root.mkdir(parents=True, exist_ok=True)  # create output root if needed
 
@@ -750,7 +866,7 @@ def convert(input=None, output=None, voice=None, chunk_tokens=None, force_rebuil
         book_out_dir = output_root / book_name
         book_out_dir.mkdir(parents=True, exist_ok=True)
 
-        output_path = book_out_dir / f"{book_name}.mp3"
+        output_path = book_out_dir / f"{book_name}.{audio_format}"
         temp_dir = book_out_dir / TEMP_DIRNAME
         manifest_path = book_out_dir / MANIFEST_FILENAME
 
@@ -766,14 +882,28 @@ def convert(input=None, output=None, voice=None, chunk_tokens=None, force_rebuil
 
         print("  Extracting text...")
         try:
-            raw = load_text(fp, work_dir=book_out_dir)
+            # Chapters only where the source actually has them. Everything else
+            # is one chapter, which is what the old single-string path was.
+            suffix = fp.suffix.lower()
+            if suffix == ".epub":
+                chapters = extract_epub_chapters(fp)
+            elif suffix == ".mobi":
+                chapters = extract_epub_chapters(
+                    convert_mobi_to_epub(fp, book_out_dir))
+            else:
+                chapters = [(book_name, load_text(fp, work_dir=book_out_dir))]
         except Exception as e:
             print(f"  ❌ Failed to read file: {e}")
             continue
 
+        chapters = [(title, light_normalize(text)) for title, text in chapters]
+        raw = "\n\n".join(text for _, text in chapters)
+
         print("  Raw text length:", len(raw))
-        normalized = light_normalize(raw)
+        normalized = raw
         print("  Normalized text length:", len(normalized))
+        if audio_format == FORMAT_M4B:
+            print(f"  Chapters detected: {len(chapters)}")
 
         text_tokens = count_text_tokens(normalized)
         est_seconds = estimate_audio_seconds_from_text(normalized, words_per_minute=150.0)
@@ -787,6 +917,8 @@ def convert(input=None, output=None, voice=None, chunk_tokens=None, force_rebuil
                 output_path=output_path,
                 temp_dir=temp_dir,
                 manifest_path=manifest_path,
+                chapters=chapters,
+                audio_format=audio_format,
             )
         except Exception as e:
             print(f"\n❌ Fatal error while processing {fp.name}: {e}")
@@ -824,6 +956,7 @@ def main():
             voice=args.voice,
             chunk_tokens=args.chunk_tokens,
             force_rebuild=args.force_rebuild,
+            audio_format=args.audio_format,
         )
     except Exception as e:
         print(f"\n❌ Fatal error: {e}")
