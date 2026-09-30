@@ -7,6 +7,7 @@ import random
 import shutil
 import argparse
 import subprocess
+import hashlib
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -42,11 +43,12 @@ FFMPEG_CONCAT_FILENAME = "ffmpeg_concat.txt"
 
 USD_PER_1M_INPUT_TOKENS = 0.60
 USD_PER_1M_OUTPUT_AUDIO_TOKENS = 12.00
-# Aligned with Imprint's services/per_unit_pricing.DEFAULT_EUR_PER_USD — the
+# Aligned with services/per_unit_pricing.DEFAULT_EUR_PER_USD — the two
 # fallbacks had drifted (0.855 here vs 0.92 there), so the same conversion
-# priced differently depending on which copy estimated it. This module stays
-# import-side-effect-free (it runs as a bundled subprocess), so it keeps a
-# constant rather than importing a live rate; callers that know one pass it in.
+# priced differently depending on which module estimated it. This module
+# stays import-side-effect-free (it runs as a bundled subprocess), so it
+# keeps a constant rather than importing the live rate; callers that know
+# the live rate pass it in.
 EUR_PER_USD_FALLBACK = 0.92
 
 # Lazy OpenAI client: importing this module must have NO side effects so it can
@@ -196,21 +198,31 @@ def extract_pdf(path: Path) -> str:
 
 
 def extract_epub(path: Path) -> str:
-    book = epub.read_epub(str(path))
-    sections = []
+    return "\n\n".join(text for _, text in extract_epub_chapters(path))
 
-    for item in book.get_items():
+
+def extract_epub_chapters(path: Path) -> list[tuple[str, str]]:
+    """(title, text) per section, in reading order.
+
+    Walks the **spine**, not `get_items()`. The manifest order `get_items()`
+    returns is not the reading order, so a book whose files are not named in
+    reading order was narrated with its chapters shuffled — and nothing said
+    so, because the audio was fine, just in the wrong sequence.
+    """
+    book = epub.read_epub(str(path))
+    sections: list[tuple[str, str]] = []
+    for item_id, _linear in book.spine:
+        item = book.get_item_with_id(item_id)
         if isinstance(item, epub.EpubHtml) and not isinstance(item, epub.EpubNav):
             soup = BeautifulSoup(item.get_body_content(), "html.parser")
-
+            heading = soup.find(["h1", "h2", "h3"])
+            title = heading.get_text(" ", strip=True) if heading else ""
             for tag in soup(["script", "style", "header", "footer", "noscript"]):
                 tag.extract()
-
-            txt = soup.get_text(separator="\n", strip=True)
-            if txt:
-                sections.append(txt)
-
-    return "\n\n".join(sections)
+            content = soup.get_text(separator="\n", strip=True)
+            if content:
+                sections.append((title or f"Section {len(sections) + 1}", content))
+    return sections
 
 
 def convert_mobi_to_epub(mobi_path: Path, work_dir: Path) -> Path:
@@ -372,6 +384,7 @@ def build_manifest(book_name: str, source_file: Path, chunks: list[str]) -> dict
     return {
         "book_name": book_name,
         "source_file": str(source_file),
+        "text_sha256": hashlib.sha256("\0".join(chunks).encode()).hexdigest(),
         "tts_model": TTS_MODEL,
         "tts_voice": TTS_VOICE,
         "tts_instructions": TTS_INSTRUCTIONS,
@@ -407,6 +420,7 @@ def load_or_create_manifest(
     compatible = (
         existing.get("book_name") == expected["book_name"]
         and existing.get("source_file") == expected["source_file"]
+        and existing.get("text_sha256") == expected["text_sha256"]
         and existing.get("tts_model") == expected["tts_model"]
         and existing.get("tts_voice") == expected["tts_voice"]
         and existing.get("tts_instructions") == expected["tts_instructions"]
@@ -496,7 +510,7 @@ def ffmpeg_escape_concat_path(path: Path) -> str:
 
 
 def merge_mp3s_with_ffmpeg(temp_dir: Path, output_path: Path, total_chunks: int):
-    ensure_ffmpeg_available()
+    ffmpeg = ensure_ffmpeg_available()
 
     concat_file = temp_dir / FFMPEG_CONCAT_FILENAME
     lines = []
@@ -512,7 +526,7 @@ def merge_mp3s_with_ffmpeg(temp_dir: Path, output_path: Path, total_chunks: int)
     temp_output = output_path.with_suffix(".tmp.mp3")
 
     cmd = [
-        "ffmpeg",
+        ffmpeg,
         "-y",
         "-f", "concat",
         "-safe", "0",
