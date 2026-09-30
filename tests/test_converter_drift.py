@@ -3,11 +3,14 @@ Narrator converter — drift guard
 ================================
 Type: Cross-repository consistency check.
 
-The same converter exists three times in this workspace:
+The same converter exists twice in this workspace:
 
     imprint/services/narrator/converter.py
     lab_hub/lab_hub/tools/narrator/converter.py
-    audiobook_studio/audiobook_studio/converter.py
+
+A third copy lived in the standalone audiobook_studio app until that app was
+merged into Imprint on 2026-09-30 (archived under
+archive/audiobook_studio_standalone_2026-09-30/).
 
 They are copies, not a shared package, and copies drift. This one already
 did: for three days lab_hub's copy was missing the fix that clears stale
@@ -40,7 +43,6 @@ SELF = "lab_hub"
 COPIES = {
     "imprint": "imprint/services/narrator/converter.py",
     "lab_hub": "lab_hub/lab_hub/tools/narrator/converter.py",
-    "audiobook_studio": "audiobook_studio/audiobook_studio/converter.py",
 }
 
 # Differences each copy is allowed to keep, and why. Each entry is a regex
@@ -49,11 +51,10 @@ LOCAL = (
     # Default output folder: each app writes somewhere different.
     (re.compile(r"^OUTPUT_ROOT = .*$", re.M), "OUTPUT_ROOT = <local>"),
     (re.compile(r"^# The UI supplies an output folder\..*$", re.M), ""),
-    # Default container: Imprint and Lab Hub default to MP3, Audiobook Studio
-    # is a chaptered-M4B product.
+    # Default container: kept declarable so a copy can default to M4B.
     (re.compile(r"^DEFAULT_FORMAT = .*$", re.M), "DEFAULT_FORMAT = <local>"),
     # Resume policy: a GUI with no force-rebuild control clears and carries on;
-    # a CLI with an operator present refuses and asks.
+    # a CLI-only copy with an operator present may refuse and ask instead.
     (re.compile(r"^ON_SETTINGS_CHANGE = .*$", re.M), "ON_SETTINGS_CHANGE = <local>"),
     # The module path in the CLI docstring names its own package.
     (re.compile(r"python -m [\w.]*converter"), "python -m <local>.converter"),
