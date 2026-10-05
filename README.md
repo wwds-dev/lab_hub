@@ -34,6 +34,35 @@ Sentinel and works the same way from source and from the installed app.
 
 ## Tabs
 
+**Trackpad swipes change tab** (`ui/swipe.py`). macOS has two horizontal
+swipes and the app sees them as two different Qt events, so both are handled:
+a two-finger swipe arrives as an ordinary horizontal scroll (`QEvent.Wheel`),
+a three-finger one as `QEvent.NativeGesture` with `Qt.SwipeNativeGesture`.
+Which one reaches the app is a System Settings choice, not ours —
+**Trackpad ▸ More Gestures ▸ Swipe between pages**.
+
+Worth knowing before filing it as broken: by default macOS gives the
+three-finger horizontal swipe to *Swipe between full-screen apps*
+(`TrackpadThreeFingerHorizSwipeGesture = 2`), and while that is selected the
+window server consumes the gesture and no application ever sees it. Two fingers
+is what works out of the box.
+
+Three rules it keeps:
+
+* **It never wraps.** The macOS page swipe does not, and a navigation gesture
+  that loops makes the ends indistinguishable from the middle.
+* **Innermost tabs first.** A swipe inside Tools moves between the tools, and
+  reaches the window's own tabs only once the tools run out — otherwise Tools
+  is a room you can swipe into and never back out of. The tab strip itself is
+  inside no tool, so a swipe there always moves the window's tabs.
+* **A widget that can genuinely use the gesture keeps it.** A table wide enough
+  to scroll sideways (the Narrator library's eight columns) takes the swipe;
+  one whose content fits does not, because it is not using it for anything.
+
+One gesture is one tab: the change latches on the first delta past the
+threshold and the rest of the swipe — including the momentum after the fingers
+lift — is swallowed. Without that, inertia alone walks several tabs.
+
 ### Apps
 One tile per umbrella app: **Sentinel**, **Imprint**, **SONAR**.
 
@@ -416,6 +445,14 @@ actually broken: the red button once quit instead of hiding, and the fix for
 that then re-showed the window in the same breath as closing it (a visible but
 never-repainted black rectangle). Both shipped. `tests/test_window_lifecycle.py`
 is that hunt written down, and its regression test fails against the old code.
+
+`tests/test_swipe.py` drives synthetic events shaped the way macOS shapes the
+real ones, because the gesture itself cannot be produced from a test — what it
+pins down is everything after the event arrives. Every rule above is
+mutation-tested: removing the momentum guard, the latch, the dominance check or
+the sideways-scroll veto each fails a named test. Two of those tests originally
+passed against the broken code (they swiped off the last tab, where nothing
+could move either way); if you add one here, check it fails without the feature.
 
 `--selftest` covers what pytest structurally cannot. It runs against the built
 binary from `build_app.sh`, and beyond checking assets and paths it **starts a

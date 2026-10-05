@@ -178,6 +178,17 @@
 
 ## v3 — later
 
+- [x] `P2` `feature` `@ai` **Trackpad swipes change tab** (`ui/swipe.py`). macOS sends a
+  two-finger page swipe as a horizontal scroll (`QEvent.Wheel`) and a three-finger one as
+  `QEvent.NativeGesture`; both are handled, because which one an app sees is a System
+  Settings choice. Note the macOS default gives the three-finger horizontal swipe to
+  *Swipe between full-screen apps*, so the window server eats it and no app ever sees it —
+  two fingers is what works out of the box. Innermost tabs move first, so a swipe inside
+  Tools moves between the tools and only falls out to the window's tabs when they run out;
+  no wrap-around; a sideways-scrolling table (the Narrator library) keeps the gesture for
+  itself. One gesture is one tab, momentum included. `tests/test_swipe.py`, mutation-tested.
+
+
 - [ ] `P2` `feature` `@ai` Read each project's `TODO.md` and show an open-item count next to its launch button
 - [ ] `P2` `feature` `@me` Decide whether Ebook Converter deserves a tile — its job is
   already the embedded Convert Files tab, so a launch button would be a second door to
