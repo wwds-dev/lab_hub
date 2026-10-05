@@ -180,21 +180,22 @@
 
 What the review of df9c356 found and 1dc265b (wwds-dev/lab_hub#1) did not close: the
 port the fix now demands, three pre-existing faults noticed on the way, one decision, one
-check that needs the real machine, and the tidying that would let the three copies be one.
+check that needs the real machine, and the tidying that would let the two copies be one.
 
 - [ ] `P1` `infra` `@me` **Review and merge wwds-dev/lab_hub#1** — the converter fixes and the
   corrected drift guard, one commit on `claude/code-review-ultra-lab-hub-adsk4b`. Sourcery is
   green and there are no review threads; it is waiting on a human.
   https://github.com/wwds-dev/lab_hub/pull/1
-- [ ] `P1` `infra` `@me` **Merge the port of 1dc265b into Imprint and Audiobook Studio** —
-  wwds-dev/imprint#1 and wwds-dev/audiobook_studio#1, one commit each on
-  `claude/port-narrator-converter-fixes`. Until both are merged this copy of `converter.py`
-  differs from theirs and `tests/test_converter_drift.py` fails on the lab machine — the test
-  doing its job. Each copy keeps its own `OUTPUT_ROOT`, `DEFAULT_FORMAT`, `ON_SETTINGS_CHANGE`
-  and CLI docstring path (the `LOCAL` list); both siblings' own drift tests got the same fix,
-  and Imprint's converter tests follow the two signature changes (`text_to_audio()` takes
-  `chapters` and no `text`; `write_chapter_metadata()` a title and no `total_chunks`). With
-  the three checkouts side by side, all three drift tests pass.
+- [ ] `P1` `infra` `@me` **Merge the port of 1dc265b into Imprint** — wwds-dev/imprint#1, one
+  commit on `claude/port-narrator-converter-fixes`, merged up to Imprint's main. Until it is in,
+  this copy of `converter.py` differs from Imprint's and `tests/test_converter_drift.py` fails
+  on the lab machine — the test doing its job. Each copy keeps its own `OUTPUT_ROOT`,
+  `DEFAULT_FORMAT`, `ON_SETTINGS_CHANGE` and CLI docstring path (the `LOCAL` list); Imprint's
+  own drift test got the same fix, and its converter tests follow the two signature changes
+  (`text_to_audio()` takes `chapters` and no `text`; `write_chapter_metadata()` a title and no
+  `total_chunks`). With the two checkouts side by side, both drift tests pass. The standalone
+  Audiobook Studio was retired into Imprint on 2026-09-30, so wwds-dev/audiobook_studio#1, the
+  same port for that copy, is moot and can be closed.
 - [ ] `P1` `bug` `@ai` **A chunk cut off mid-stream is stitched into the finished book.**
   Pre-existing, noticed in the review. Stop in the Narrator tab terminates the worker; if
   `response.stream_to_file` was half way through `chunk_57.mp3`, a partial file stays behind.
@@ -202,7 +203,7 @@ check that needs the real machine, and the tidying that would let the three copi
   it, and merges a mid-sentence cut into a book it then reports as finished. Nothing says so
   — the same shape as the stale-chunk bug the drift guard exists for. Write each chunk to a
   temp name and rename on completion, so a cut leaves nothing a resume can mistake for done.
-  All three copies.
+  Both copies.
 - [ ] `P2` `feature` `@me` **Decide whether the Narrator tab should offer M4B.** The converter
   makes chaptered M4B behind `--format m4b`; the tab never passes `--format`, so Lab Hub is
   MP3-only by choice (df9c356). If yes: a format picker in `ui/narrator_tab.py`, `_validate`
@@ -216,7 +217,7 @@ check that needs the real machine, and the tidying that would let the three copi
 - [ ] `P3` `bug` `@ai` **MOBI and AZW3 leave `<stem>.converted.epub` beside the audiobook.**
   `convert_mobi_to_epub` writes into `book_out_dir`; neither `cleanup_after_success` nor
   `wipe_book_state` removes it. Write it into `temp_dir`, which both already clear.
-  Pre-existing. All three copies.
+  Pre-existing. Both copies.
 - [ ] `P3` `bug` `@ai` **Inside the frozen app, the converter's subprocesses inherit
   PyInstaller's environment.** `lab_hub/tools/convert/calibre.py` exists for this: its
   `subprocess_env()` restores the `DYLD_*` variables from `*_ORIG` (or drops them when
@@ -231,13 +232,14 @@ check that needs the real machine, and the tidying that would let the three copi
   with its own error shape, want one `_run_checked(cmd, what)` helper.
 - [ ] `P3` `design` `@ai` **The resume policy as an argument, not a per-copy constant.**
   `ON_SETTINGS_CHANGE` is the one line of real code the drift test has to be taught to look
-  away from, and the `REFUSE` branch ships in this copy dead. An
-  `--on-settings-change {rebuild,refuse}` flag (default `refuse`; the Narrator tab passes
-  `rebuild`) makes all three files identical. Cost: both sibling front-ends must pass it.
+  away from, and the `REFUSE` branch ships dead in both copies now that Audiobook Studio, the
+  one copy that refused, is retired. An `--on-settings-change {rebuild,refuse}` flag (default
+  `refuse`; the Narrator tab passes `rebuild`) makes both files identical. Cost: Imprint's
+  front-end must pass it too.
   Do it with the port above, or not at all.
 - [ ] `P3` `testing` `@ai` **The drift guard is itself a vendored copy, and guards one pair.**
-  `SELF` is hand-set and `LOCAL` hand-kept, so copied into the siblings there are three of it
-  that can drift. Derive `SELF` from `__file__`, and turn `_normalised` and the compare into
+  `SELF` is hand-set and `LOCAL` hand-kept, so copied into Imprint there are two of it that
+  can drift. Derive `SELF` from `__file__`, and turn `_normalised` and the compare into
   a table of `(mine, theirs, local)` so the other vendored pair the docstring names —
   `lab_hub/tools/convert/{calibre,formats,jobs,runner}.py` against `toolbox/convert_epub` —
   is guarded the same way. Those four headers say "keep the two in step"; nothing checks.
