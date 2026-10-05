@@ -178,24 +178,23 @@
 
 ## Narrator converter — open (2026-09-30)
 
-What the review of df9c356 found and 1dc265b (wwds-dev/lab_hub#1) did not close: the
-port the fix now demands, three pre-existing faults noticed on the way, one decision, one
-check that needs the real machine, and the tidying that would let the two copies be one.
+What the review of df9c356 found. The fix (1dc265b, wwds-dev/lab_hub#1) and its port to
+Imprint are merged; still open are three pre-existing faults noticed on the way, one
+decision, one check that needs the real machine, and the tidying that would let the two
+copies be one.
 
-- [ ] `P1` `infra` `@me` **Review and merge wwds-dev/lab_hub#1** — the converter fixes and the
-  corrected drift guard, one commit on `claude/code-review-ultra-lab-hub-adsk4b`. Sourcery is
-  green and there are no review threads; it is waiting on a human.
-  https://github.com/wwds-dev/lab_hub/pull/1
-- [ ] `P1` `infra` `@me` **Merge the port of 1dc265b into Imprint** — wwds-dev/imprint#1, one
-  commit on `claude/port-narrator-converter-fixes`, merged up to Imprint's main. Until it is in,
-  this copy of `converter.py` differs from Imprint's and `tests/test_converter_drift.py` fails
-  on the lab machine — the test doing its job. Each copy keeps its own `OUTPUT_ROOT`,
-  `DEFAULT_FORMAT`, `ON_SETTINGS_CHANGE` and CLI docstring path (the `LOCAL` list); Imprint's
-  own drift test got the same fix, and its converter tests follow the two signature changes
-  (`text_to_audio()` takes `chapters` and no `text`; `write_chapter_metadata()` a title and no
-  `total_chunks`). With the two checkouts side by side, both drift tests pass. The standalone
-  Audiobook Studio was retired into Imprint on 2026-09-30, so wwds-dev/audiobook_studio#1, the
-  same port for that copy, is moot and can be closed.
+- [x] `P1` `infra` `@me` **wwds-dev/lab_hub#1 merged** (2026-10-05) — the converter fixes and
+  the corrected drift guard, merged in the same minute as Imprint's port so neither drift
+  test was left failing. https://github.com/wwds-dev/lab_hub/pull/1
+- [x] `P1` `infra` `@ai` **The port of 1dc265b is in Imprint** (2026-10-05, wwds-dev/imprint#1).
+  Each copy keeps its own `OUTPUT_ROOT`, `DEFAULT_FORMAT`, `ON_SETTINGS_CHANGE` and CLI
+  docstring path (the `LOCAL` list); Imprint's own drift test got the same fix, its converter
+  tests follow the two signature changes (`text_to_audio()` takes `chapters` and no `text`;
+  `write_chapter_metadata()` a title and no `total_chunks`), and Sourcery's one finding there
+  — the audiobook panel and Reading Compass contract still refusing AZW3 — went in with it.
+  With both mains checked out side by side, both drift tests pass. The standalone Audiobook
+  Studio was retired into Imprint on 2026-09-30 and its repository archived, so
+  wwds-dev/audiobook_studio#1, the same port for that copy, stays frozen there.
 - [ ] `P1` `bug` `@ai` **A chunk cut off mid-stream is stitched into the finished book.**
   Pre-existing, noticed in the review. Stop in the Narrator tab terminates the worker; if
   `response.stream_to_file` was half way through `chunk_57.mp3`, a partial file stays behind.
