@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QMainWindow, QMessageBox, QStatusBar, QTabWidget
 
 from lab_hub import APP_NAME, asset_path, config, launcher, login_item, version
 
-from . import appkit_guard, dock, theme, tray
+from . import appkit_guard, dock, swipe, theme, tray
 from .apps_tab import AppsTab
 from .convert_tab import ConvertTab
 from .images_tab import ImagesTab
@@ -100,6 +100,13 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tools_tabs, "Tools")
         self.tabs.addTab(self.settings_tab, "Settings")
         self.setCentralWidget(self.tabs)
+
+        # Trackpad swipes change tab. Innermost first, so a swipe inside Tools
+        # moves between the tools and only reaches the window's own tabs once
+        # they run out — otherwise Tools is a room you can swipe into and not
+        # back out of.
+        self.swipe = swipe.SwipeTabs(self.tools_tabs, self.tabs, parent=self)
+        self.swipe.install()
 
         self.setStatusBar(QStatusBar())
 
