@@ -168,7 +168,9 @@ been opened and closed again by hand.
 
 Launch **Backup Control Center** and **git_autosync** from one place. Spelled
 "and", not "&": Qt reads an ampersand in a tab label as a mnemonic marker and
-renders "Backup & Sync" as "Backup _Sync".
+renders "Backup & Sync" as "Backup _Sync". Neither app has a launchpad tile, so
+the tab carries its own **Check builds** and Update now
+(`AppsTab(check_own_builds=True)`), scoped to these two.
 
 ### Tools
 
@@ -261,7 +263,8 @@ does not read and `launcher.APPS` — the self-test, the build report, Settings 
 does; `tests/test_tab_groups.py` pins both halves. Its card carries a **Check build**
 button — the launchpad's Check builds and Update now, scoped to Backstage alone
 (`AppsTab(check_own_builds=True)`), since a Tools-only app has no launchpad tile to be
-rebuilt from.
+rebuilt from. A scoped check says which apps it looked at and never reports
+"every app", which only the launchpad's all-apps report can claim.
 
 ### Settings
 Only the lab folder, and only because it cannot always be inferred: launching an

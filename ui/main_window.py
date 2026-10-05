@@ -67,6 +67,7 @@ class MainWindow(QMainWindow):
                 "Run backups and keep the lab's repositories synchronized. "
                 "Each control center opens in its own window."
             ),
+            check_own_builds=True,
         )
         self.convert_tab = ConvertTab(self.settings)
         self.narrator_tab = NarratorTab(self.settings)

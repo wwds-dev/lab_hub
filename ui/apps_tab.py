@@ -523,9 +523,9 @@ class AppsTab(QWidget):
         row = QHBoxLayout()
         row.addWidget(refresh)
         self.check_button: QPushButton | None = None
-        # One button, on the launchpad only, reporting every registered app.
-        # Three identical copies of it would be noise, and the question it
-        # answers — "am I opening the newest of everything?" — is not per-tab.
+        # One button reports every registered app, and it is the launchpad's:
+        # the question it answers — "am I opening the newest of everything?" —
+        # is not per-tab, and a copy of it on every tab would be noise.
         if check_builds:
             check = QPushButton("Check builds")
             check.setToolTip(
@@ -535,14 +535,18 @@ class AppsTab(QWidget):
             row.addWidget(check)
             self.check_button = check
         elif check_own_builds:
-            # A Tools-only app has no tile on the launchpad, so its own tab
-            # carries the same check and Update now — scoped to it alone, so the
-            # launchpad's all-apps report is still the only one of those.
+            # Backstage and the two sync companions have no launchpad tile, so
+            # their own tab carries the same check and Update now — scoped to
+            # the apps on that tab, so the launchpad's all-apps report is still
+            # the only one of those.
             count = len(self._build_apps)
             check = QPushButton("Check build" if count == 1 else "Check builds")
             check.setToolTip(
                 "Compare the installed app against its source checkout, and "
                 "rebuild it if it is behind"
+                if count == 1 else
+                "Compare these installed apps against their source checkouts, "
+                "and rebuild any that are behind"
             )
             check.clicked.connect(self.show_build_report)
             row.addWidget(check)
@@ -625,8 +629,13 @@ class AppsTab(QWidget):
             headline = (
                 f"Nothing is out of date, but {len(unknown)} could not be checked."
             )
-        else:
+        elif self._build_apps is None:
             headline = "Every app is the newest build of itself."
+        elif len(report) == 1:
+            headline = f"{report[0].app.name} is the newest build of itself."
+        else:
+            # A scoped report cannot speak for apps it never looked at.
+            headline = f"All {len(report)} apps are the newest build of themselves."
 
         lines = []
         for row in report:
