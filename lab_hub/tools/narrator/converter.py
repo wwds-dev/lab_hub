@@ -41,6 +41,10 @@ MANIFEST_FILENAME = "manifest.json"
 TEMP_DIRNAME = "temp_audio"
 FFMPEG_CONCAT_FILENAME = "ffmpeg_concat.txt"
 CHAPTER_METADATA_FILENAME = "chapters.ffmeta"
+# A chunk streams into "<name>.part" and takes its final name only once it is
+# complete, so a run stopped mid-stream leaves nothing a resume can mistake
+# for a finished chunk.
+CHUNK_PARTIAL_SUFFIX = ".part"
 
 # What the converter reads. MOBI and AZW3 are turned into EPUB by Calibre
 # first, so they also need ebook-convert on the machine.
@@ -476,7 +480,8 @@ def load_or_create_manifest(
         # audio into a "completed" book. Stale caches are wiped with the
         # manifest they belonged to.
         if temp_dir is not None and temp_dir.exists():
-            stale = sorted(temp_dir.glob("chunk_*.mp3"))
+            stale = sorted(temp_dir.glob("chunk_*.mp3")) + sorted(
+                temp_dir.glob("chunk_*.mp3" + CHUNK_PARTIAL_SUFFIX))
             for chunk_file in stale:
                 chunk_file.unlink()
             if stale:
@@ -503,6 +508,7 @@ def sync_manifest_with_files(manifest: dict, temp_dir: Path) -> dict:
 # ------------------------------------------------------
 
 def generate_tts_chunk(text: str, temp_path: Path, retries: int = RETRIES) -> bool:
+    partial_path = temp_path.with_name(temp_path.name + CHUNK_PARTIAL_SUFFIX)
     for attempt in range(1, retries + 1):
         try:
             kwargs = {
@@ -514,15 +520,18 @@ def generate_tts_chunk(text: str, temp_path: Path, retries: int = RETRIES) -> bo
                 kwargs["instructions"] = TTS_INSTRUCTIONS
 
             with get_client().audio.speech.with_streaming_response.create(**kwargs) as response:
-                response.stream_to_file(str(temp_path))
+                response.stream_to_file(str(partial_path))
+            os.replace(partial_path, temp_path)
             return True
 
         except AuthenticationError as e:
+            partial_path.unlink(missing_ok=True)
             print(f"\n❌ Authentication failed: {e}")
             print("   Check your OPENAI_API_KEY in .env")
             return False
 
         except Exception as e:
+            partial_path.unlink(missing_ok=True)
             err_str = str(e)
             if "insufficient_quota" in err_str or "exceeded your current quota" in err_str or "Billing hard limit" in err_str:
                 print(f"\n❌ insufficient_quota: Your OpenAI account has run out of credit.")
@@ -753,8 +762,9 @@ def text_to_audio(
 
 def cleanup_after_success(temp_dir: Path, manifest_path: Path):
     print("  Removing temp chunks and manifest...")
-    for f in temp_dir.glob("chunk_*.mp3"):
-        f.unlink(missing_ok=True)
+    for pattern in ("chunk_*.mp3", "chunk_*.mp3" + CHUNK_PARTIAL_SUFFIX):
+        for f in temp_dir.glob(pattern):
+            f.unlink(missing_ok=True)
 
     concat_file = temp_dir / FFMPEG_CONCAT_FILENAME
     concat_file.unlink(missing_ok=True)

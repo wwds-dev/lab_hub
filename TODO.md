@@ -195,14 +195,15 @@ copies be one.
   With both mains checked out side by side, both drift tests pass. The standalone Audiobook
   Studio was retired into Imprint on 2026-09-30 and its repository archived, so
   wwds-dev/audiobook_studio#1, the same port for that copy, stays frozen there.
-- [ ] `P1` `bug` `@ai` **A chunk cut off mid-stream is stitched into the finished book.**
-  Pre-existing, noticed in the review. Stop in the Narrator tab terminates the worker; if
-  `response.stream_to_file` was half way through `chunk_57.mp3`, a partial file stays behind.
-  `sync_manifest_with_files` trusts any non-empty file, so the next run marks it done, skips
-  it, and merges a mid-sentence cut into a book it then reports as finished. Nothing says so
-  — the same shape as the stale-chunk bug the drift guard exists for. Write each chunk to a
-  temp name and rename on completion, so a cut leaves nothing a resume can mistake for done.
-  Both copies.
+- [x] `P1` `bug` `@ai` **A chunk cut off mid-stream is no longer stitched into the finished
+  book** (2026-10-05). Stop in the Narrator tab terminates the worker; if
+  `response.stream_to_file` was half way through `chunk_57.mp3`, the bytes already streamed
+  sat under the chunk's final name, `sync_manifest_with_files` trusted any non-empty file,
+  and the next run merged a mid-sentence cut into a book it then reported as finished.
+  Nothing said so — the same shape as the stale-chunk bug the drift guard exists for. The
+  stream now goes to `chunk_57.mp3.part` and is renamed only once complete, so a cut leaves
+  nothing a resume can mistake for done; cleanup and the stale-chunk sweep remove partials
+  too. Pinned in Imprint's `tests/test_narrator_converter.py`; both copies.
 - [ ] `P2` `feature` `@me` **Decide whether the Narrator tab should offer M4B.** The converter
   makes chaptered M4B behind `--format m4b`; the tab never passes `--format`, so Lab Hub is
   MP3-only by choice (df9c356). If yes: a format picker in `ui/narrator_tab.py`, `_validate`
