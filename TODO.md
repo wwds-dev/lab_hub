@@ -178,9 +178,10 @@
 
 ## Narrator converter — open (2026-09-30)
 
-What the review of df9c356 found and 1dc265b (wwds-dev/lab_hub#1) did not close: the
-port the fix now demands, three pre-existing faults noticed on the way, one decision, one
-check that needs the real machine, and the tidying that would let the two copies be one.
+What the review of df9c356 found. The fix (1dc265b, wwds-dev/lab_hub#1) and its port to
+Imprint are merged; still open are three pre-existing faults noticed on the way, one
+decision, one check that needs the real machine, and the tidying that would let the two
+copies be one.
 
 - [x] `P1` `infra` `@me` **wwds-dev/lab_hub#1 merged** (2026-10-05) — the converter fixes and
   the corrected drift guard, merged in the same minute as Imprint's port so neither drift
