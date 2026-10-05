@@ -42,6 +42,11 @@ TEMP_DIRNAME = "temp_audio"
 FFMPEG_CONCAT_FILENAME = "ffmpeg_concat.txt"
 CHAPTER_METADATA_FILENAME = "chapters.ffmeta"
 
+# What the converter reads. MOBI and AZW3 are turned into EPUB by Calibre
+# first, so they also need ebook-convert on the machine.
+CALIBRE_SUFFIXES = (".mobi", ".azw3")
+SUPPORTED_SUFFIXES = (".epub", ".pdf", ".txt") + CALIBRE_SUFFIXES
+
 # Output formats. MP3 is a lossless stream copy of the chunks and plays
 # anywhere; M4B re-encodes to AAC and carries chapter marks, which is what
 # Apple Books and most audiobook players navigate by.
@@ -59,6 +64,11 @@ DEFAULT_FORMAT = FORMAT_MP3
 REBUILD_ON_CHANGE = "rebuild"
 REFUSE_ON_CHANGE = "refuse"
 ON_SETTINGS_CHANGE = REBUILD_ON_CHANGE
+
+
+class SettingsChanged(RuntimeError):
+    """A resume met a manifest from a run with different text or settings."""
+
 
 USD_PER_1M_INPUT_TOKENS = 0.60
 USD_PER_1M_OUTPUT_AUDIO_TOKENS = 12.00
@@ -216,10 +226,6 @@ def extract_pdf(path: Path) -> str:
     return text
 
 
-def extract_epub(path: Path) -> str:
-    return "\n\n".join(text for _, text in extract_epub_chapters(path))
-
-
 def extract_epub_chapters(path: Path) -> list[tuple[str, str]]:
     """(title, text) per section, in reading order.
 
@@ -254,7 +260,7 @@ def convert_mobi_to_epub(mobi_path: Path, work_dir: Path) -> Path:
         str(converted),
     ]
 
-    print(f"  Converting MOBI -> EPUB with Calibre: {mobi_path.name}")
+    print(f"  Converting {mobi_path.suffix.lstrip('.').upper()} -> EPUB with Calibre: {mobi_path.name}")
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.returncode != 0 or not converted.exists():
@@ -266,22 +272,30 @@ def convert_mobi_to_epub(mobi_path: Path, work_dir: Path) -> Path:
     return converted
 
 
-def load_text(path: Path, work_dir: Path | None = None) -> str:
+def load_chapters(path: Path, work_dir: Path | None = None) -> list[tuple[str, str]]:
+    """(title, text) per section of the book, in reading order.
+
+    Only EPUB, and what Calibre turns into EPUB, has sections. Everything else
+    is one chapter named after the book.
+    """
     suffix = path.suffix.lower()
 
-    if suffix == ".pdf":
-        return extract_pdf(path)
     if suffix == ".epub":
-        return extract_epub(path)
-    if suffix == ".txt":
-        return path.read_text(encoding="utf-8", errors="ignore")
-    if suffix == ".mobi":
+        return extract_epub_chapters(path)
+    if suffix in CALIBRE_SUFFIXES:
         if work_dir is None:
-            raise ValueError("work_dir is required for .mobi conversion")
-        epub_path = convert_mobi_to_epub(path, work_dir)
-        return extract_epub(epub_path)
+            raise ValueError(f"work_dir is required for {suffix} conversion")
+        return extract_epub_chapters(convert_mobi_to_epub(path, work_dir))
+    if suffix == ".pdf":
+        return [(clean_name(path.name), extract_pdf(path))]
+    if suffix == ".txt":
+        return [(clean_name(path.name), path.read_text(encoding="utf-8", errors="ignore"))]
 
     raise ValueError(f"Unsupported file type: {path}")
+
+
+def load_text(path: Path, work_dir: Path | None = None) -> str:
+    return "\n\n".join(text for _, text in load_chapters(path, work_dir))
 
 
 # ------------------------------------------------------
@@ -326,10 +340,10 @@ def estimate_audio_seconds_from_text(text: str, words_per_minute: float = 150.0)
 
 
 def get_audio_duration_seconds(audio_path: Path) -> float:
-    ensure_ffprobe_available()
+    ffprobe = ensure_ffprobe_available()
 
     cmd = [
-        "ffprobe",
+        ffprobe,
         "-v", "error",
         "-show_entries", "format=duration",
         "-of", "default=noprint_wrappers=1:nokey=1",
@@ -449,10 +463,10 @@ def load_or_create_manifest(
 
     if not compatible:
         if ON_SETTINGS_CHANGE == REFUSE_ON_CHANGE:
-            raise RuntimeError(
+            raise SettingsChanged(
                 "Source text or settings changed since this run began. The "
-                "audio generated so far cannot be reused safely. Use "
-                "--force-rebuild to start a new run."
+                "audio generated so far cannot be reused safely. Run again with "
+                f'--force-rebuild "{book_name}" to start over.'
             )
         print("  ⚠️ Existing manifest does not match current run.")
         print("  Rebuilding manifest from scratch.")
@@ -535,9 +549,13 @@ def ffmpeg_escape_concat_path(path: Path) -> str:
 
 
 def ffmetadata_escape(value: str) -> str:
-    """Escape a chapter title for an ffmetadata file."""
-    for source, target in (("\\", "\\\\"), ("=", "\\="), (";", "\\;"),
-                           ("#", "\\#"), ("\n", " ")):
+    """Escape a chapter title for an ffmetadata file.
+
+    One line, because the parser ends a value at any line break, with the
+    characters ffmetadata gives meaning to escaped.
+    """
+    value = " ".join(value.split())
+    for source, target in (("\\", "\\\\"), ("=", "\\="), (";", "\\;"), ("#", "\\#")):
         value = value.replace(source, target)
     return value
 
@@ -572,18 +590,19 @@ def merge_chunks_with_ffmpeg(
         encoding="utf-8",
     )
 
+    temp_output = output_path.with_suffix(f".tmp.{audio_format}")
+    cmd = [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file)]
     if audio_format == FORMAT_MP3:
-        temp_output = output_path.with_suffix(".tmp.mp3")
-        cmd = [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file),
-               "-c", "copy", str(temp_output)]
-    else:
+        cmd += ["-c", "copy"]
+    elif audio_format == FORMAT_M4B:
         metadata_file = write_chapter_metadata(
-            temp_dir, output_path, chunk_paths, chapter_starts or [], total_chunks)
-        temp_output = output_path.with_suffix(".tmp.m4b")
-        cmd = [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file),
-               "-i", str(metadata_file), "-map", "0:a:0", "-map_metadata", "1",
-               "-map_chapters", "1", "-c:a", "aac", "-b:a", "64k",
-               "-movflags", "+faststart", str(temp_output)]
+            temp_dir, output_path.stem, chunk_paths, chapter_starts or [])
+        cmd += ["-i", str(metadata_file), "-map", "0:a:0", "-map_metadata", "1",
+                "-map_chapters", "1", "-c:a", "aac", "-b:a", "64k",
+                "-movflags", "+faststart"]
+    else:
+        raise ValueError(f"Unsupported audio format: {audio_format!r}")
+    cmd.append(str(temp_output))
 
     result = subprocess.run(cmd, capture_output=True, text=True)
 
@@ -598,26 +617,30 @@ def merge_chunks_with_ffmpeg(
 
 def write_chapter_metadata(
     temp_dir: Path,
-    output_path: Path,
+    title: str,
     chunk_paths: list[Path],
     chapter_starts: list[tuple[str, int]],
-    total_chunks: int,
 ) -> Path:
-    """An ffmetadata file placing each chapter at its measured offset."""
-    durations_ms = [round(get_audio_duration_seconds(path) * 1000)
-                    for path in chunk_paths]
+    """An ffmetadata file placing each chapter at its measured offset.
+
+    Every chunk is probed once. The probes run in parallel because a long book
+    has hundreds of chunks and each probe is a process.
+    """
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        durations_ms = [round(seconds * 1000) for seconds in
+                        executor.map(get_audio_duration_seconds, chunk_paths)]
     offsets = [0]
     for duration in durations_ms:
         offsets.append(offsets[-1] + duration)
 
-    metadata = [";FFMETADATA1", f"title={ffmetadata_escape(output_path.stem)}"]
-    for index, (title, first_chunk) in enumerate(chapter_starts):
-        end_chunk = (chapter_starts[index + 1][1]
-                     if index + 1 < len(chapter_starts) else total_chunks)
+    # A chapter ends where the next begins; the last one ends with the book.
+    ends = [start for _, start in chapter_starts[1:]] + [len(chunk_paths)]
+    metadata = [";FFMETADATA1", f"title={ffmetadata_escape(title)}"]
+    for (chapter_title, first_chunk), end_chunk in zip(chapter_starts, ends):
         metadata += [
             "[CHAPTER]", "TIMEBASE=1/1000",
             f"START={offsets[first_chunk]}", f"END={offsets[end_chunk]}",
-            f"title={ffmetadata_escape(title)}",
+            f"title={ffmetadata_escape(chapter_title)}",
         ]
 
     metadata_file = temp_dir / CHAPTER_METADATA_FILENAME
@@ -630,21 +653,22 @@ def write_chapter_metadata(
 # ------------------------------------------------------
 
 def text_to_audio(
-    text: str,
+    chapters: list[tuple[str, str]],
     source_file: Path,
     book_name: str,
     output_path: Path,
     temp_dir: Path,
     manifest_path: Path,
-    chapters: list[tuple[str, str]] | None = None,
     audio_format: str = DEFAULT_FORMAT,
 ) -> bool:
     print("  Preparing text chunks...")
-    # Chunking per chapter rather than over the whole book keeps every chapter
-    # starting on a chunk boundary, which is what lets a chapter mark point at
-    # a real offset. With no chapters the whole book is one of them, and the
-    # chunking is identical to what it was before.
-    chapters = chapters or [(book_name, text)]
+    # A chapter mark needs its chapter to start on a chunk boundary, so M4B
+    # chunks chapter by chapter. MP3 carries no marks, so it chunks the whole
+    # book in one pass: those are the boundaries earlier versions drew, which
+    # keeps a run paused under one of them resumable, and it saves the short
+    # chunk (one TTS request) every section would otherwise end on.
+    if audio_format != FORMAT_M4B:
+        chapters = [(book_name, "\n\n".join(text for _, text in chapters))]
     chunks: list[str] = []
     chapter_starts: list[tuple[str, int]] = []
     for title, chapter_text in chapters:
@@ -829,6 +853,16 @@ def convert(input=None, output=None, voice=None, chunk_tokens=None,
               f"Expected one of {', '.join(AUDIO_FORMATS)}.")
         return False
 
+    # Both tools are first needed after every chunk has been generated and paid
+    # for, so look for them before the first request rather than after the last.
+    try:
+        ensure_ffmpeg_available()
+        if audio_format == FORMAT_M4B:
+            ensure_ffprobe_available()
+    except RuntimeError as e:
+        print(f"❌ {e}")
+        return False
+
     print(f"\n📚 Input path: {input_path}")  # show chosen input path
     print(f"🎧 Output root: {output_root}")  # show chosen output folder
     print(f"🗣️ Voice: {TTS_VOICE}")  # show chosen voice
@@ -842,11 +876,11 @@ def convert(input=None, output=None, voice=None, chunk_tokens=None,
         return False
 
     if input_path.is_file():
-        ebook_files = [input_path] if input_path.suffix.lower() in {".pdf", ".epub", ".txt", ".mobi"} else []  # single file mode
+        ebook_files = [input_path] if input_path.suffix.lower() in SUPPORTED_SUFFIXES else []  # single file mode
     else:
         ebook_files = sorted(
             f for f in input_path.iterdir()
-            if f.suffix.lower() in {".pdf", ".epub", ".txt", ".mobi"}
+            if f.suffix.lower() in SUPPORTED_SUFFIXES
         )  # folder mode
 
     if not ebook_files:
@@ -880,46 +914,45 @@ def convert(input=None, output=None, voice=None, chunk_tokens=None,
             print(f"  ✅ Final audiobook already exists, skipping: {output_path}")
             continue
 
+        # The chunks went when that run finished, so another format means
+        # narrating the book again. Say so before the money goes.
+        for other_format in AUDIO_FORMATS:
+            other_output = book_out_dir / f"{book_name}.{other_format}"
+            if other_format != audio_format and other_output.exists():
+                print(f"  ⚠️ {other_output.name} already exists; making {audio_format} "
+                      "narrates the whole book again.")
+
         print("  Extracting text...")
         try:
-            # Chapters only where the source actually has them. Everything else
-            # is one chapter, which is what the old single-string path was.
-            suffix = fp.suffix.lower()
-            if suffix == ".epub":
-                chapters = extract_epub_chapters(fp)
-            elif suffix == ".mobi":
-                chapters = extract_epub_chapters(
-                    convert_mobi_to_epub(fp, book_out_dir))
-            else:
-                chapters = [(book_name, load_text(fp, work_dir=book_out_dir))]
+            chapters = load_chapters(fp, work_dir=book_out_dir)
         except Exception as e:
             print(f"  ❌ Failed to read file: {e}")
             continue
 
         chapters = [(title, light_normalize(text)) for title, text in chapters]
-        raw = "\n\n".join(text for _, text in chapters)
+        text = "\n\n".join(text for _, text in chapters)
 
-        print("  Raw text length:", len(raw))
-        normalized = raw
-        print("  Normalized text length:", len(normalized))
+        print("  Text length:", len(text))
         if audio_format == FORMAT_M4B:
             print(f"  Chapters detected: {len(chapters)}")
 
-        text_tokens = count_text_tokens(normalized)
-        est_seconds = estimate_audio_seconds_from_text(normalized, words_per_minute=150.0)
+        text_tokens = count_text_tokens(text)
+        est_seconds = estimate_audio_seconds_from_text(text, words_per_minute=150.0)
         print_cost_estimate("Estimated cost before conversion:", text_tokens, est_seconds)
 
         try:
             success = text_to_audio(
-                text=normalized,
+                chapters=chapters,
                 source_file=fp,
                 book_name=book_name,
                 output_path=output_path,
                 temp_dir=temp_dir,
                 manifest_path=manifest_path,
-                chapters=chapters,
                 audio_format=audio_format,
             )
+        except SettingsChanged as e:
+            print(f"\n❌ {e}")
+            return False
         except Exception as e:
             print(f"\n❌ Fatal error while processing {fp.name}: {e}")
             print("▶️ Fix the issue and run the script again to resume.")
