@@ -23,6 +23,8 @@ def test_backup_and_sync_apps_have_their_own_tab(window):
         app.key for app in launcher.BACKUP_SYNC_APPS
     ]
     assert _keys(window.backup_sync_tab) == ["backup_manager", "git_autosync"]
+    # No launchpad tile either, so rebuild them from here.
+    assert window.backup_sync_tab.check_button.text() == "Check builds"
 
 
 def test_tools_include_built_in_tools_and_unblock_tracker(window):

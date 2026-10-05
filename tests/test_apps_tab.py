@@ -451,6 +451,47 @@ def test_a_tools_only_tab_checks_its_own_build(qapp, tmp_path, monkeypatch):
     shiboken6.delete(tab)
 
 
+def test_a_scoped_check_never_speaks_for_every_app(qapp, tmp_path, monkeypatch):
+    """Backup and Sync checks its own two apps. "Every app is the newest build"
+    is the launchpad's answer, and this report has not looked at every app."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from lab_hub import config
+    from ui.apps_tab import AppsTab
+
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    apps = (launcher.ExternalApp("c", "C", "c", "main.py", "s"),
+            launcher.ExternalApp("d", "D", "d", "main.py", "s"))
+    tab = AppsTab(config.Settings(), apps, "C and D", "intro", check_own_builds=True)
+    assert tab.check_button.text() == "Check builds"
+
+    asked = []
+
+    def report(root, scope=None):
+        asked.append(scope)
+        return tuple(
+            launcher.BuildStatus(app, launcher.Version("1.0", "bundle"), "current",
+                                 "matches its source.")
+            for app in apps
+        )
+
+    seen = {}
+    monkeypatch.setattr(launcher, "build_report", report)
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: seen.update(
+        text=self.text(), labels={b.text() for b in self.buttons()}))
+    tab.show_build_report()
+
+    assert asked == [apps]
+    assert seen["text"] == "All 2 apps are the newest build of themselves."
+    # Nothing to rebuild, so no Update now.
+    assert "Update now" not in seen["labels"]
+
+    import shiboken6
+
+    tab._poll.stop()
+    shiboken6.delete(tab)
+
+
 def test_copying_the_commands_puts_them_on_the_clipboard(qapp, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QApplication
 
