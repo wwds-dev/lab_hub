@@ -194,7 +194,7 @@ copies be one.
   — the audiobook panel and Reading Compass contract still refusing AZW3 — went in with it.
   With both mains checked out side by side, both drift tests pass. The standalone Audiobook
   Studio was retired into Imprint on 2026-09-30 and its repository archived, so
-  wwds-dev/audiobook_studio#1, the same port for that copy, stays frozen there.
+  wwds-dev/audiobook_studio#1, the same port for that copy, was closed unmerged (2026-10-06).
 - [x] `P1` `bug` `@ai` **A chunk cut off mid-stream is no longer stitched into the finished
   book** (2026-10-05). Stop in the Narrator tab terminates the worker; if
   `response.stream_to_file` was half way through `chunk_57.mp3`, the bytes already streamed
