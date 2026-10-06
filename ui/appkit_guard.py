@@ -32,6 +32,17 @@ deliberately narrow: one selector, an unchanged answer for every event the
 method was ever valid for, and a clean failure that leaves AppKit untouched if
 any step does not resolve. Remove it when Qt ships a fixed cocoa plugin — the
 test that proves it is `tests/test_appkit_guard.py`.
+
+## The copies
+
+This file is the original. `sonar/ui/appkit_guard.py` (2026-09-22) and
+`imprint/ui/appkit_guard.py` (2026-10-06) are deliberate copies of it, because
+there is no shared package in this workspace to put it in. **The code in all
+three is byte-identical — change one, change the rest**, and delete all three
+together when the fixed plugin lands. Only the docstrings differ, each saying
+what the menu means in that app. `AGENTS.md` keeps the roster of which apps
+here have a tray menu and therefore need this; `backup_manager` and
+`git_autosync` are on it and still unguarded.
 """
 
 from __future__ import annotations
