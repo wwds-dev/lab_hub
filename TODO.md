@@ -255,13 +255,16 @@ copies be one.
   no TTS spend — if the chunk durations survived `cleanup_after_success` (keep
   `chapters.ffmeta`, or the durations in a retained manifest). Today the run warns and
   narrates the book again.
-- [ ] `P3` `bug` `@ai` **Two conversions of the same book at once corrupt each other.** Nothing
-  locks a book's output folder: two runs share `manifest.json` and the chunk names (and now
-  the `.part` names), so each can publish or delete the other's work. The Narrator tab runs
-  one worker at a time, so it takes the CLI and the tab, or two tabs, on the same book. A
-  lock file beside the manifest, created with `O_EXCL` and holding the pid, checked for a
-  live process on resume, would refuse the second run with a clear message. Raised by
-  Sourcery on wwds-dev/imprint#2. Both copies.
+- [x] `P3` `bug` `@ai` **Two conversions of the same book at once no longer corrupt each
+  other** (2026-10-06). Nothing locked a book's output folder: two runs shared
+  `manifest.json` and the chunk names, so each could publish or delete the other's work (the
+  CLI and the tab, or two tabs, on the same book). `narrator.lock` beside the manifest now
+  holds the pid of the run that owns the folder, created with `O_EXCL` so of two runs
+  starting together only one wins; a second run is refused before it reads the text, with
+  the lock's path in the message. A lock whose pid is gone was left by Stop in the tab or a
+  crash and is taken over; one that holds no pid is left for a human, since it cannot be told
+  from one a run is still writing. Raised by Sourcery on wwds-dev/imprint#2. Pinned in
+  Imprint's `tests/test_narrator_converter.py`; both copies.
 - [x] `P3` `infra` `@ai` **Four pre-existing lint warnings in `converter.py`** (2026-10-06) —
   two f-strings without placeholders (`F541`), one long line (`E501`) and one missing blank
   line before `def convert` (`E302`), left alone in 1dc265b so the review diff stayed

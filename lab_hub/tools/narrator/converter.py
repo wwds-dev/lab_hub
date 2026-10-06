@@ -38,6 +38,7 @@ MANIFEST_SAVE_EVERY = 5
 MAX_INPUT_TOKENS_PER_CHUNK = 1500
 
 MANIFEST_FILENAME = "manifest.json"
+LOCK_FILENAME = "narrator.lock"
 TEMP_DIRNAME = "temp_audio"
 CONVERTED_EPUB_SUFFIX = ".converted.epub"
 FFMPEG_CONCAT_FILENAME = "ffmpeg_concat.txt"
@@ -78,6 +79,10 @@ ON_SETTINGS_CHANGE = REBUILD_ON_CHANGE
 
 class SettingsChanged(RuntimeError):
     """A resume met a manifest from a run with different text or settings."""
+
+
+class BookLocked(RuntimeError):
+    """Another running conversion holds the book's folder."""
 
 
 USD_PER_1M_INPUT_TOKENS = 0.60
@@ -268,6 +273,72 @@ def wipe_book_state(book_out_dir: Path):
         shutil.rmtree(temp_dir)
     if manifest_path.exists():
         manifest_path.unlink()
+
+
+def pid_is_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # it exists; it belongs to another user
+    return True
+
+
+class BookLock:
+    """One conversion per book folder at a time.
+
+    Two runs on the same book share `manifest.json` and the chunk names, so
+    each can publish or delete the other's work. The Narrator tab runs one
+    worker, but the CLI and the tab, or two tabs, on the same book would race.
+    The lock file beside the manifest names the pid of the run that owns the
+    folder. It is created with O_EXCL, so of two runs starting together only
+    one wins; a lock whose pid is no longer running was left by a kill or a
+    crash and is taken over. Released on the way out, whatever the way.
+    """
+
+    def __init__(self, book_out_dir: Path):
+        self.path = book_out_dir / LOCK_FILENAME
+
+    def __enter__(self):
+        for _attempt in range(3):
+            try:
+                fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+            except FileExistsError:
+                try:
+                    holder = self._holder()
+                except FileNotFoundError:
+                    continue  # released between our two looks
+                if holder is None or pid_is_alive(holder):
+                    raise BookLocked(self._refusal(holder))
+                self.path.unlink(missing_ok=True)  # stale: its process is gone
+                continue
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(str(os.getpid()))
+            # Two runs that both found a stale lock can unlink each other's
+            # fresh one; whoever's pid is in the file now owns the folder.
+            if self._holder() == os.getpid():
+                return self
+            raise BookLocked(self._refusal(self._holder()))
+        raise BookLocked(self._refusal(None))
+
+    def __exit__(self, *_exc):
+        self.path.unlink(missing_ok=True)
+
+    def _holder(self) -> int | None:
+        """The pid in the lock file, or None when it holds no pid."""
+        try:
+            return int(self.path.read_text(encoding="utf-8").strip())
+        except ValueError:
+            return None
+
+    def _refusal(self, holder: int | None) -> str:
+        who = f" (pid {holder})" if holder else ""
+        return (
+            f"Another conversion of {self.path.parent.name} is running{who}.\n"
+            "Wait for it to finish, or stop it, then run again. If none is running, "
+            f"delete {self.path} and run again."
+        )
 
 
 def matches_force_target(fp: Path, book_name: str, force_target: str | None) -> bool:
@@ -976,76 +1047,81 @@ def convert(input=None, output=None, voice=None, chunk_tokens=None,
         book_out_dir = output_root / book_name
         book_out_dir.mkdir(parents=True, exist_ok=True)
 
-        output_path = book_out_dir / f"{book_name}.{audio_format}"
-        temp_dir = book_out_dir / TEMP_DIRNAME
-        manifest_path = book_out_dir / MANIFEST_FILENAME
-
-        if matches_force_target(fp, book_name, force_rebuild):
-            print(f"  🧹 Force rebuild requested for: {fp.name}")
-            wipe_book_state(book_out_dir)
-            if output_path.exists():
-                output_path.unlink()
-
-        if output_path.exists():
-            print(f"  ✅ Final audiobook already exists, skipping: {output_path}")
-            continue
-
-        # The chunks went when that run finished, so another format means
-        # narrating the book again. Say so before the money goes.
-        for other_format in AUDIO_FORMATS:
-            other_output = book_out_dir / f"{book_name}.{other_format}"
-            if other_format != audio_format and other_output.exists():
-                print(f"  ⚠️ {other_output.name} already exists; making {audio_format} "
-                      "narrates the whole book again.")
-
-        print("  Extracting text...")
         try:
-            chapters = load_chapters(fp, work_dir=temp_dir)
-        except Exception as e:
-            print(f"  ❌ Failed to read file: {e}")
-            continue
+            with BookLock(book_out_dir):
+                output_path = book_out_dir / f"{book_name}.{audio_format}"
+                temp_dir = book_out_dir / TEMP_DIRNAME
+                manifest_path = book_out_dir / MANIFEST_FILENAME
 
-        chapters = [(title, light_normalize(text)) for title, text in chapters]
-        text = "\n\n".join(text for _, text in chapters)
+                if matches_force_target(fp, book_name, force_rebuild):
+                    print(f"  🧹 Force rebuild requested for: {fp.name}")
+                    wipe_book_state(book_out_dir)
+                    if output_path.exists():
+                        output_path.unlink()
 
-        print("  Text length:", len(text))
-        if audio_format == FORMAT_M4B:
-            print(f"  Chapters detected: {len(chapters)}")
+                if output_path.exists():
+                    print(f"  ✅ Final audiobook already exists, skipping: {output_path}")
+                    continue
 
-        text_tokens = count_text_tokens(text)
-        est_seconds = estimate_audio_seconds_from_text(text, words_per_minute=150.0)
-        print_cost_estimate("Estimated cost before conversion:", text_tokens, est_seconds)
+                # The chunks went when that run finished, so another format means
+                # narrating the book again. Say so before the money goes.
+                for other_format in AUDIO_FORMATS:
+                    other_output = book_out_dir / f"{book_name}.{other_format}"
+                    if other_format != audio_format and other_output.exists():
+                        print(f"  ⚠️ {other_output.name} already exists; making {audio_format} "
+                              "narrates the whole book again.")
 
-        try:
-            success = text_to_audio(
-                chapters=chapters,
-                source_file=fp,
-                book_name=book_name,
-                output_path=output_path,
-                temp_dir=temp_dir,
-                manifest_path=manifest_path,
-                audio_format=audio_format,
-            )
-        except SettingsChanged as e:
-            print(f"\n❌ {e}")
+                print("  Extracting text...")
+                try:
+                    chapters = load_chapters(fp, work_dir=temp_dir)
+                except Exception as e:
+                    print(f"  ❌ Failed to read file: {e}")
+                    continue
+
+                chapters = [(title, light_normalize(text)) for title, text in chapters]
+                text = "\n\n".join(text for _, text in chapters)
+
+                print("  Text length:", len(text))
+                if audio_format == FORMAT_M4B:
+                    print(f"  Chapters detected: {len(chapters)}")
+
+                text_tokens = count_text_tokens(text)
+                est_seconds = estimate_audio_seconds_from_text(text, words_per_minute=150.0)
+                print_cost_estimate("Estimated cost before conversion:", text_tokens, est_seconds)
+
+                try:
+                    success = text_to_audio(
+                        chapters=chapters,
+                        source_file=fp,
+                        book_name=book_name,
+                        output_path=output_path,
+                        temp_dir=temp_dir,
+                        manifest_path=manifest_path,
+                        audio_format=audio_format,
+                    )
+                except SettingsChanged as e:
+                    print(f"\n❌ {e}")
+                    return False
+                except Exception as e:
+                    print(f"\n❌ Fatal error while processing {fp.name}: {e}")
+                    print("▶️ Fix the issue and run the script again to resume.")
+                    return False
+
+                if not success:
+                    print("\n⏸️ Conversion paused.")
+                    print("▶️ Run the script again later to automatically resume.")
+                    return False
+
+                try:
+                    final_seconds = get_audio_duration_seconds(output_path)
+                    print_cost_estimate("Final estimated cost after conversion:", text_tokens, final_seconds)
+                except Exception as e:
+                    print(f"  ⚠️ Could not calculate final duration/cost: {e}")
+
+                cleanup_after_success(temp_dir, manifest_path)
+        except BookLocked as e:
+            print(f"  ❌ {e}")
             return False
-        except Exception as e:
-            print(f"\n❌ Fatal error while processing {fp.name}: {e}")
-            print("▶️ Fix the issue and run the script again to resume.")
-            return False
-
-        if not success:
-            print("\n⏸️ Conversion paused.")
-            print("▶️ Run the script again later to automatically resume.")
-            return False
-
-        try:
-            final_seconds = get_audio_duration_seconds(output_path)
-            print_cost_estimate("Final estimated cost after conversion:", text_tokens, final_seconds)
-        except Exception as e:
-            print(f"  ⚠️ Could not calculate final duration/cost: {e}")
-
-        cleanup_after_success(temp_dir, manifest_path)
 
     print("\n🎉 ALL BOOKS COMPLETED SUCCESSFULLY!")
     return True
