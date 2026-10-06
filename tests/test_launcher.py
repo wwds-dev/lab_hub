@@ -273,7 +273,7 @@ def test_the_executable_comes_from_the_plist(tmp_path, monkeypatch):
     (macos / "applet").write_text("#!/bin/sh\n")
     with (tmp_path / "Sentinel.app" / "Contents" / "Info.plist").open("wb") as f:
         plistlib.dump({"CFBundleExecutable": "applet"}, f)
-    app = launcher.ExternalApp("sf", "Sentinel", "sentinel_fork", "main.py", "")
+    app = launcher.ExternalApp("sf", "Sentinel", "sentinel", "main.py", "")
 
     assert launcher.bundle_executable(app).name == "applet"
     assert launcher.readiness(app, tmp_path).ok
@@ -353,11 +353,11 @@ def test_an_installed_app_running_from_its_checkout_counts_as_running(
     """
     monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
     make_bundle(tmp_path, "Sentinel")
-    _project(tmp_path, "sentinel_fork")
-    app = launcher.ExternalApp("sf", "Sentinel", "sentinel_fork", "main.py", "")
+    _project(tmp_path, "sentinel")
+    app = launcher.ExternalApp("sf", "Sentinel", "sentinel", "main.py", "")
     table = (
         "/bin/zsh\n"
-        f"{tmp_path}/sentinel_fork/.venv/bin/python {tmp_path}/sentinel_fork/main.py\n"
+        f"{tmp_path}/sentinel/.venv/bin/python {tmp_path}/sentinel/main.py\n"
     )
 
     assert launcher.is_running(app, tmp_path, table)
@@ -377,20 +377,20 @@ def test_the_bundle_still_counts_on_its_own(tmp_path, monkeypatch):
 def test_both_markers_are_offered_when_both_exist(tmp_path, monkeypatch):
     monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
     make_bundle(tmp_path, "Sentinel")
-    _project(tmp_path, "sentinel_fork")
-    app = launcher.ExternalApp("sf", "Sentinel", "sentinel_fork", "main.py", "")
+    _project(tmp_path, "sentinel")
+    app = launcher.ExternalApp("sf", "Sentinel", "sentinel", "main.py", "")
 
     markers = launcher.running_markers(app, tmp_path)
 
     assert str(tmp_path / "Sentinel.app" / "Contents" / "MacOS") in markers
-    assert str(tmp_path / "sentinel_fork" / "main.py") in markers
+    assert str(tmp_path / "sentinel" / "main.py") in markers
 
 
 def test_an_unrelated_process_is_not_mistaken_for_it(tmp_path, monkeypatch):
     monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
     make_bundle(tmp_path, "Sentinel")
-    _project(tmp_path, "sentinel_fork")
-    app = launcher.ExternalApp("sf", "Sentinel", "sentinel_fork", "main.py", "")
+    _project(tmp_path, "sentinel")
+    app = launcher.ExternalApp("sf", "Sentinel", "sentinel", "main.py", "")
 
     assert not launcher.is_running(app, tmp_path, "/bin/zsh\n/usr/bin/python main.py\n")
 
@@ -569,8 +569,8 @@ def test_a_launcher_bundle_answers_with_the_checkout(tmp_path, monkeypatch):
     (bundle / "Contents" / "Resources").mkdir(parents=True, exist_ok=True)
     (bundle / "Contents" / "Resources" / "project_root.txt").write_text("/somewhere")
     _stamp(bundle, build=999)  # even a stamp must not win here
-    _checkout(tmp_path, "sentinel_fork", monkeypatch=monkeypatch)
-    app = launcher.ExternalApp("sf", "Sentinel", "sentinel_fork", "main.py", "")
+    _checkout(tmp_path, "sentinel", monkeypatch=monkeypatch)
+    app = launcher.ExternalApp("sf", "Sentinel", "sentinel", "main.py", "")
 
     found = launcher.version(app, tmp_path)
 
@@ -603,13 +603,13 @@ def test_a_source_only_app_answers_with_the_checkout(tmp_path, monkeypatch):
 
 
 def test_a_version_file_holding_a_whole_version_yields_the_arc(tmp_path, monkeypatch):
-    """`sentinel_fork/VERSION` holds `2.001` against a convention that says the
+    """`sentinel/VERSION` holds `2.001` against a convention that says the
     build half is derived. Take the arc; derive the rest."""
     monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
-    project = _project(tmp_path, "sentinel_fork")
+    project = _project(tmp_path, "sentinel")
     (project / "VERSION").write_text("2.001\n")
     monkeypatch.setattr(launcher, "_commit_count", lambda _project: 55)
-    app = launcher.ExternalApp("sf", "Sentinel", "sentinel_fork", "main.py", "")
+    app = launcher.ExternalApp("sf", "Sentinel", "sentinel", "main.py", "")
 
     text = launcher.version(app, tmp_path).text
 
@@ -691,8 +691,8 @@ def test_a_launcher_bundle_is_never_behind(tmp_path, monkeypatch):
     (bundle / "Contents" / "Resources").mkdir(parents=True, exist_ok=True)
     (bundle / "Contents" / "Resources" / "project_root.txt").write_text("/somewhere")
     _stamp(bundle, build=1)
-    _checkout(tmp_path, "sentinel_fork", monkeypatch=monkeypatch, build=55)
-    app = launcher.ExternalApp("sf", "Sentinel", "sentinel_fork", "main.py", "")
+    _checkout(tmp_path, "sentinel", monkeypatch=monkeypatch, build=55)
+    app = launcher.ExternalApp("sf", "Sentinel", "sentinel", "main.py", "")
 
     found = launcher.version(app, tmp_path)
 
@@ -790,9 +790,9 @@ def test_a_launcher_bundle_is_never_out_of_date(tmp_path, monkeypatch):
     bundle = make_bundle(tmp_path, "Sentinel")
     (bundle / "Contents" / "Resources").mkdir(parents=True, exist_ok=True)
     (bundle / "Contents" / "Resources" / "project_root.txt").write_text("/x")
-    _checkout(tmp_path, "sentinel_fork", monkeypatch=monkeypatch, build=55)
+    _checkout(tmp_path, "sentinel", monkeypatch=monkeypatch, build=55)
     monkeypatch.setattr(launcher, "dirty_checkout", lambda _project: True)
-    app = launcher.ExternalApp("sf", "Sentinel", "sentinel_fork", "main.py", "")
+    app = launcher.ExternalApp("sf", "Sentinel", "sentinel", "main.py", "")
 
     row = launcher.build_status(app, tmp_path)
 
@@ -879,7 +879,7 @@ def test_a_script_that_installs_by_default_is_left_alone(tmp_path):
 def test_a_nested_script_is_named_from_the_project_root(tmp_path):
     """`cd <project> && ./scripts/build_app.sh`, not a cd into scripts/ — the
     script resolves its own paths relative to the project."""
-    project = tmp_path / "sentinel_fork"
+    project = tmp_path / "sentinel"
     script = _script(project, "scripts/build_app.sh", "#!/bin/bash\n")
 
     command = launcher.install_command(project, script)

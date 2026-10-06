@@ -68,14 +68,14 @@
   `Create & Publish.app` was still installed, so the card read *Installed* and
   silently launched a stale build. Worse than a dead tile.
 - [x] `P2` `design` `@ai` **Umbrella apps only — agents are not separately launchable.**
-  Tunnel and Bug Spray live inside Sentinel (`sentinel_fork/agents/`), the video
+  Tunnel and Bug Spray live inside Sentinel (`sentinel/agents/`), the video
   pipeline inside Imprint, macro and Playmaker inside SONAR. Lab Hub lists the three
   umbrella apps and nothing below them, in the Apps tab and the menu bar alike. The
   nested-companion rows tried in between are gone: they still offered a second door to
   a feature that belongs to its parent app. `/Applications/VPN Agent.app` is still
   installed and **stale** (built Aug 17; the source has commits through Sep 9). It is
   not orphaned — `build_app.sh` and the spec moved along with the source to
-  `sentinel_fork/agents/vpn_agent`, so it rebuilds from there. Not deleted: VPN Agent
+  `sentinel/agents/vpn_agent`, so it rebuilds from there. Not deleted: VPN Agent
   is essential to Sentinel and is being worked on elsewhere.
   `tests/test_tab_groups.py`, `tests/test_tray.py`.
 - [x] `P3` `design` `@ai` Menu bar lists **top-level apps only** — companions were
@@ -274,7 +274,7 @@ copies be one.
   (Imprint imports the same pipeline as its Video mode) and `VPN Agent.app` (stale, and
   a second door to an agent that belongs inside Sentinel). None was referenced by a
   LaunchAgent, and no source was touched: VPN Agent rebuilds from
-  `sentinel_fork/agents/vpn_agent/build_app.sh`, vidforge from its own repo, and
+  `sentinel/agents/vpn_agent/build_app.sh`, vidforge from its own repo, and
   Sentinel AI is archived but fully pushed to GitHub.
 - [ ] `P3` `feature` `@ai` Global search across every project's docs from the hub
 - [ ] `P3` `feature` `@ai` Per-app last-launched timestamp and crash count

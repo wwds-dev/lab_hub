@@ -52,7 +52,7 @@ def test_the_apps_tab_lists_the_suites(window):
     `sentinel_ai` is archived and `create_and_publish` was renamed to
     `imprint`, so neither belongs here any more.
     """
-    assert _keys(window.apps_tab) == ["sentinel_fork", "imprint", "sonar"]
+    assert _keys(window.apps_tab) == ["sentinel", "imprint", "sonar"]
 
 
 def test_agents_are_not_separately_launchable(window):

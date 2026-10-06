@@ -67,7 +67,7 @@ lift — is swallowed. Without that, inertia alone walks several tabs.
 One tile per umbrella app: **Sentinel**, **Imprint**, **SONAR**.
 
 **Agents and sub-modules are deliberately not here.** Tunnel and Bug Spray live
-inside Sentinel (`sentinel_fork/agents/`), the video pipeline inside Imprint,
+inside Sentinel (`sentinel/agents/`), the video pipeline inside Imprint,
 macro and Playmaker inside SONAR — and each is reached from its own app, never from
 Lab Hub. Two doors to the same feature is how you end up with a standalone VPN
 Agent window that knows nothing about the Sentinel session that should own
