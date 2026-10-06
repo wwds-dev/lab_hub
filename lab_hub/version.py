@@ -48,7 +48,7 @@ def is_frozen() -> bool:
 
 def _read_major() -> str:
     """The arc, from the VERSION file. Split on the dot so a file holding a
-    whole version — `sentinel_fork` has one — still yields the arc."""
+    whole version — `sentinel` has one — still yields the arc."""
     for candidate in (PROJECT_ROOT / "VERSION", resource_path("VERSION")):
         try:
             text = candidate.read_text(encoding="utf-8").strip()

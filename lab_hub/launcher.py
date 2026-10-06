@@ -97,9 +97,9 @@ class ExternalApp:
 # Sentinel session that should own it.
 SUITES: tuple[ExternalApp, ...] = (
     ExternalApp(
-        key="sentinel_fork",
+        key="sentinel",
         name="Sentinel",
-        project="sentinel_fork",
+        project="sentinel",
         entry="main.py",
         summary="Security and investigation command centre. Its agents — Chat, "
         "Trace, Bloodhound, Beacon, Forge, Tunnel and Bug Spray — live inside it.",
@@ -540,7 +540,7 @@ def _commit_count(project: Path) -> int | None:
 def _major(project: Path) -> str | None:
     """The product arc: the VERSION file, else the `## vN` heading in TODO.md.
 
-    Split on the first dot because `sentinel_fork/VERSION` holds `2.001` — the
+    Split on the first dot because `sentinel/VERSION` holds `2.001` — the
     whole version, hand-written, against a convention that says the build half
     is derived. Taking the arc and deriving the rest keeps that file honest
     without editing another project's tree.
