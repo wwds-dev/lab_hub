@@ -45,6 +45,11 @@ CHAPTER_METADATA_FILENAME = "chapters.ffmeta"
 # complete, so a run stopped mid-stream leaves nothing a resume can mistake
 # for a finished chunk.
 CHUNK_PARTIAL_SUFFIX = ".part"
+# Manifest format 2 records that chunks reach their final name only when
+# complete. A manifest without it was written by a version that streamed
+# straight into the final name, so a chunk it never recorded as done may be
+# the one a stop cut short.
+MANIFEST_FORMAT = 2
 
 # What the converter reads. MOBI and AZW3 are turned into EPUB by Calibre
 # first, so they also need ebook-convert on the machine.
@@ -427,6 +432,7 @@ def build_manifest(book_name: str, source_file: Path, chunks: list[str]) -> dict
         "tts_instructions": TTS_INSTRUCTIONS,
         "max_input_tokens_per_chunk": MAX_INPUT_TOKENS_PER_CHUNK,
         "total_chunks": len(chunks),
+        "format": MANIFEST_FORMAT,
         "chunks": [
             {
                 "index": i,
@@ -494,12 +500,27 @@ def load_or_create_manifest(
 
 
 def sync_manifest_with_files(manifest: dict, temp_dir: Path) -> dict:
+    """Make the manifest agree with the chunk files on disk.
+
+    A chunk under its final name is complete, because it only gets that name
+    once its stream has finished. Two exceptions: a partial left by a stop is
+    swept, and a manifest from before partial files existed is trusted only
+    where it recorded the chunk as done, since a chunk it never recorded may
+    be the one a stop cut short.
+    """
+    for partial in temp_dir.glob("chunk_*.mp3" + CHUNK_PARTIAL_SUFFIX):
+        partial.unlink(missing_ok=True)
+
+    legacy = manifest.get("format", 1) < MANIFEST_FORMAT
     for entry in manifest["chunks"]:
         chunk_file = temp_dir / entry["filename"]
-        if chunk_file.exists() and chunk_file.stat().st_size > 0:
-            entry["status"] = "done"
-        else:
-            entry["status"] = "pending"
+        present = chunk_file.exists() and chunk_file.stat().st_size > 0
+        if present and legacy and entry["status"] != "done":
+            chunk_file.unlink()
+            present = False
+        entry["status"] = "done" if present else "pending"
+
+    manifest["format"] = MANIFEST_FORMAT
     return manifest
 
 
