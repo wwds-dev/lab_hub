@@ -202,8 +202,11 @@ copies be one.
   and the next run merged a mid-sentence cut into a book it then reported as finished.
   Nothing said so — the same shape as the stale-chunk bug the drift guard exists for. The
   stream now goes to `chunk_57.mp3.part` and is renamed only once complete, so a cut leaves
-  nothing a resume can mistake for done; cleanup and the stale-chunk sweep remove partials
-  too. Pinned in Imprint's `tests/test_narrator_converter.py`; both copies.
+  nothing a resume can mistake for done; a resume, cleanup and the stale-chunk sweep remove
+  partials. A manifest from before this change is trusted only where it recorded a chunk as
+  done, since a chunk it never recorded may be the one a stop cut short (at most the few
+  finished since the last manifest save are redone). Pinned in Imprint's
+  `tests/test_narrator_converter.py`; both copies.
 - [ ] `P2` `feature` `@me` **Decide whether the Narrator tab should offer M4B.** The converter
   makes chaptered M4B behind `--format m4b`; the tab never passes `--format`, so Lab Hub is
   MP3-only by choice (df9c356). If yes: a format picker in `ui/narrator_tab.py`, `_validate`
@@ -248,6 +251,13 @@ copies be one.
   no TTS spend — if the chunk durations survived `cleanup_after_success` (keep
   `chapters.ffmeta`, or the durations in a retained manifest). Today the run warns and
   narrates the book again.
+- [ ] `P3` `bug` `@ai` **Two conversions of the same book at once corrupt each other.** Nothing
+  locks a book's output folder: two runs share `manifest.json` and the chunk names (and now
+  the `.part` names), so each can publish or delete the other's work. The Narrator tab runs
+  one worker at a time, so it takes the CLI and the tab, or two tabs, on the same book. A
+  lock file beside the manifest, created with `O_EXCL` and holding the pid, checked for a
+  live process on resume, would refuse the second run with a clear message. Raised by
+  Sourcery on wwds-dev/imprint#2. Both copies.
 - [ ] `P3` `infra` `@ai` **Four pre-existing lint warnings in `converter.py`** — two
   f-strings without placeholders (`F541`, lines 371 and 528 as of 1dc265b), one long line
   (`E501`, 527) and one missing blank line before `def convert` (`E302`, 829). Left alone so
