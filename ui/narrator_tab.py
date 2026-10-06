@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from lab_hub import config
+from lab_hub.tools.convert import calibre
 
 from . import theme
 from .widgets import FolderField, LOG_LIMIT, scroll_column
@@ -146,7 +147,9 @@ class NarratorTab(QWidget):
             raise ValueError("Choose an output folder.")
         if not os.getenv("OPENAI_API_KEY") and not (Path.cwd() / ".env").is_file():
             raise ValueError("OPENAI_API_KEY is not set. Add it to Lab Hub's .env file or environment.")
-        if not shutil.which("ffmpeg"):
+        # Launched from Finder the app has a PATH without Homebrew on it, so look
+        # where the converter's own subprocesses will.
+        if not shutil.which("ffmpeg", path=calibre.subprocess_env()["PATH"]):
             raise ValueError("ffmpeg is not installed or is not on PATH.")
         return source, output
 

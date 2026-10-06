@@ -39,6 +39,7 @@ MAX_INPUT_TOKENS_PER_CHUNK = 1500
 
 MANIFEST_FILENAME = "manifest.json"
 TEMP_DIRNAME = "temp_audio"
+CONVERTED_EPUB_SUFFIX = ".converted.epub"
 FFMPEG_CONCAT_FILENAME = "ffmpeg_concat.txt"
 CHAPTER_METADATA_FILENAME = "chapters.ffmeta"
 # A chunk streams into "<name>.part" and takes its final name only once it is
@@ -164,8 +165,67 @@ def json_load(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+# ------------------------------------------------------
+# EXTERNAL TOOLS
+# ------------------------------------------------------
+# Inside the frozen .app the converter is a child of the app itself, and so
+# inherits two things Terminal never hands it. Finder's PATH, not the shell's:
+# Homebrew is missing from it, so a tool that works in Terminal is invisible to
+# `shutil.which`. And PyInstaller's dynamic-linker variables, which point at
+# the bundle's own copies of system libraries; ffmpeg or Calibre loading those
+# instead of its own crashes. PyInstaller stashes the launch-time values as
+# `<VAR>_ORIG`, so they can be put back. The same logic lives in
+# lab_hub/tools/convert/calibre.py; it is repeated here because this file is
+# vendored into Imprint and imports nothing from `lab_hub.*`.
+
+EXTRA_PATH_ENTRIES = ("/opt/homebrew/bin", "/usr/local/bin")
+LINKER_VARS = ("DYLD_LIBRARY_PATH", "DYLD_FRAMEWORK_PATH", "LD_LIBRARY_PATH")
+# Calibre's own installer ships an app bundle, not a PATH entry.
+EBOOK_CONVERT_IN_APP = "Applications/calibre.app/Contents/MacOS/ebook-convert"
+
+
+def subprocess_env() -> dict[str, str]:
+    """The environment a tool from outside the bundle should run in."""
+    env = os.environ.copy()
+    for var in LINKER_VARS:
+        original = env.pop(f"{var}_ORIG", None)
+        if original:
+            env[var] = original
+        elif getattr(sys, "frozen", False):
+            env.pop(var, None)
+    entries = [entry for entry in env.get("PATH", "").split(os.pathsep) if entry]
+    entries += [extra for extra in EXTRA_PATH_ENTRIES if extra not in entries]
+    env["PATH"] = os.pathsep.join(entries)
+    return env
+
+
+def find_tool(name: str, *fallbacks: Path) -> str | None:
+    """`name` on the PATH a subprocess will see, else the first runnable fallback."""
+    found = shutil.which(name, path=subprocess_env()["PATH"])
+    if found:
+        return found
+    for candidate in fallbacks:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
+
+def run_checked(cmd: list[str], what: str) -> subprocess.CompletedProcess:
+    """Run one of the external tools, raising a readable error when it fails."""
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, env=subprocess_env())
+    except OSError as e:
+        raise RuntimeError(f"{what} could not be started: {e}") from e
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"{what} failed (exit code {result.returncode}).\n"
+            f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
+        )
+    return result
+
+
 def ensure_ffmpeg_available() -> str:
-    ffmpeg_path = shutil.which("ffmpeg")
+    ffmpeg_path = find_tool("ffmpeg")
     if ffmpeg_path:
         return ffmpeg_path
     raise RuntimeError(
@@ -175,7 +235,7 @@ def ensure_ffmpeg_available() -> str:
 
 
 def ensure_ffprobe_available() -> str:
-    ffprobe_path = shutil.which("ffprobe")
+    ffprobe_path = find_tool("ffprobe")
     if ffprobe_path:
         return ffprobe_path
     raise RuntimeError(
@@ -185,14 +245,13 @@ def ensure_ffprobe_available() -> str:
 
 
 def ensure_ebook_convert_available() -> str:
-    cmd = shutil.which("ebook-convert")
+    cmd = find_tool(
+        "ebook-convert",
+        Path("/") / EBOOK_CONVERT_IN_APP,
+        Path.home() / EBOOK_CONVERT_IN_APP,
+    )
     if cmd:
         return cmd
-
-    mac_path = Path("/Applications/calibre.app/Contents/MacOS/ebook-convert")
-    if mac_path.exists():
-        return str(mac_path)
-
     raise RuntimeError(
         "ebook-convert was not found.\n"
         "Install Calibre and make sure ebook-convert is callable from your terminal.\n"
@@ -260,24 +319,20 @@ def extract_epub_chapters(path: Path) -> list[tuple[str, str]]:
 
 
 def convert_mobi_to_epub(mobi_path: Path, work_dir: Path) -> Path:
+    """Calibre's EPUB of `mobi_path`, written into `work_dir`.
+
+    The caller hands over the run's temp dir, so the file goes when the chunks
+    go: written beside the audiobook it stayed there for good.
+    """
     ebook_convert = ensure_ebook_convert_available()
-    converted = work_dir / f"{mobi_path.stem}.converted.epub"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    converted = work_dir / f"{mobi_path.stem}{CONVERTED_EPUB_SUFFIX}"
 
-    cmd = [
-        ebook_convert,
-        str(mobi_path),
-        str(converted),
-    ]
-
-    print(f"  Converting {mobi_path.suffix.lstrip('.').upper()} -> EPUB with Calibre: {mobi_path.name}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
-
-    if result.returncode != 0 or not converted.exists():
-        raise RuntimeError(
-            "ebook-convert failed.\n"
-            f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
-        )
-
+    print(f"  Converting {mobi_path.suffix.lstrip('.').upper()} -> EPUB with Calibre: "
+          f"{mobi_path.name}")
+    run_checked([ebook_convert, str(mobi_path), str(converted)], "ebook-convert")
+    if not converted.exists():
+        raise RuntimeError("ebook-convert reported success but wrote no file.")
     return converted
 
 
@@ -349,20 +404,13 @@ def estimate_audio_seconds_from_text(text: str, words_per_minute: float = 150.0)
 
 
 def get_audio_duration_seconds(audio_path: Path) -> float:
-    ffprobe = ensure_ffprobe_available()
-
-    cmd = [
-        ffprobe,
+    result = run_checked([
+        ensure_ffprobe_available(),
         "-v", "error",
         "-show_entries", "format=duration",
         "-of", "default=noprint_wrappers=1:nokey=1",
         str(audio_path),
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-
-    if result.returncode != 0:
-        raise RuntimeError(f"ffprobe failed: {result.stderr.strip()}")
-
+    ], "ffprobe")
     return float(result.stdout.strip())
 
 
@@ -377,7 +425,7 @@ def print_cost_estimate(label: str, text_tokens: int, audio_seconds: float):
     print(f"  {label}")
     print(f"    Text tokens: ~{text_tokens:,}")
     print(f"    Audio duration: ~{audio_seconds/60:.1f} min")
-    print(f"    Cost estimate:")
+    print("    Cost estimate:")
     print(f"      Input:  ${costs['input_usd']:.4f} / €{input_eur:.4f}")
     print(f"      Output: ${costs['output_usd']:.4f} / €{output_eur:.4f}")
     print(f"      Total:  ${costs['total_usd']:.4f} / €{total_eur:.4f}")
@@ -554,8 +602,9 @@ def generate_tts_chunk(text: str, temp_path: Path, retries: int = RETRIES) -> bo
         except Exception as e:
             partial_path.unlink(missing_ok=True)
             err_str = str(e)
-            if "insufficient_quota" in err_str or "exceeded your current quota" in err_str or "Billing hard limit" in err_str:
-                print(f"\n❌ insufficient_quota: Your OpenAI account has run out of credit.")
+            if any(marker in err_str for marker in (
+                    "insufficient_quota", "exceeded your current quota", "Billing hard limit")):
+                print("\n❌ insufficient_quota: Your OpenAI account has run out of credit.")
                 print("   Top up your account at platform.openai.com/settings/billing")
                 print("   Then run again — progress will resume automatically.")
                 return False
@@ -634,14 +683,7 @@ def merge_chunks_with_ffmpeg(
         raise ValueError(f"Unsupported audio format: {audio_format!r}")
     cmd.append(str(temp_output))
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
-
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"ffmpeg {audio_format.upper()} merge failed.\n"
-            f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
-        )
-
+    run_checked(cmd, f"ffmpeg {audio_format.upper()} merge")
     temp_output.replace(output_path)
 
 
@@ -790,6 +832,8 @@ def cleanup_after_success(temp_dir: Path, manifest_path: Path):
     concat_file = temp_dir / FFMPEG_CONCAT_FILENAME
     concat_file.unlink(missing_ok=True)
     (temp_dir / CHAPTER_METADATA_FILENAME).unlink(missing_ok=True)
+    for f in temp_dir.glob("*" + CONVERTED_EPUB_SUFFIX):
+        f.unlink(missing_ok=True)
 
     manifest_path.unlink(missing_ok=True)
 
@@ -852,6 +896,7 @@ def parse_args():
     )
 
     return parser.parse_args()
+
 
 # ------------------------------------------------------
 # MAIN
@@ -955,7 +1000,7 @@ def convert(input=None, output=None, voice=None, chunk_tokens=None,
 
         print("  Extracting text...")
         try:
-            chapters = load_chapters(fp, work_dir=book_out_dir)
+            chapters = load_chapters(fp, work_dir=temp_dir)
         except Exception as e:
             print(f"  ❌ Failed to read file: {e}")
             continue
