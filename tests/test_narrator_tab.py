@@ -18,7 +18,7 @@ def test_narrator_is_a_lab_hub_tab(window):
 def test_form_rejects_a_missing_book(qapp, tmp_path, monkeypatch):
     tab = NarratorTab(config.Settings(narrator_output=str(tmp_path)))
     monkeypatch.setenv("OPENAI_API_KEY", "test-only")
-    monkeypatch.setattr("ui.narrator_tab.shutil.which", lambda name: "/usr/bin/ffmpeg")
+    monkeypatch.setattr("ui.narrator_tab.shutil.which", lambda name, path=None: "/usr/bin/ffmpeg")
     with pytest.raises(ValueError, match="Choose an ebook"):
         tab._validate()
 
@@ -30,7 +30,7 @@ def test_form_values_reach_the_lab_hub_worker(qapp, tmp_path, monkeypatch):
         narrator_input=str(book), narrator_output=str(tmp_path), narrator_voice="nova"
     ))
     monkeypatch.setenv("OPENAI_API_KEY", "test-only")
-    monkeypatch.setattr("ui.narrator_tab.shutil.which", lambda name: "/usr/bin/ffmpeg")
+    monkeypatch.setattr("ui.narrator_tab.shutil.which", lambda name, path=None: "/usr/bin/ffmpeg")
     source, output = tab._validate()
     assert source == book
     assert output == Path(tmp_path)

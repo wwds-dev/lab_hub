@@ -217,29 +217,33 @@ copies be one.
   the concat demuxer places each file by too; the one way they could drift is TTS chunks
   carrying LAME gapless tags, which trim audio the duration does not count. Narrate one short
   book to M4B and open it in Apple Books: the last chapter should start where its text does.
-- [ ] `P3` `bug` `@ai` **MOBI and AZW3 leave `<stem>.converted.epub` beside the audiobook.**
-  `convert_mobi_to_epub` writes into `book_out_dir`; neither `cleanup_after_success` nor
-  `wipe_book_state` removes it. Write it into `temp_dir`, which both already clear.
-  Pre-existing. Both copies.
-- [ ] `P3` `bug` `@ai` **Inside the frozen app, the converter's subprocesses inherit
-  PyInstaller's environment.** `lab_hub/tools/convert/calibre.py` exists for this: its
-  `subprocess_env()` restores the `DYLD_*` variables from `*_ORIG` (or drops them when
-  frozen) and adds Homebrew to `PATH`, and its `find_ebook_convert()` searches
-  `/opt/homebrew/bin`, `/Applications` and `~/Applications`. The converter's
-  `ensure_ebook_convert_available()` checks `PATH` and `/Applications` only, and its three
-  `subprocess.run` calls (ebook-convert, ffprobe, ffmpeg) pass no env — so a MOBI, or the
-  merge itself, can fail in the bundle for a tool that is installed. The converter is
-  vendored and cannot import `lab_hub.*`, so the same logic goes into `converter.py` and
-  travels with the port. While there, the three copies of run-a-subprocess-and-raise
-  (`convert_mobi_to_epub`, `get_audio_duration_seconds`, `merge_chunks_with_ffmpeg`), each
-  with its own error shape, want one `_run_checked(cmd, what)` helper.
+- [x] `P3` `bug` `@ai` **MOBI and AZW3 no longer leave `<stem>.converted.epub` beside the
+  audiobook** (2026-10-06). `convert_mobi_to_epub` wrote into `book_out_dir`, which nothing
+  cleared; it now writes into `temp_dir`, which `wipe_book_state` and `cleanup_after_success`
+  already clear (the latter sweeps the EPUB by name too). Pinned in Imprint's
+  `tests/test_narrator_converter.py`; both copies.
+- [x] `P3` `bug` `@ai` **Inside the frozen app, the converter's subprocesses get the launch
+  environment back** (2026-10-06). They inherited PyInstaller's: `DYLD_*` pointing at the
+  bundle's libraries, and Finder's bare `PATH` without Homebrew, so a MOBI, or the merge
+  itself, could fail in the bundle for a tool that is installed. `converter.py` now carries
+  the same logic as `lab_hub/tools/convert/calibre.py` (it is vendored and cannot import
+  `lab_hub.*`): `subprocess_env()` restores the linker variables from `*_ORIG` or drops them
+  when frozen and adds `/opt/homebrew/bin` and `/usr/local/bin` to `PATH`; `find_tool()`
+  looks on that `PATH` first and then in Calibre's app bundle under `/Applications` and
+  `~/Applications`; and one `run_checked(cmd, what)` replaced the three copies of
+  run-a-subprocess-and-raise, so ebook-convert, ffprobe and ffmpeg all run with that
+  environment and fail with the same error shape. The Narrator tab's own ffmpeg check in
+  `_validate` looks on the same `PATH`, since it gated the converter behind the same bare
+  one. Pinned in Imprint's `tests/test_narrator_converter.py`; both copies.
 - [ ] `P3` `design` `@ai` **The resume policy as an argument, not a per-copy constant.**
   `ON_SETTINGS_CHANGE` is the one line of real code the drift test has to be taught to look
   away from, and the `REFUSE` branch ships dead in both copies now that Audiobook Studio, the
   one copy that refused, is retired. An `--on-settings-change {rebuild,refuse}` flag (default
   `refuse`; the Narrator tab passes `rebuild`) makes both files identical. Cost: Imprint's
-  front-end must pass it too.
-  Do it with the port above, or not at all.
+  front-end must pass it too, and a `refuse` default changes what a plain CLI run does in
+  both copies, which is why the frozen-app port (2026-10-06) went without it. Decide the
+  default first; with `rebuild` as the default nothing changes for anyone and the flag is
+  only an addition.
 - [ ] `P3` `testing` `@ai` **The drift guard is itself a vendored copy, and guards one pair.**
   `SELF` is hand-set and `LOCAL` hand-kept, so copied into Imprint there are two of it that
   can drift. Derive `SELF` from `__file__`, and turn `_normalised` and the compare into
@@ -258,10 +262,11 @@ copies be one.
   lock file beside the manifest, created with `O_EXCL` and holding the pid, checked for a
   live process on resume, would refuse the second run with a clear message. Raised by
   Sourcery on wwds-dev/imprint#2. Both copies.
-- [ ] `P3` `infra` `@ai` **Four pre-existing lint warnings in `converter.py`** — two
-  f-strings without placeholders (`F541`, lines 371 and 528 as of 1dc265b), one long line
-  (`E501`, 527) and one missing blank line before `def convert` (`E302`, 829). Left alone so
-  the review diff stayed minimal. Fix them in the port, so the copies stay identical.
+- [x] `P3` `infra` `@ai` **Four pre-existing lint warnings in `converter.py`** (2026-10-06) —
+  two f-strings without placeholders (`F541`), one long line (`E501`) and one missing blank
+  line before `def convert` (`E302`), left alone in 1dc265b so the review diff stayed
+  minimal. Fixed with the frozen-app port; `flake8 --max-line-length=120` is clean on both
+  copies.
 
 ## v3 — later
 
