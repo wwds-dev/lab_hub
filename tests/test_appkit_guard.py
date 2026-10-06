@@ -7,6 +7,9 @@ apps here produced byte-identical stacks.
 
 These run against the real Objective-C runtime, because a mock of AppKit would
 be a mock of the thing being tested. They are skipped off macOS.
+
+Ported into SONAR and Imprint along with the guard itself. All three go when
+Qt ships a fixed cocoa plugin; until then keep them in step.
 """
 
 from __future__ import annotations
