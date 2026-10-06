@@ -38,13 +38,20 @@ MANIFEST_SAVE_EVERY = 5
 MAX_INPUT_TOKENS_PER_CHUNK = 1500
 
 MANIFEST_FILENAME = "manifest.json"
+LOCK_FILENAME = "narrator.lock"
 TEMP_DIRNAME = "temp_audio"
+CONVERTED_EPUB_SUFFIX = ".converted.epub"
 FFMPEG_CONCAT_FILENAME = "ffmpeg_concat.txt"
 CHAPTER_METADATA_FILENAME = "chapters.ffmeta"
 # A chunk streams into "<name>.part" and takes its final name only once it is
 # complete, so a run stopped mid-stream leaves nothing a resume can mistake
 # for a finished chunk.
 CHUNK_PARTIAL_SUFFIX = ".part"
+# Manifest format 2 records that chunks reach their final name only when
+# complete. A manifest without it was written by a version that streamed
+# straight into the final name, so a chunk it never recorded as done may be
+# the one a stop cut short.
+MANIFEST_FORMAT = 2
 
 # What the converter reads. MOBI and AZW3 are turned into EPUB by Calibre
 # first, so they also need ebook-convert on the machine.
@@ -72,6 +79,10 @@ ON_SETTINGS_CHANGE = REBUILD_ON_CHANGE
 
 class SettingsChanged(RuntimeError):
     """A resume met a manifest from a run with different text or settings."""
+
+
+class BookLocked(RuntimeError):
+    """Another running conversion holds the book's folder."""
 
 
 USD_PER_1M_INPUT_TOKENS = 0.60
@@ -159,8 +170,67 @@ def json_load(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+# ------------------------------------------------------
+# EXTERNAL TOOLS
+# ------------------------------------------------------
+# Inside the frozen .app the converter is a child of the app itself, and so
+# inherits two things Terminal never hands it. Finder's PATH, not the shell's:
+# Homebrew is missing from it, so a tool that works in Terminal is invisible to
+# `shutil.which`. And PyInstaller's dynamic-linker variables, which point at
+# the bundle's own copies of system libraries; ffmpeg or Calibre loading those
+# instead of its own crashes. PyInstaller stashes the launch-time values as
+# `<VAR>_ORIG`, so they can be put back. The same logic lives in
+# lab_hub/tools/convert/calibre.py; it is repeated here because this file is
+# vendored into Imprint and imports nothing from `lab_hub.*`.
+
+EXTRA_PATH_ENTRIES = ("/opt/homebrew/bin", "/usr/local/bin")
+LINKER_VARS = ("DYLD_LIBRARY_PATH", "DYLD_FRAMEWORK_PATH", "LD_LIBRARY_PATH")
+# Calibre's own installer ships an app bundle, not a PATH entry.
+EBOOK_CONVERT_IN_APP = "Applications/calibre.app/Contents/MacOS/ebook-convert"
+
+
+def subprocess_env() -> dict[str, str]:
+    """The environment a tool from outside the bundle should run in."""
+    env = os.environ.copy()
+    for var in LINKER_VARS:
+        original = env.pop(f"{var}_ORIG", None)
+        if original:
+            env[var] = original
+        elif getattr(sys, "frozen", False):
+            env.pop(var, None)
+    entries = [entry for entry in env.get("PATH", "").split(os.pathsep) if entry]
+    entries += [extra for extra in EXTRA_PATH_ENTRIES if extra not in entries]
+    env["PATH"] = os.pathsep.join(entries)
+    return env
+
+
+def find_tool(name: str, *fallbacks: Path) -> str | None:
+    """`name` on the PATH a subprocess will see, else the first runnable fallback."""
+    found = shutil.which(name, path=subprocess_env()["PATH"])
+    if found:
+        return found
+    for candidate in fallbacks:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
+
+def run_checked(cmd: list[str], what: str) -> subprocess.CompletedProcess:
+    """Run one of the external tools, raising a readable error when it fails."""
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, env=subprocess_env())
+    except OSError as e:
+        raise RuntimeError(f"{what} could not be started: {e}") from e
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"{what} failed (exit code {result.returncode}).\n"
+            f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
+        )
+    return result
+
+
 def ensure_ffmpeg_available() -> str:
-    ffmpeg_path = shutil.which("ffmpeg")
+    ffmpeg_path = find_tool("ffmpeg")
     if ffmpeg_path:
         return ffmpeg_path
     raise RuntimeError(
@@ -170,7 +240,7 @@ def ensure_ffmpeg_available() -> str:
 
 
 def ensure_ffprobe_available() -> str:
-    ffprobe_path = shutil.which("ffprobe")
+    ffprobe_path = find_tool("ffprobe")
     if ffprobe_path:
         return ffprobe_path
     raise RuntimeError(
@@ -180,14 +250,13 @@ def ensure_ffprobe_available() -> str:
 
 
 def ensure_ebook_convert_available() -> str:
-    cmd = shutil.which("ebook-convert")
+    cmd = find_tool(
+        "ebook-convert",
+        Path("/") / EBOOK_CONVERT_IN_APP,
+        Path.home() / EBOOK_CONVERT_IN_APP,
+    )
     if cmd:
         return cmd
-
-    mac_path = Path("/Applications/calibre.app/Contents/MacOS/ebook-convert")
-    if mac_path.exists():
-        return str(mac_path)
-
     raise RuntimeError(
         "ebook-convert was not found.\n"
         "Install Calibre and make sure ebook-convert is callable from your terminal.\n"
@@ -204,6 +273,72 @@ def wipe_book_state(book_out_dir: Path):
         shutil.rmtree(temp_dir)
     if manifest_path.exists():
         manifest_path.unlink()
+
+
+def pid_is_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # it exists; it belongs to another user
+    return True
+
+
+class BookLock:
+    """One conversion per book folder at a time.
+
+    Two runs on the same book share `manifest.json` and the chunk names, so
+    each can publish or delete the other's work. The Narrator tab runs one
+    worker, but the CLI and the tab, or two tabs, on the same book would race.
+    The lock file beside the manifest names the pid of the run that owns the
+    folder. It is created with O_EXCL, so of two runs starting together only
+    one wins; a lock whose pid is no longer running was left by a kill or a
+    crash and is taken over. Released on the way out, whatever the way.
+    """
+
+    def __init__(self, book_out_dir: Path):
+        self.path = book_out_dir / LOCK_FILENAME
+
+    def __enter__(self):
+        for _attempt in range(3):
+            try:
+                fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+            except FileExistsError:
+                try:
+                    holder = self._holder()
+                except FileNotFoundError:
+                    continue  # released between our two looks
+                if holder is None or pid_is_alive(holder):
+                    raise BookLocked(self._refusal(holder))
+                self.path.unlink(missing_ok=True)  # stale: its process is gone
+                continue
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(str(os.getpid()))
+            # Two runs that both found a stale lock can unlink each other's
+            # fresh one; whoever's pid is in the file now owns the folder.
+            if self._holder() == os.getpid():
+                return self
+            raise BookLocked(self._refusal(self._holder()))
+        raise BookLocked(self._refusal(None))
+
+    def __exit__(self, *_exc):
+        self.path.unlink(missing_ok=True)
+
+    def _holder(self) -> int | None:
+        """The pid in the lock file, or None when it holds no pid."""
+        try:
+            return int(self.path.read_text(encoding="utf-8").strip())
+        except ValueError:
+            return None
+
+    def _refusal(self, holder: int | None) -> str:
+        who = f" (pid {holder})" if holder else ""
+        return (
+            f"Another conversion of {self.path.parent.name} is running{who}.\n"
+            "Wait for it to finish, or stop it, then run again. If none is running, "
+            f"delete {self.path} and run again."
+        )
 
 
 def matches_force_target(fp: Path, book_name: str, force_target: str | None) -> bool:
@@ -255,24 +390,20 @@ def extract_epub_chapters(path: Path) -> list[tuple[str, str]]:
 
 
 def convert_mobi_to_epub(mobi_path: Path, work_dir: Path) -> Path:
+    """Calibre's EPUB of `mobi_path`, written into `work_dir`.
+
+    The caller hands over the run's temp dir, so the file goes when the chunks
+    go: written beside the audiobook it stayed there for good.
+    """
     ebook_convert = ensure_ebook_convert_available()
-    converted = work_dir / f"{mobi_path.stem}.converted.epub"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    converted = work_dir / f"{mobi_path.stem}{CONVERTED_EPUB_SUFFIX}"
 
-    cmd = [
-        ebook_convert,
-        str(mobi_path),
-        str(converted),
-    ]
-
-    print(f"  Converting {mobi_path.suffix.lstrip('.').upper()} -> EPUB with Calibre: {mobi_path.name}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
-
-    if result.returncode != 0 or not converted.exists():
-        raise RuntimeError(
-            "ebook-convert failed.\n"
-            f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
-        )
-
+    print(f"  Converting {mobi_path.suffix.lstrip('.').upper()} -> EPUB with Calibre: "
+          f"{mobi_path.name}")
+    run_checked([ebook_convert, str(mobi_path), str(converted)], "ebook-convert")
+    if not converted.exists():
+        raise RuntimeError("ebook-convert reported success but wrote no file.")
     return converted
 
 
@@ -344,20 +475,13 @@ def estimate_audio_seconds_from_text(text: str, words_per_minute: float = 150.0)
 
 
 def get_audio_duration_seconds(audio_path: Path) -> float:
-    ffprobe = ensure_ffprobe_available()
-
-    cmd = [
-        ffprobe,
+    result = run_checked([
+        ensure_ffprobe_available(),
         "-v", "error",
         "-show_entries", "format=duration",
         "-of", "default=noprint_wrappers=1:nokey=1",
         str(audio_path),
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-
-    if result.returncode != 0:
-        raise RuntimeError(f"ffprobe failed: {result.stderr.strip()}")
-
+    ], "ffprobe")
     return float(result.stdout.strip())
 
 
@@ -372,7 +496,7 @@ def print_cost_estimate(label: str, text_tokens: int, audio_seconds: float):
     print(f"  {label}")
     print(f"    Text tokens: ~{text_tokens:,}")
     print(f"    Audio duration: ~{audio_seconds/60:.1f} min")
-    print(f"    Cost estimate:")
+    print("    Cost estimate:")
     print(f"      Input:  ${costs['input_usd']:.4f} / €{input_eur:.4f}")
     print(f"      Output: ${costs['output_usd']:.4f} / €{output_eur:.4f}")
     print(f"      Total:  ${costs['total_usd']:.4f} / €{total_eur:.4f}")
@@ -427,6 +551,7 @@ def build_manifest(book_name: str, source_file: Path, chunks: list[str]) -> dict
         "tts_instructions": TTS_INSTRUCTIONS,
         "max_input_tokens_per_chunk": MAX_INPUT_TOKENS_PER_CHUNK,
         "total_chunks": len(chunks),
+        "format": MANIFEST_FORMAT,
         "chunks": [
             {
                 "index": i,
@@ -494,12 +619,27 @@ def load_or_create_manifest(
 
 
 def sync_manifest_with_files(manifest: dict, temp_dir: Path) -> dict:
+    """Make the manifest agree with the chunk files on disk.
+
+    A chunk under its final name is complete, because it only gets that name
+    once its stream has finished. Two exceptions: a partial left by a stop is
+    swept, and a manifest from before partial files existed is trusted only
+    where it recorded the chunk as done, since a chunk it never recorded may
+    be the one a stop cut short.
+    """
+    for partial in temp_dir.glob("chunk_*.mp3" + CHUNK_PARTIAL_SUFFIX):
+        partial.unlink(missing_ok=True)
+
+    legacy = manifest.get("format", 1) < MANIFEST_FORMAT
     for entry in manifest["chunks"]:
         chunk_file = temp_dir / entry["filename"]
-        if chunk_file.exists() and chunk_file.stat().st_size > 0:
-            entry["status"] = "done"
-        else:
-            entry["status"] = "pending"
+        present = chunk_file.exists() and chunk_file.stat().st_size > 0
+        if present and legacy and entry["status"] != "done":
+            chunk_file.unlink()
+            present = False
+        entry["status"] = "done" if present else "pending"
+
+    manifest["format"] = MANIFEST_FORMAT
     return manifest
 
 
@@ -533,8 +673,9 @@ def generate_tts_chunk(text: str, temp_path: Path, retries: int = RETRIES) -> bo
         except Exception as e:
             partial_path.unlink(missing_ok=True)
             err_str = str(e)
-            if "insufficient_quota" in err_str or "exceeded your current quota" in err_str or "Billing hard limit" in err_str:
-                print(f"\n❌ insufficient_quota: Your OpenAI account has run out of credit.")
+            if any(marker in err_str for marker in (
+                    "insufficient_quota", "exceeded your current quota", "Billing hard limit")):
+                print("\n❌ insufficient_quota: Your OpenAI account has run out of credit.")
                 print("   Top up your account at platform.openai.com/settings/billing")
                 print("   Then run again — progress will resume automatically.")
                 return False
@@ -613,14 +754,7 @@ def merge_chunks_with_ffmpeg(
         raise ValueError(f"Unsupported audio format: {audio_format!r}")
     cmd.append(str(temp_output))
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
-
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"ffmpeg {audio_format.upper()} merge failed.\n"
-            f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
-        )
-
+    run_checked(cmd, f"ffmpeg {audio_format.upper()} merge")
     temp_output.replace(output_path)
 
 
@@ -769,6 +903,8 @@ def cleanup_after_success(temp_dir: Path, manifest_path: Path):
     concat_file = temp_dir / FFMPEG_CONCAT_FILENAME
     concat_file.unlink(missing_ok=True)
     (temp_dir / CHAPTER_METADATA_FILENAME).unlink(missing_ok=True)
+    for f in temp_dir.glob("*" + CONVERTED_EPUB_SUFFIX):
+        f.unlink(missing_ok=True)
 
     manifest_path.unlink(missing_ok=True)
 
@@ -831,6 +967,7 @@ def parse_args():
     )
 
     return parser.parse_args()
+
 
 # ------------------------------------------------------
 # MAIN
@@ -910,76 +1047,81 @@ def convert(input=None, output=None, voice=None, chunk_tokens=None,
         book_out_dir = output_root / book_name
         book_out_dir.mkdir(parents=True, exist_ok=True)
 
-        output_path = book_out_dir / f"{book_name}.{audio_format}"
-        temp_dir = book_out_dir / TEMP_DIRNAME
-        manifest_path = book_out_dir / MANIFEST_FILENAME
-
-        if matches_force_target(fp, book_name, force_rebuild):
-            print(f"  🧹 Force rebuild requested for: {fp.name}")
-            wipe_book_state(book_out_dir)
-            if output_path.exists():
-                output_path.unlink()
-
-        if output_path.exists():
-            print(f"  ✅ Final audiobook already exists, skipping: {output_path}")
-            continue
-
-        # The chunks went when that run finished, so another format means
-        # narrating the book again. Say so before the money goes.
-        for other_format in AUDIO_FORMATS:
-            other_output = book_out_dir / f"{book_name}.{other_format}"
-            if other_format != audio_format and other_output.exists():
-                print(f"  ⚠️ {other_output.name} already exists; making {audio_format} "
-                      "narrates the whole book again.")
-
-        print("  Extracting text...")
         try:
-            chapters = load_chapters(fp, work_dir=book_out_dir)
-        except Exception as e:
-            print(f"  ❌ Failed to read file: {e}")
-            continue
+            with BookLock(book_out_dir):
+                output_path = book_out_dir / f"{book_name}.{audio_format}"
+                temp_dir = book_out_dir / TEMP_DIRNAME
+                manifest_path = book_out_dir / MANIFEST_FILENAME
 
-        chapters = [(title, light_normalize(text)) for title, text in chapters]
-        text = "\n\n".join(text for _, text in chapters)
+                if matches_force_target(fp, book_name, force_rebuild):
+                    print(f"  🧹 Force rebuild requested for: {fp.name}")
+                    wipe_book_state(book_out_dir)
+                    if output_path.exists():
+                        output_path.unlink()
 
-        print("  Text length:", len(text))
-        if audio_format == FORMAT_M4B:
-            print(f"  Chapters detected: {len(chapters)}")
+                if output_path.exists():
+                    print(f"  ✅ Final audiobook already exists, skipping: {output_path}")
+                    continue
 
-        text_tokens = count_text_tokens(text)
-        est_seconds = estimate_audio_seconds_from_text(text, words_per_minute=150.0)
-        print_cost_estimate("Estimated cost before conversion:", text_tokens, est_seconds)
+                # The chunks went when that run finished, so another format means
+                # narrating the book again. Say so before the money goes.
+                for other_format in AUDIO_FORMATS:
+                    other_output = book_out_dir / f"{book_name}.{other_format}"
+                    if other_format != audio_format and other_output.exists():
+                        print(f"  ⚠️ {other_output.name} already exists; making {audio_format} "
+                              "narrates the whole book again.")
 
-        try:
-            success = text_to_audio(
-                chapters=chapters,
-                source_file=fp,
-                book_name=book_name,
-                output_path=output_path,
-                temp_dir=temp_dir,
-                manifest_path=manifest_path,
-                audio_format=audio_format,
-            )
-        except SettingsChanged as e:
-            print(f"\n❌ {e}")
+                print("  Extracting text...")
+                try:
+                    chapters = load_chapters(fp, work_dir=temp_dir)
+                except Exception as e:
+                    print(f"  ❌ Failed to read file: {e}")
+                    continue
+
+                chapters = [(title, light_normalize(text)) for title, text in chapters]
+                text = "\n\n".join(text for _, text in chapters)
+
+                print("  Text length:", len(text))
+                if audio_format == FORMAT_M4B:
+                    print(f"  Chapters detected: {len(chapters)}")
+
+                text_tokens = count_text_tokens(text)
+                est_seconds = estimate_audio_seconds_from_text(text, words_per_minute=150.0)
+                print_cost_estimate("Estimated cost before conversion:", text_tokens, est_seconds)
+
+                try:
+                    success = text_to_audio(
+                        chapters=chapters,
+                        source_file=fp,
+                        book_name=book_name,
+                        output_path=output_path,
+                        temp_dir=temp_dir,
+                        manifest_path=manifest_path,
+                        audio_format=audio_format,
+                    )
+                except SettingsChanged as e:
+                    print(f"\n❌ {e}")
+                    return False
+                except Exception as e:
+                    print(f"\n❌ Fatal error while processing {fp.name}: {e}")
+                    print("▶️ Fix the issue and run the script again to resume.")
+                    return False
+
+                if not success:
+                    print("\n⏸️ Conversion paused.")
+                    print("▶️ Run the script again later to automatically resume.")
+                    return False
+
+                try:
+                    final_seconds = get_audio_duration_seconds(output_path)
+                    print_cost_estimate("Final estimated cost after conversion:", text_tokens, final_seconds)
+                except Exception as e:
+                    print(f"  ⚠️ Could not calculate final duration/cost: {e}")
+
+                cleanup_after_success(temp_dir, manifest_path)
+        except BookLocked as e:
+            print(f"  ❌ {e}")
             return False
-        except Exception as e:
-            print(f"\n❌ Fatal error while processing {fp.name}: {e}")
-            print("▶️ Fix the issue and run the script again to resume.")
-            return False
-
-        if not success:
-            print("\n⏸️ Conversion paused.")
-            print("▶️ Run the script again later to automatically resume.")
-            return False
-
-        try:
-            final_seconds = get_audio_duration_seconds(output_path)
-            print_cost_estimate("Final estimated cost after conversion:", text_tokens, final_seconds)
-        except Exception as e:
-            print(f"  ⚠️ Could not calculate final duration/cost: {e}")
-
-        cleanup_after_success(temp_dir, manifest_path)
 
     print("\n🎉 ALL BOOKS COMPLETED SUCCESSFULLY!")
     return True
