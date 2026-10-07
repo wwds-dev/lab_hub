@@ -50,6 +50,13 @@ TTS_PROVIDERS = {
     "elevenlabs": {"model": "eleven_multilingual_v2",
                    "voice": "21m00Tcm4TlvDq8ikWAM",
                    "max_chars": 9000, "keys": ("ELEVENLABS_API_KEY",)},
+    # Gemini 3.8 Flash TTS, GA since September 2026: 8,192 input tokens and
+    # about eleven minutes of audio per request, so 6,000 characters (about
+    # seven minutes of narration) stays well inside both. It returns WAV,
+    # which each chunk turns into MP3 so the cache and the stream-copy merge
+    # work as for every other route. Needs the google-genai package.
+    "gemini": {"model": "gemini-3.8-flash-tts", "voice": "Kore",
+               "max_chars": 6000, "keys": ("GEMINI_API_KEY", "GOOGLE_API_KEY")},
 }
 # What a manifest written before routes existed was narrated with.
 LEGACY_TTS_PROVIDER = "openai"
@@ -661,7 +668,7 @@ def load_or_create_manifest(
         # manifest they belonged to.
         if temp_dir is not None and temp_dir.exists():
             stale = sorted(temp_dir.glob("chunk_*.mp3")) + sorted(
-                temp_dir.glob("chunk_*.mp3" + CHUNK_PARTIAL_SUFFIX))
+                temp_dir.glob("chunk_*.mp3" + CHUNK_PARTIAL_SUFFIX + "*"))
             for chunk_file in stale:
                 chunk_file.unlink()
             if stale:
@@ -682,7 +689,8 @@ def sync_manifest_with_files(manifest: dict, temp_dir: Path) -> dict:
     where it recorded the chunk as done, since a chunk it never recorded may
     be the one a stop cut short.
     """
-    for partial in temp_dir.glob("chunk_*.mp3" + CHUNK_PARTIAL_SUFFIX):
+    # "*" after the suffix also takes a route's intermediate (Gemini's .wav).
+    for partial in temp_dir.glob("chunk_*.mp3" + CHUNK_PARTIAL_SUFFIX + "*"):
         partial.unlink(missing_ok=True)
 
     legacy = manifest.get("format", 1) < MANIFEST_FORMAT
@@ -754,7 +762,8 @@ def _generate_with_route(text: str, temp_path: Path, partial_path: Path,
                          retries: int, previous_text: str | None,
                          next_text: str | None) -> bool:
     """The non-OpenAI routes, with the same partial-file and retry contract."""
-    synthesise = {"elevenlabs": _elevenlabs_chunk}[TTS_PROVIDER]
+    synthesise = {"elevenlabs": _elevenlabs_chunk,
+                  "gemini": _gemini_chunk}[TTS_PROVIDER]
     for attempt in range(1, retries + 1):
         try:
             synthesise(text, partial_path, previous_text, next_text)
@@ -816,6 +825,84 @@ def _elevenlabs_chunk(text: str, partial_path: Path,
             raise ProviderRefused(
                 f"ElevenLabs refused the request ({e.code}): {detail[:300]}") from e
         raise RuntimeError(f"ElevenLabs HTTP {e.code}: {detail[:300]}") from e
+
+
+_GEMINI_CLIENT = None
+
+
+def gemini_client(httpx_client=None):
+    """A google-genai client that sends each narration request exactly once.
+
+    The Interactions API turns HttpRetryOptions(attempts=1) into one retry,
+    so a server error was billed twice (google-genai 2.21.0). Its own retry
+    config is switched off; it lives on a private module path, and if a
+    later SDK moves it the route refuses to run rather than retry paid work.
+    """
+    global _GEMINI_CLIENT
+    if _GEMINI_CLIENT is not None and httpx_client is None:
+        return _GEMINI_CLIENT
+    try:
+        from google import genai
+        from google.genai import types as genai_types
+        from google.genai._gaos.utils.retries import RetryConfig
+    except ImportError as e:
+        raise ProviderRefused(
+            "The gemini route needs the google-genai package (a version whose "
+            "Interactions retries can be switched off).") from e
+    key = provider_key("gemini")
+    if not key:
+        raise ProviderRefused(
+            "GEMINI_API_KEY (or GOOGLE_API_KEY) not found. Set it in the app's "
+            f"environment or in a .env file (cwd or {_ENV_PATH}).")
+    options = {"timeout": 600_000,
+               "retry_options": genai_types.HttpRetryOptions(attempts=1)}
+    if httpx_client is not None:
+        options["httpx_client"] = httpx_client
+    client = genai.Client(api_key=key,
+                          http_options=genai_types.HttpOptions(**options))
+    client.interactions.sdk_configuration.retry_config = RetryConfig(
+        "none", None, False)
+    if httpx_client is None:
+        _GEMINI_CLIENT = client
+    return client
+
+
+def _gemini_chunk(text: str, partial_path: Path,
+                  previous_text: str | None, next_text: str | None) -> None:
+    """One chunk from Gemini TTS: WAV from the API, MP3 into `partial_path`."""
+    import base64
+
+    client = gemini_client()
+    try:
+        interaction = client.interactions.create(
+            model=TTS_MODEL, input=text,
+            response_format={"type": "audio", "mime_type": "audio/wav",
+                             "sample_rate": 24000},
+            generation_config={"speech_config": [{"voice": TTS_VOICE}]})
+    except Exception as e:
+        status = getattr(e, "status_code", None)
+        body = getattr(e, "body", None)
+        code = (body.get("error", {}).get("code", "")
+                if isinstance(body, dict) else "")
+        # 401/402/403 and a spent daily quota or disabled billing will not
+        # recover on retry; rate limits and 5xx might.
+        if status in (401, 402, 403) or code in (
+                "quota_exceeded", "failed_precondition", "payment_required"):
+            raise ProviderRefused(f"Gemini refused the request ({status} {code}): {e}") from e
+        raise
+    audio = getattr(interaction, "output_audio", None)
+    data = getattr(audio, "data", None) if audio is not None else None
+    if not data:
+        raise RuntimeError(
+            f"Gemini returned no audio ({getattr(interaction, 'status', '?')})")
+    wav_path = partial_path.with_name(partial_path.name + ".wav")
+    try:
+        wav_path.write_bytes(base64.b64decode(data))
+        run_checked([ensure_ffmpeg_available(), "-y", "-loglevel", "error",
+                     "-i", str(wav_path), "-c:a", "libmp3lame", "-b:a", "128k",
+                     "-f", "mp3", str(partial_path)], "ffmpeg")
+    finally:
+        wav_path.unlink(missing_ok=True)
 
 
 # ------------------------------------------------------
@@ -1051,7 +1138,7 @@ def text_to_audio(
 
 def cleanup_after_success(temp_dir: Path, manifest_path: Path):
     print("  Removing temp chunks and manifest...")
-    for pattern in ("chunk_*.mp3", "chunk_*.mp3" + CHUNK_PARTIAL_SUFFIX):
+    for pattern in ("chunk_*.mp3", "chunk_*.mp3" + CHUNK_PARTIAL_SUFFIX + "*"):
         for f in temp_dir.glob(pattern):
             f.unlink(missing_ok=True)
 
