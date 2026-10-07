@@ -52,3 +52,66 @@ def test_the_menu_lists_only_umbrella_apps(menu_bar_item):
     assert not (labels & {"VPN Agent", "Bug Spray", "vidforge"})
     # Backstage is reached from the Tools tab only, by choice.
     assert "Backstage" not in labels
+
+
+def test_the_menu_has_the_websites(menu_bar_item):
+    from lab_hub import sites
+
+    labels = [a.text() for a in menu_bar_item.sites_menu.actions()]
+
+    assert labels == [site.name for site in sites.SITES]
+
+
+def test_the_dashboards_come_from_the_catalog_each_time(qapp, tmp_path):
+    """Re-read on every opening, so a dashboard added to the catalog is in the
+    menu without restarting Lab Hub."""
+    import json
+
+    from lab_hub import dashboards
+
+    active = tmp_path / "active"
+    active.mkdir()
+    catalog = tmp_path / dashboards.CATALOG_NAME
+    catalog.write_text(json.dumps([{"id": "a", "title": "A", "url": "https://a.test/"}]))
+    item = Tray(lambda: active)
+    assert [a.text() for a in item.dashboards_menu.actions()] == ["A"]
+
+    catalog.write_text(json.dumps([
+        {"id": "a", "title": "A", "url": "https://a.test/"},
+        {"id": "b", "title": "B", "path": str(tmp_path / "gone.html")},
+    ]))
+    item._menu.aboutToShow.emit()
+
+    actions = item.dashboards_menu.actions()
+    assert [a.text() for a in actions] == ["A", "B"]
+    assert not actions[1].isEnabled(), "a missing file cannot be opened"
+
+
+def test_a_running_web_app_is_opened_not_started_again(qapp, monkeypatch):
+    """A second launch would start a second server on the next port."""
+    from lab_hub import launcher
+
+    provisio = next(app for app in launcher.MENU_BAR_APPS if app.key == "provisio")
+    monkeypatch.setattr(launcher, "is_running", lambda app, root, table=None: True)
+    calls = []
+    monkeypatch.setattr(launcher, "open_url", lambda url: calls.append(("open", url)))
+    monkeypatch.setattr(launcher, "launch", lambda app, root: calls.append(("launch",)))
+    item = Tray(lambda: Path("/tmp"))
+
+    item._launch(provisio)
+
+    assert calls == [("open", provisio.url)]
+
+
+def test_a_stopped_web_app_is_started_then_opened(qapp, monkeypatch):
+    from lab_hub import launcher
+
+    provisio = next(app for app in launcher.MENU_BAR_APPS if app.key == "provisio")
+    monkeypatch.setattr(launcher, "is_running", lambda app, root, table=None: False)
+    monkeypatch.setattr(launcher, "launch", lambda app, root: "launched")
+    item = Tray(lambda: Path("/tmp"))
+
+    item._launch(provisio)
+
+    assert item._openers["provisio"].waiting
+    item._openers["provisio"].stop()

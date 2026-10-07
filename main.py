@@ -103,6 +103,14 @@ def _probe_child_launches(lab_root) -> list[tuple[str, bool | None, str]]:
 
     results = []
     for app in launcher.APPS:
+        # Not every tile is a Qt app started from a venv: Provisio's server is
+        # node, and Agent Lab only ever opens its own built bundle.
+        if app.runtime != "python":
+            results.append((app.name, None, f"runs on {app.runtime}, not Qt"))
+            continue
+        if not app.runs_from_source:
+            results.append((app.name, None, "only its built bundle is launched"))
+            continue
         project = launcher.source_dir(app, lab_root)
         if project is None:
             results.append((app.name, None, "no checkout to probe"))
@@ -114,6 +122,22 @@ def _probe_child_launches(lab_root) -> list[tuple[str, bool | None, str]]:
         ok, detail = _probe_one_child(python)
         results.append((app.name, ok, detail))
     return results
+
+
+def _probe_tls() -> tuple[bool, str]:
+    """Whether this build can make an HTTPS request at all.
+
+    The Websites tab checks its sites with Qt's network manager, which needs a
+    TLS backend plugin. From source the venv's Qt has one; a bundle has it only
+    if PyInstaller collected the `tls` plugins — and without one every site
+    would read *Unreachable*, which looks like the sites' fault.
+    """
+    from PySide6.QtNetwork import QSslSocket
+
+    backends = QSslSocket.availableBackends()
+    ok = QSslSocket.supportsSsl()
+    detail = f"{QSslSocket.activeBackend() or 'none'} (available: {', '.join(backends) or 'none'})"
+    return ok, detail
 
 
 def _probe_dock_policy() -> str:
@@ -226,6 +250,28 @@ def selftest() -> int:
         print(f"  txt -> epub:     {detail}")
         if not ok:
             problems.append(f"round-trip conversion failed: {detail}")
+
+    tls_ok, tls_detail = _probe_tls()
+    print(f"  https (Websites): {tls_detail}")
+    if not tls_ok:
+        problems.append(
+            "no TLS backend — every site on the Websites tab would read "
+            "Unreachable"
+        )
+
+    # Reported, never fatal: the catalog is the lab's, not this build's.
+    from lab_hub import dashboards, sites
+
+    try:
+        listed = dashboards.load(lab_root)
+        missing = [entry.title for entry in listed if not entry.available()]
+        note = f"{len(listed)} listed" + (
+            f", {len(missing)} file(s) missing: {', '.join(missing)}" if missing else ""
+        )
+    except dashboards.CatalogError as error:
+        note = str(error)
+    print(f"  dashboards:      {dashboards.catalog_path(lab_root)} ({note})")
+    print(f"  websites:        {', '.join(site.name for site in sites.SITES)}")
 
     # The Dock icon is meant to follow the window. Only a live reading from
     # inside the process proves the switch takes effect once packaged.

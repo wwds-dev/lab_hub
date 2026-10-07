@@ -707,3 +707,107 @@ def test_build_check_dialog_can_be_dismissed(qapp_or_none=None):
     assert box.close(), "dialog refused to close"
     app.processEvents()
     assert not box.isVisible()
+
+
+# ----------------------------------------------------------------------
+# A web app's tile — Provisio
+# ----------------------------------------------------------------------
+def _web_card(tmp_path, monkeypatch, serving=False):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    monkeypatch.setattr(launcher, "serving", lambda _app: serving)
+    project = tmp_path / "provisio"
+    (project / "scripts").mkdir(parents=True)
+    (project / "scripts" / "run-framework.mjs").write_text("\n")
+    (project / "node_modules").mkdir()
+    app = launcher.ExternalApp(
+        "provisio", "Provisio", "provisio", "scripts/run-framework.mjs", "summary",
+        url="http://localhost:5173/", runtime="node", args=("dev",),
+    )
+    return AppCard(app), project
+
+
+def test_a_stopped_web_app_is_at_rest_not_a_warning(qapp, tmp_path, monkeypatch):
+    card, _project = _web_card(tmp_path, monkeypatch)
+
+    card.refresh(tmp_path, table="/bin/zsh\n")
+
+    assert card.state.text() == "Stopped"
+    assert card.launch_button.text() == "Launch"
+    assert card.launch_button.isEnabled()
+    assert not card.stop_button.isEnabled()
+
+
+def test_a_serving_web_app_opens_in_the_browser(qapp, tmp_path, monkeypatch):
+    card, project = _web_card(tmp_path, monkeypatch, serving=True)
+
+    card.refresh(tmp_path, table=f"node {project}/scripts/run-framework.mjs dev\n")
+
+    assert card.state.text() == "Running"
+    assert card.launch_button.text() == "Open in browser"
+    assert card.stop_button.isEnabled()
+
+
+def test_a_server_started_by_hand_cannot_be_stopped_from_here(qapp, tmp_path, monkeypatch):
+    """It answers, so the page can be opened — but nothing on the process
+    table says it is ours, and killing whatever holds the port could be
+    anything."""
+    card, _project = _web_card(tmp_path, monkeypatch, serving=True)
+
+    card.refresh(tmp_path, table="node scripts/run-framework.mjs dev\n")
+
+    assert card.launch_button.text() == "Open in browser"
+    assert not card.stop_button.isEnabled()
+    assert "Control-C" in card.stop_button.toolTip()
+
+
+def test_launching_a_web_app_waits_for_it_then_opens_it(qapp, tmp_path, monkeypatch):
+    from ui import web_open
+
+    card, _project = _web_card(tmp_path, monkeypatch)
+    card.refresh(tmp_path, table="/bin/zsh\n")
+    monkeypatch.setattr(launcher, "launch", lambda a, root: "launched")
+    opened = []
+    monkeypatch.setattr(launcher, "open_url", opened.append)
+
+    card._launch()
+    assert card.state.text() == "Starting…"
+    # Its server is on the table but not yet listening: still starting, and
+    # already stoppable.
+    card.refresh(tmp_path, table=f"node {_project}/scripts/run-framework.mjs dev\n")
+    assert card.state.text() == "Starting…"
+    assert card.stop_button.isEnabled()
+    assert isinstance(card.opener, web_open.OpenWhenServing)
+    assert card.opener.waiting
+
+    card.opener._check()
+    assert opened == [], "nothing answers yet, so nothing is opened"
+
+    monkeypatch.setattr(launcher, "serving", lambda _app: True)
+    card.opener._check()
+    assert opened == ["http://localhost:5173/"]
+    assert not card.opener.waiting
+    assert card.state.text() == "Running"
+
+
+def test_a_desktop_app_has_no_stop_button(qapp, tmp_path, monkeypatch):
+    app = _installed(tmp_path, monkeypatch)
+
+    assert AppCard(app).stop_button is None
+
+
+def test_a_bundle_built_in_its_checkout_reads_built(qapp, tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    project = tmp_path / "agent_lab"
+    (project / "dist").mkdir(parents=True)
+    (project / "server.py").write_text("\n")
+    make_bundle(project / "dist", "Agent Lab")
+    app = launcher.ExternalApp(
+        "agent_lab", "Agent Lab", "agent_lab", "server.py", "summary",
+        bundle_dir="dist", runs_from_source=False,
+    )
+    card = AppCard(app)
+
+    card.refresh(tmp_path, table="/bin/zsh\n")
+
+    assert card.state.text() == "Built"
+    assert card.launch_button.isEnabled()

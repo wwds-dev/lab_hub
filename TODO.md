@@ -287,6 +287,29 @@ copies be one.
 
 ## v3 — later
 
+- [x] `P1` `feature` `@ai` **Provisio and Agent Lab on the Apps tab; new Websites and
+  Dashboards tabs** (2026-10-07). Provisio is a *web app* tile: Launch starts its local
+  server through a login shell with the absolute entry path, `ui/web_open.py` opens
+  `localhost:5173` once it answers, *Running* means the address answers, **Open in
+  browser** replaces Bring to front, and **Stop** ends a server Lab Hub can recognise
+  (process group, so `workerd` goes too). Headroom stays inside it — no tile. Agent Lab
+  (the Antfarm workstation, working name) is linked in as `active/agent_lab`; its bundle is
+  found in `dist/` (`bundle_dir`, state *Built*) and its checkout is never run
+  (`runs_from_source=False` — `server.py` would take the Monitor's port). **Websites**
+  (altmerch.store, bookadatewithme.com) checks each site with a non-blocking `HEAD`;
+  **Dashboards** is the lab's `dashboard_catalog.json`, re-read when it changes. Both carry
+  Re-check, on-screen-only polling, swipe, Settings refresh and a menu bar submenu.
+  `--selftest` fails a build with no TLS backend. `tests/test_launcher.py`,
+  `test_apps_tab.py`, `test_sites.py`, `test_dashboards.py`, `test_links_tab.py`,
+  `test_tray.py`, `test_tab_groups.py`.
+- [ ] `P2` `feature` `@me` **Decide Agent Lab's real name.** The tile, the bundle and the
+  `active/agent_lab` link all carry the working name. Renaming means its builder's
+  `CFBundleName`/bundle path, `ExternalApp.name` in `launcher.py`, the link, then
+  rebuilding Lab Hub (the registry is compiled in).
+- [ ] `P2` `bug` `@me` **bookadatewithme.com answers 404.** Netlify serves the domain with
+  no site deployed behind it (checked 2026-10-07); the Websites tile reports it as *Error
+  404*. Redeploy from `~/Documents/Websites/bookadatewithme` or point the domain elsewhere.
+
 - [x] `P2` `feature` `@ai` **Trackpad swipes change tab** (`ui/swipe.py`). macOS sends a
   two-finger page swipe as a horizontal scroll (`QEvent.Wheel`) and a three-finger one as
   `QEvent.NativeGesture`; both are handled, because which one an app sees is a System

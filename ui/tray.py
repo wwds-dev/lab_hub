@@ -12,7 +12,13 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
-from lab_hub import APP_NAME, asset_path, launcher
+from lab_hub import APP_NAME, asset_path, dashboards, launcher, sites
+
+from .web_open import OpenWhenServing
+
+# How long a web app launched from the menu gets to start answering before
+# its page is given up on. Matches the tile's own wait.
+SERVER_WAIT_SECONDS = 60.0
 
 
 def available() -> bool:
@@ -41,6 +47,7 @@ class Tray(QObject):
     def __init__(self, resolve_lab_root, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._resolve_lab_root = resolve_lab_root
+        self._openers: dict[str, OpenWhenServing] = {}
 
         self.icon = QSystemTrayIcon(_icon(), self)
         self.icon.setToolTip(APP_NAME)
@@ -60,6 +67,20 @@ class Tray(QObject):
             action.triggered.connect(lambda _checked=False, a=app: self._launch(a))
             menu.addAction(action)
 
+        # The two link tabs, one submenu each. Websites are fixed; dashboards
+        # are re-read from the catalog every time the menu opens, so one added
+        # there is here without a restart.
+        menu.addSeparator()
+        self.sites_menu = menu.addMenu("Websites")
+        for site in sites.SITES:
+            action = QAction(site.name, self.sites_menu)
+            action.triggered.connect(
+                lambda _checked=False, s=site: self._open(s.name, s.url)
+            )
+            self.sites_menu.addAction(action)
+        self.dashboards_menu = menu.addMenu("Dashboards")
+        self._fill_dashboards()
+
         menu.addSeparator()
         quit_action = QAction(f"Quit {APP_NAME}", menu)
         quit_action.triggered.connect(self.quit_requested)
@@ -68,6 +89,7 @@ class Tray(QObject):
         # Opening the menu activates the app. That activation must not be
         # mistaken for the user asking for the window back.
         menu.aboutToShow.connect(self.menu_opened)
+        menu.aboutToShow.connect(self._fill_dashboards)
 
         # Held on the instance: a QMenu that only the tray icon references is
         # garbage collected out from under it, and the menu comes up empty.
@@ -84,9 +106,56 @@ class Tray(QObject):
         self.icon.showMessage(title, message, _icon(), 4000)
 
     def _launch(self, app: launcher.ExternalApp) -> None:
+        lab_root = self._resolve_lab_root()
+        # The desktop apps hand a second launch to the copy already running.
+        # A web app would start a second server instead, so open the one that
+        # is up.
+        if app.served and launcher.is_running(app, lab_root):
+            self._open(app.name, app.url)
+            return
         try:
-            message = launcher.launch(app, self._resolve_lab_root())
+            message = launcher.launch(app, lab_root)
         except launcher.LaunchError as error:
             self.launch_failed.emit(app.name, str(error))
             return
+        if app.served:
+            self._opener(app).start(SERVER_WAIT_SECONDS)
         self.launched.emit(message)
+
+    def _opener(self, app: launcher.ExternalApp) -> OpenWhenServing:
+        """One watcher per web app, made on first use and reused after."""
+        opener = self._openers.get(app.key)
+        if opener is None:
+            opener = OpenWhenServing(app, self)
+            opener.opened.connect(self.launched)
+            opener.gave_up.connect(
+                lambda message, name=app.name: self.launch_failed.emit(name, message)
+            )
+            self._openers[app.key] = opener
+        return opener
+
+    def _fill_dashboards(self) -> None:
+        """Rebuild the Dashboards submenu from the catalog."""
+        self.dashboards_menu.clear()
+        try:
+            entries = dashboards.load(self._resolve_lab_root())
+        except dashboards.CatalogError as error:
+            missing = QAction(str(error), self.dashboards_menu)
+            missing.setEnabled(False)
+            self.dashboards_menu.addAction(missing)
+            return
+        for entry in entries:
+            action = QAction(entry.title, self.dashboards_menu)
+            action.setEnabled(entry.available())
+            action.triggered.connect(
+                lambda _checked=False, e=entry: self._open(e.title, dashboards.target(e))
+            )
+            self.dashboards_menu.addAction(action)
+
+    def _open(self, name: str, address: str) -> None:
+        try:
+            launcher.open_url(address)
+        except launcher.LaunchError as error:
+            self.launch_failed.emit(name, str(error))
+            return
+        self.launched.emit(f"Opened {name}")

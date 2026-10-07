@@ -297,7 +297,7 @@ def test_the_window_installs_it_over_both_tab_levels(window):
 def test_a_swipe_moves_the_real_window_tabs(window):
     window.tabs.setCurrentIndex(0)
     assert swipe_across(window.swipe, window.apps_tab, -STEP) is True
-    assert window.tabs.tabText(window.tabs.currentIndex()) == "Backup and Sync"
+    assert window.tabs.tabText(window.tabs.currentIndex()) == "Websites"
 
 
 def test_the_filter_dies_with_the_window(window):

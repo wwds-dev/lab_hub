@@ -12,6 +12,8 @@ def _keys(tab):
 def test_top_level_tabs_are_grouped(window):
     assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == [
         "Apps",
+        "Websites",
+        "Dashboards",
         "Backup and Sync",
         "Tools",
         "Settings",
@@ -50,9 +52,35 @@ def test_the_apps_tab_lists_the_suites(window):
     """Only the suites get a tile; their companions are nested inside them.
 
     `sentinel_ai` is archived and `create_and_publish` was renamed to
-    `imprint`, so neither belongs here any more.
+    `imprint`, so neither belongs here any more. Provisio and Agent Lab (the
+    Antfarm workstation) joined on 2026-10-07.
     """
-    assert _keys(window.apps_tab) == ["sentinel", "imprint", "sonar"]
+    assert _keys(window.apps_tab) == [
+        "sentinel", "imprint", "sonar", "provisio", "agent_lab",
+    ]
+
+
+def test_headroom_has_no_tile_of_its_own(window):
+    """Headroom is Provisio's `engine/` — a sub-module, reached through
+    Provisio like Tunnel is through Sentinel."""
+    assert "headroom" not in {app.key for app in launcher.APPS}
+    provisio = next(app for app in launcher.APPS if app.key == "provisio")
+    assert "Headroom" in provisio.summary
+
+
+def test_websites_and_dashboards_have_their_own_tabs(window):
+    from lab_hub import sites
+
+    assert [card.name.text() for card in window.sites_tab.cards] == [
+        site.name for site in sites.SITES
+    ]
+    assert {site.name for site in sites.SITES} == {
+        "altmerch.store", "bookadatewithme.com",
+    }
+    # The same features as the app pages: a state on every tile and Re-check.
+    for tab in (window.sites_tab, window.dashboards_tab):
+        assert tab.recheck_button.text() == "Re-check"
+        assert all(card.state.text() for card in tab.cards)
 
 
 def test_agents_are_not_separately_launchable(window):

@@ -3,7 +3,7 @@
 One front door for the lab's desktop tools: a launcher for the standalone apps,
 and a home for the small utilities that never had a UI.
 
-Tabs: **Apps** · **Backup and Sync** · **Tools** · **Settings**
+Tabs: **Apps** · **Websites** · **Dashboards** · **Backup and Sync** · **Tools** · **Settings**
 
 ## Why two kinds of thing
 
@@ -64,7 +64,57 @@ threshold and the rest of the swipe — including the momentum after the fingers
 lift — is swallowed. Without that, inertia alone walks several tabs.
 
 ### Apps
-One tile per umbrella app: **Sentinel**, **Imprint**, **SONAR**.
+One tile per umbrella app: **Sentinel**, **Imprint**, **SONAR**, **Provisio**,
+**Agent Lab** (the last two added 2026-10-07).
+
+**Provisio is a web app, and its tile behaves like one.** Its checkout runs a
+local server (`scripts/run-framework.mjs dev`, port 5173) and the browser is its
+window. Launch starts that server — through a login shell, because node lives
+wherever the user's profile puts it and a frozen app's `PATH` is bare — and
+`ui/web_open.py` opens `http://localhost:5173/` the moment the address answers,
+rather than on the next three-second poll. *Running* means **the address
+answers** and nothing else: the process is on the table seconds before it
+listens, and calling it running then offered a page that could not load yet. The
+button then reads **Open in browser**. A stopped server is the resting state
+(*Stopped*, not the *Source only* warning). Two things only this tile has:
+
+* **Stop.** A server has no window to close, so one started from here would
+  otherwise run until the Mac restarted. It sends SIGTERM to the process group
+  (`launch` makes the server a group leader), which takes Wrangler's `workerd`
+  with it. It only ever stops a server it can recognise — the one started with
+  the absolute entry path Lab Hub uses. A server started by hand from
+  `start-preview.command` runs by a relative path; the tile still sees it (the
+  address answers) and opens it, but Stop is disabled and says to use Control-C
+  where it was started, because killing whatever holds a port could be anything.
+* **A longer wait.** A dev server compiles before it listens, so *Did not start*
+  waits 60 seconds (`SERVER_CONFIRM_SECONDS`) instead of 20. It usually answers
+  in about five.
+
+**Headroom has no tile.** It is Provisio's `engine/` — a sub-module, reached
+through Provisio, under the same rule as Tunnel and Bug Spray below.
+
+**Agent Lab is the Antfarm workstation, under a working name.** The brand is not
+decided; when it is, rename the bundle in its builder and `ExternalApp.name`
+here, then rebuild Lab Hub. Its source is a Codex project outside the lab, linked
+in as `active/agent_lab` (a real symlink, the `altmerch_store` pattern — which
+also puts it on the Lab Project Monitor). Two registry fields exist for it:
+
+* `bundle_dir="dist"` — its builder stops at `dist/Agent Lab.app` and has no
+  installer, so a bundle there counts when none is installed. The tile says
+  *Built* rather than *Installed*, and shows the path the lab reaches it by; the
+  running marker uses the resolved path, because `ps` only ever shows the real
+  one. An installed copy in `/Applications` still wins.
+* `runs_from_source=False` — its `server.py` is the engine without the window,
+  on port 8765, which the Lab Project Monitor already holds. Only the built
+  bundle is ever launched; with none built, Launch is disabled and says so.
+
+Its builder stamps no version and it has no git history, so its tile shows no
+number and Check builds reports it *unknown* — with a note that it does not use
+the lab's version scheme, not the usual "rebuild it once", which could not work.
+
+A `VERSION` file holding a release line rather than an arc is kept whole:
+Provisio's `2.0` reads `v2.0.064`, the same number its own footer stamps. Only a
+three-digit tail is treated as a hand-written build (Sentinel's `2.002`).
 
 **Agents and sub-modules are deliberately not here.** Tunnel and Bug Spray live
 inside Sentinel (`sentinel/agents/`), the video pipeline inside Imprint,
@@ -78,7 +128,9 @@ A tile shows where its app will start from:
 | State | Meaning |
 | --- | --- |
 | Installed | found in `/Applications` — launched with `open` |
+| Built | not installed, but built inside its checkout (`bundle_dir`) — launched with `open` |
 | Source only | not installed, but the checkout is there — run with that project's own `.venv` |
+| Stopped | a web app whose server is not answering — Launch starts it |
 | Not found | neither; Launch is disabled |
 | Starting… | launched, waiting for it to appear |
 | Running | its process is in the table; the button raises it instead |
@@ -230,6 +282,46 @@ so it expires after a minute, and **Re-check** clears it outright. It used to
 persist: a tile could still be reading *Did not start* long after the app had
 been opened and closed again by hand.
 
+### Websites
+
+**altmerch.store** (Shopify) and **bookadatewithme.com** (Netlify), registered in
+`lab_hub/sites.py`. Built like the Apps tab on purpose — same tile, same grid,
+Re-check, a state on every tile that is re-read rather than remembered, and a
+poll that runs only while the tab is on screen — but a site's state is **whether
+it answers right now**: *Online*, *Error 404* (or whichever code), *Unreachable*,
+with the detail in the tooltip. **Open site** opens it; **Show files** shows its
+local folder (`active/altmerch_store`, `~/Documents/Websites/bookadatewithme`).
+
+The check is a `HEAD` through Qt's `QNetworkAccessManager`, on the event loop
+rather than a thread — so there is nothing to stop when the app quits — and a
+page is never downloaded to learn its status. It runs when the tab is shown (if
+the last check is over a minute old), every five minutes while it stays shown,
+and on Re-check; never in the constructor, since the window builds every tab at
+startup. A 4xx counts as **down**: a host answering 404 at the front door is
+serving nobody. That is exactly what bookadatewithme.com did the day this tab
+was written — Netlify answering for the domain with no site deployed behind it.
+
+The tests never reach the network: a session-scoped fixture in
+`tests/conftest.py` replaces `SiteChecker.check`, because a swipe or a tab switch
+in any test can reveal this tab.
+
+### Dashboards
+
+Every entry in the lab's `dashboard_catalog.json` — the **same file** the Lab
+Project Monitor's Dashboards section reads, one folder up from the projects
+folder. Nothing is copied into Lab Hub: add a dashboard to the catalog and it is
+on this tab (and in the menu bar) without a rebuild; the tab rebuilds itself when
+the catalog's modification time changes. A tile shows its source and kind, and a
+state: *Link*, *Local file*, or *File missing* (Open disabled). **Show catalog**
+reveals the file to edit.
+
+A local dashboard opens through the Monitor's own server
+(`127.0.0.1:8765/dashboards/<id>`) when that is up, because its route wraps an
+HTML fragment — the Antfarm workstation is one — in a proper page; otherwise the
+file opens directly, which is the Monitor page's own fallback. Long paths are
+shortened on the tile (full path in the tooltip): a path is one unbreakable word,
+and at full length the Antfarm workstation's set the whole tab's minimum width.
+
 ### Backup and Sync
 
 Launch **Backup Control Center** and **git_autosync** from one place. Spelled
@@ -334,9 +426,9 @@ rebuilt from. A scoped check says which apps it looked at and never reports
 
 ### Settings
 Only the lab folder, and only because it cannot always be inferred: launching an
-installed app does not need it, but running one from source does. Blank means
-auto-detect (`$LAB_ROOT`, then the checkout this was run from, then
-`~/Documents/lab/active`).
+installed app does not need it, but running one from source does, and the
+Dashboards tab finds its catalog one folder up from it. Blank means auto-detect
+(`$LAB_ROOT`, then the checkout this was run from, then `~/Documents/lab/active`).
 
 ## One instance, and the menu bar
 
@@ -351,6 +443,13 @@ menu opens the window and launches apps directly — **umbrella apps only**
 (`launcher.MENU_BAR_APPS`). An agent belongs to its own app, so it gets no entry
 here; listing VPN Agent, Bug Spray and vidforge turned a six-item menu into a
 nine-item one and buried what is actually reached for.
+
+Picking Provisio there opens its page if its server already answers — a second
+launch would start a second server on the next port — and otherwise starts it
+and opens the page once it does. Below the apps, a **Websites** submenu opens
+each site and a **Dashboards** submenu opens each catalog entry; the dashboards
+are re-read from the catalog every time the menu opens, and a missing local file
+is listed but disabled.
 
 Because the app lives in the menu bar, **closing the window hides it** rather
 than quitting — a conversion left running would otherwise lose the log it is
@@ -440,6 +539,8 @@ suppressed.
     lab_hub/             no Qt imports below this line
       config.py          settings, stored in Application Support
       launcher.py        finding and starting the standalone apps
+      sites.py           the websites, and what an answer from one means
+      dashboards.py      reading the lab's dashboard catalog
       tools/convert/     any format to any format (vendored engine)
       tools/images.py    resizing, renaming, moving small files aside
     ui/                  the only package that imports PySide6
@@ -447,6 +548,8 @@ suppressed.
       worker.py          runs any tool off the GUI thread
       single_instance.py the one-copy guard
       tray.py            the menu bar item
+      links_tab.py       the Websites and Dashboards tabs
+      web_open.py        opens a web app once its server answers
     tests/               pytest, offscreen — see Tests below
     assets/make_icon.py  regenerates icon.icns and the menu bar PNGs
     docs/                reserved for future documentation; currently empty
@@ -503,7 +606,14 @@ being scrubbed is shared, but the Qt build on the other side of it belongs to
 each project, so each venv is its own answer; running the apps themselves would
 open six windows on every build and would prove nothing extra, because the crash
 happens inside `QApplication()` before any of them reaches its own code. An app
-with no checkout or no venv is reported as skipped, not as a pass.
+with no checkout or no venv is reported as skipped, not as a pass — and so is one
+that is not a Qt app started from a venv at all (Provisio runs on node; Agent Lab
+only ever opens its own bundle).
+
+It also fails a build with **no TLS backend**: the Websites tab's checks need
+Qt's `tls` plugin, which a bundle has only if PyInstaller collected it, and
+without one every site would read *Unreachable* — which looks like the sites'
+fault. The dashboard catalog and the registered sites are listed, never fatal.
 
 ## What this does not do
 

@@ -22,11 +22,14 @@ import os
 import plistlib
 import shlex
 import shutil
+import signal
+import socket
 import subprocess
 import tempfile
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
+from urllib.parse import urlsplit
 
 APPLICATIONS = Path("/Applications")
 
@@ -87,6 +90,26 @@ class ExternalApp:
     # that is the point of it — worth reporting, but never as "the app is
     # open", which is the question the Launch button answers.
     service: str | None = None
+    # A web app: its checkout runs a local server and the browser is its
+    # window. Provisio is one. "Running" then means the address answers, and
+    # the button opens it rather than raising anything.
+    url: str | None = None
+    # What runs `entry` for a source launch, and with which arguments. A web
+    # app's server is a node script, not a python one.
+    runtime: str = "python"
+    args: tuple[str, ...] = ()
+    # Where inside the checkout a built bundle is looked for when none is
+    # installed in /Applications — for an app whose builder stops at its own
+    # `dist/` and has no installer, like Agent Lab's.
+    bundle_dir: str | None = None
+    # Whether the checkout itself is the app. Agent Lab's `server.py` is its
+    # engine without the window, on the port the Lab Project Monitor already
+    # holds, so only its built bundle is ever launched.
+    runs_from_source: bool = True
+
+    @property
+    def served(self) -> bool:
+        return self.url is not None
 
 
 # One tile per umbrella app, and nothing else. The agents and sub-modules that
@@ -120,6 +143,35 @@ SUITES: tuple[ExternalApp, ...] = (
         summary="Market scanner and paper-trading terminal: live prices, "
         "prediction-market odds and a probability model, traded with paper money.",
         service="Background engine",
+    ),
+    # Headroom is Provisio's `engine/`, not an app of its own — it gets no tile
+    # for the same reason Tunnel does not. Started with its own runner rather
+    # than `start-preview.command`, which runs it by a relative path: the
+    # absolute one is how the tile recognises its server among every `node`.
+    ExternalApp(
+        key="provisio",
+        name="Provisio",
+        project="provisio",
+        entry="scripts/run-framework.mjs",
+        summary="Income-protection product design and review, opened in your "
+        "browser. Headroom, its solvency-filings engine, lives inside it.",
+        url="http://localhost:5173/",
+        runtime="node",
+        args=("dev",),
+    ),
+    # The Antfarm workstation. "Agent Lab" is a working name until the brand is
+    # decided; renaming it means rebuilding its bundle and changing it here.
+    # Its source is a Codex project outside the lab, linked in as
+    # `active/agent_lab` the way `altmerch_store` is.
+    ExternalApp(
+        key="agent_lab",
+        name="Agent Lab",
+        project="agent_lab",
+        entry="server.py",
+        summary="The Antfarm workstation (name still to be decided): an animated "
+        "factory over a local fulfilment engine, storefront and departments.",
+        bundle_dir="dist",
+        runs_from_source=False,
     ),
 )
 
@@ -176,10 +228,20 @@ LAUNCHPAD: tuple[ExternalApp, ...] = MENU_BAR_APPS
 APPS: tuple[ExternalApp, ...] = LAUNCHPAD + TOOLS_ONLY_APPS
 
 
-def bundle_path(app: ExternalApp) -> Path | None:
-    """The installed .app, if it is there."""
+def bundle_path(app: ExternalApp, lab_root: Path | None = None) -> Path | None:
+    """The installed .app, if it is there.
+
+    For an app with a `bundle_dir`, a bundle built inside its checkout counts
+    when none is installed — resolved, because the checkout may be reached
+    through a symlink and the process table only ever shows the real path.
+    """
     path = APPLICATIONS / f"{app.name}.app"
-    return path if path.is_dir() else None
+    if path.is_dir():
+        return path
+    if app.bundle_dir is None or lab_root is None:
+        return None
+    built = lab_root / app.project / app.bundle_dir / f"{app.name}.app"
+    return built.resolve() if built.is_dir() else None
 
 
 def _bundle_executable_path(bundle: Path) -> Path | None:
@@ -203,7 +265,7 @@ def _bundle_executable_path(bundle: Path) -> Path | None:
     return binaries[0] if len(binaries) == 1 else None
 
 
-def bundle_executable(app: ExternalApp) -> Path | None:
+def bundle_executable(app: ExternalApp, lab_root: Path | None = None) -> Path | None:
     """The binary inside the installed bundle, if there is one.
 
     Read from `CFBundleExecutable` rather than assumed to be the app's name:
@@ -212,7 +274,7 @@ def bundle_executable(app: ExternalApp) -> Path | None:
     `is_dir`, and `open` on one fails with a LaunchServices number rather than
     a sentence.
     """
-    bundle = bundle_path(app)
+    bundle = bundle_path(app, lab_root)
     return None if bundle is None else _bundle_executable_path(bundle)
 
 
@@ -304,13 +366,13 @@ def running_markers(app: ExternalApp, lab_root: Path) -> tuple[str, ...]:
     records: without that, a checkout renamed since this build drops the
     marker and leaves only the bundle — exactly the half that does not last.
     """
-    markers = (bundle_marker(app), checkout_marker(app, lab_root))
+    markers = (bundle_marker(app, lab_root), checkout_marker(app, lab_root))
     return tuple(marker for marker in markers if marker is not None)
 
 
-def bundle_marker(app: ExternalApp) -> str | None:
+def bundle_marker(app: ExternalApp, lab_root: Path | None = None) -> str | None:
     """The installed bundle's own process, if there is a bundle."""
-    bundle = bundle_path(app)
+    bundle = bundle_path(app, lab_root)
     return None if bundle is None else str(bundle / "Contents" / "MacOS")
 
 
@@ -347,7 +409,7 @@ def launch_is_observable(app: ExternalApp, lab_root: Path) -> bool:
     """
     if checkout_marker(app, lab_root) is not None:
         return True
-    bundle = bundle_path(app)
+    bundle = bundle_path(app, lab_root)
     return bundle is not None and not hands_off_and_exits(bundle)
 
 
@@ -387,6 +449,13 @@ def presence(app: ExternalApp, lab_root: Path, table: str | None = None) -> Pres
     one process cannot be read off another's: a substring search over the
     joined table would see `--headless` somewhere in it and discount every app
     at once.
+
+    A web app's window is the browser, so for one of those the question is
+    whether its address answers, and nothing else: its process is on the
+    table seconds before it listens, and "Running" then would offer a page
+    that cannot load yet. The address also catches a server started by hand
+    from its own `start-preview.command`, which runs by a relative path no
+    marker can see. (The marker still matters to `stop`.)
     """
     markers = running_markers(app, lab_root)
     if not markers:
@@ -401,6 +470,8 @@ def presence(app: ExternalApp, lab_root: Path, table: str | None = None) -> Pres
             service = True
         else:
             window = True
+    if app.served:
+        window = serving(app)
     return Presence(window=window, service=service)
 
 
@@ -409,14 +480,101 @@ def is_running(app: ExternalApp, lab_root: Path, table: str | None = None) -> bo
     return presence(app, lab_root, table).window
 
 
-def can_bring_to_front(app: ExternalApp) -> bool:
+# A refused connection on loopback comes back at once; this only bounds the
+# rare case of something listening and not accepting.
+SERVE_PROBE_SECONDS = 0.2
+
+
+def serving(app: ExternalApp) -> bool:
+    """Whether something answers at a web app's address.
+
+    A connect, not a request: the first page of a dev server compiles on
+    demand and can take seconds, and this runs on the tile's poll. Every
+    address `localhost` resolves to is tried, because a node server bound to
+    `localhost` may be listening on ::1 only.
+    """
+    if app.url is None:
+        return False
+    parts = urlsplit(app.url)
+    if parts.hostname is None:
+        return False
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    try:
+        with socket.create_connection(
+            (parts.hostname, port), timeout=SERVE_PROBE_SECONDS
+        ):
+            return True
+    except OSError:
+        return False
+
+
+def open_url(url: str) -> None:
+    """Open an address in the default browser."""
+    result = subprocess.run(
+        ["open", url], capture_output=True, text=True, env=child_env()
+    )
+    if result.returncode != 0:
+        raise LaunchError(result.stderr.strip() or f"'open' failed for {url}")
+
+
+def can_bring_to_front(app: ExternalApp, lab_root: Path | None = None) -> bool:
     """Only an installed bundle can be raised.
 
     A source run is a bare `python`, with no bundle identifier for `open` to
     address; raising it by pid needs System Events, which is assistive access
     the user would have to grant. Better to say so than to fail quietly.
+
+    A web app's "front" is its address, which can always be opened.
     """
-    return bundle_path(app) is not None
+    return app.served or bundle_path(app, lab_root) is not None
+
+
+def server_pids(app: ExternalApp, lab_root: Path) -> list[int]:
+    """The processes running this web app's server from its checkout.
+
+    Found by the absolute entry path Lab Hub starts it with. A server started
+    by hand runs by a relative path and is deliberately not found: stopping
+    whatever happens to be listening on the port could be anything.
+    """
+    marker = checkout_marker(app, lab_root) if app.served else None
+    if marker is None:
+        return []
+    try:
+        table = subprocess.run(
+            ["ps", "-Axo", "pid=,command="], capture_output=True, text=True, timeout=5
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    pids = []
+    for line in table.splitlines():
+        pid, _, command = line.strip().partition(" ")
+        if marker in command and pid.isdigit():
+            pids.append(int(pid))
+    return pids
+
+
+def stop(app: ExternalApp, lab_root: Path) -> str:
+    """Stop a web app's server: the window it does not have cannot be closed.
+
+    SIGTERM to the process group, which `launch` made the server the leader
+    of, so the helpers a dev server starts (Wrangler's workerd) go with it.
+    """
+    pids = server_pids(app, lab_root)
+    if not pids:
+        raise LaunchError(
+            f"Lab Hub can only stop a {app.name} server it can recognise. One "
+            "started by hand is stopped where it was started — Control-C in "
+            "its Terminal window."
+        )
+    for pid in pids:
+        try:
+            os.killpg(pid, signal.SIGTERM)
+        except OSError:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                pass
+    return f"Stopped {app.name}"
 
 
 def is_launcher_bundle(bundle: Path) -> bool:
@@ -448,7 +606,11 @@ def is_launcher_bundle(bundle: Path) -> bool:
 
 
 def bring_to_front(app: ExternalApp, lab_root: Path) -> str:
-    bundle = bundle_path(app)
+    if app.url is not None:
+        open_url(app.url)
+        return f"Opened {app.name} in your browser"
+
+    bundle = bundle_path(app, lab_root)
     project = source_dir(app, lab_root)
 
     # A launcher bundle cannot raise its own GUI, so go at the entry script
@@ -622,11 +784,17 @@ def _major(project: Path) -> str | None:
     whole version, hand-written, against a convention that says the build half
     is derived. Taking the arc and deriving the rest keeps that file honest
     without editing another project's tree.
+
+    Only a three-digit tail is a build, though — that is the lab's padded
+    build format. Provisio's `2.0` is a release line, and its own footer
+    stamps `v2.0.<count>`; cutting it to `2` would put a number on the tile
+    that the app itself never shows.
     """
     try:
-        raw = (project / "VERSION").read_text().strip()
+        raw = (project / "VERSION").read_text().strip().lstrip("vV")
         if raw:
-            return raw.split(".")[0]
+            arc, _, tail = raw.partition(".")
+            return arc if len(tail) == 3 and tail.isdigit() else raw
     except OSError:
         pass
     try:
@@ -661,7 +829,7 @@ def version(app: ExternalApp, lab_root: Path) -> Version:
     A frozen bundle that carries no stamp answers *nothing* — borrowing the
     checkout's number there would describe code that is not what opens.
     """
-    bundle = bundle_path(app)
+    bundle = bundle_path(app, lab_root)
     project = source_dir(app, lab_root)
     if bundle is not None and not bundle_runs_checkout(bundle):
         stamped = _stamped_version(bundle)
@@ -776,11 +944,18 @@ def build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
             "no checkout here, so there is nothing to compare it against.",
         )
     if not found.known:
-        return BuildStatus(
-            app, found, "unknown",
+        # Rebuilding only helps a project whose build stamps a version. One
+        # outside the lab's scheme (Agent Lab: no VERSION file, no git) never
+        # will, and telling the user to rebuild it would be advice that cannot
+        # work.
+        note = (
             "installed, but it carries no build stamp — rebuild it once and it "
-            "will start reporting.", script, command,
+            "will start reporting."
+            if _major(project) is not None else
+            "it does not use the lab's version scheme, so there is nothing to "
+            "compare the build against."
         )
+        return BuildStatus(app, found, "unknown", note, script, command)
     if found.origin == "checkout":
         # It runs the source, so it opens whatever the source says right now —
         # uncommitted edits included. It cannot be out of date.
@@ -811,12 +986,24 @@ def build_report(
 
 
 def status(app: ExternalApp, lab_root: Path) -> tuple[str, str]:
-    """A (state, detail) pair for the UI. State is installed/source/missing."""
-    bundle = bundle_path(app)
+    """A (state, detail) pair for the UI.
+
+    State is installed/built/source/server/missing. *Built* is a bundle found
+    in the checkout's `bundle_dir` rather than in /Applications; *server* is a
+    web app's checkout, which is how it always runs, so not a lesser state the
+    way *source* is.
+    """
+    bundle = bundle_path(app, lab_root)
     if bundle is not None:
-        return "installed", str(bundle)
+        if bundle.parent == APPLICATIONS:
+            return "installed", str(bundle)
+        # Shown by the way the lab reaches it, not by where the symlink lands
+        # (Agent Lab's real home is a generated Codex project folder).
+        return "built", str(lab_root / app.project / app.bundle_dir / bundle.name)
     project = source_dir(app, lab_root)
     if project is not None:
+        if app.served:
+            return "server", f"{app.url} — served from {project}"
         return "source", str(project)
     return "missing", f"not in /Applications, and no checkout at {lab_root / app.project}"
 
@@ -831,7 +1018,7 @@ class Readiness:
     bundle that is still a directory but has lost its executable.
     """
 
-    state: str  # installed | source | missing
+    state: str  # installed | built | source | server | missing
     detail: str  # where it would be started from
     problem: str | None = None  # why it cannot be, if it cannot
 
@@ -844,8 +1031,8 @@ def readiness(app: ExternalApp, lab_root: Path) -> Readiness:
     """Check now what `launch` would otherwise only discover on the way."""
     state, detail = status(app, lab_root)
 
-    if state == "installed":
-        if bundle_executable(app) is None:
+    if state in ("installed", "built"):
+        if bundle_executable(app, lab_root) is None:
             return Readiness(
                 state,
                 detail,
@@ -853,6 +1040,26 @@ def readiness(app: ExternalApp, lab_root: Path) -> Readiness:
                 "and reinstall it.",
             )
         return Readiness(state, detail)
+
+    if state == "server":
+        project = source_dir(app, lab_root)
+        if not (project / "node_modules").is_dir():
+            return Readiness(
+                state,
+                detail,
+                f"its dependencies are not installed — run `npm run install:ci` "
+                f"in {project} once.",
+            )
+        return Readiness(state, detail)
+
+    if state == "source" and not app.runs_from_source:
+        where = f"{detail}/{app.bundle_dir}" if app.bundle_dir else "/Applications"
+        return Readiness(
+            state,
+            detail,
+            f"nothing built to launch: no {app.name}.app in {where}, and its "
+            "checkout is not run directly. Build it first.",
+        )
 
     if state == "source":
         project = source_dir(app, lab_root)
@@ -876,9 +1083,9 @@ def readiness(app: ExternalApp, lab_root: Path) -> Readiness:
 def launch(app: ExternalApp, lab_root: Path, *, background: bool = False) -> str:
     """Start the app. Returns a line describing what was started."""
     extra_args = ["--background"] if background else []
-    bundle = bundle_path(app)
+    bundle = bundle_path(app, lab_root)
     if bundle is not None:
-        if bundle_executable(app) is None:
+        if bundle_executable(app, lab_root) is None:
             # `open` on a gutted bundle fails with a LaunchServices number
             # rather than a sentence, so say it plainly here instead.
             raise LaunchError(
@@ -909,15 +1116,37 @@ def launch(app: ExternalApp, lab_root: Path, *, background: bool = False) -> str
             "Set the lab folder on the Settings tab if your projects live "
             "somewhere else."
         )
-
-    python = venv_python(project) or (
-        Path(shutil.which("python3")) if shutil.which("python3") else None
-    )
-    if python is None:
+    if not app.runs_from_source:
         raise LaunchError(
-            f"No interpreter to run {app.name} with: {project} has no .venv and "
-            "python3 is not on PATH."
+            f"There is no built {app.name}.app to launch, and its checkout at "
+            f"{project} is not run directly. Build it first."
         )
+
+    if app.runtime == "node":
+        # Through a login shell: node lives wherever the user's profile puts
+        # it, and a frozen app's PATH is bare. `exec` keeps one process, so the
+        # command line shows node and the absolute entry rather than a shell.
+        shell = os.environ.get("SHELL", "/bin/zsh")
+        script = " ".join(
+            shlex.quote(part)
+            for part in ("node", str(project / app.entry), *app.args)
+        )
+        command = [shell, "-lc", f"exec {script}"]
+        interpreter = "node"
+    else:
+        python = venv_python(project) or (
+            Path(shutil.which("python3")) if shutil.which("python3") else None
+        )
+        if python is None:
+            raise LaunchError(
+                f"No interpreter to run {app.name} with: {project} has no .venv and "
+                "python3 is not on PATH."
+            )
+        # Absolute, not `app.entry`: the command line is how a running copy is
+        # recognised later, and every project's relative entry is the same
+        # `main.py`.
+        command = [str(python), str(project / app.entry), *app.args, *extra_args]
+        interpreter = str(python)
 
     # Output goes to a file rather than DEVNULL. A child that dies during
     # startup is the case worth diagnosing, and discarding its stderr is what
@@ -931,10 +1160,7 @@ def launch(app: ExternalApp, lab_root: Path, *, background: bool = False) -> str
     try:
         # Detached, so quitting Lab Hub does not take the app down with it.
         process = subprocess.Popen(
-            # Absolute, not `app.entry`: the command line is how a running copy
-            # is recognised later, and every project's relative entry is the
-            # same `main.py`.
-            [str(python), str(project / app.entry), *extra_args],
+            command,
             cwd=project,
             start_new_session=True,
             stdout=handle,
@@ -962,7 +1188,7 @@ def launch(app: ExternalApp, lab_root: Path, *, background: bool = False) -> str
             )
         break  # exited cleanly and immediately — odd, but not an error
 
-    return f"Launched {app.name} from source ({project}) using {python}"
+    return f"Launched {app.name} from source ({project}) using {interpreter}"
 
 
 def _log_tail(log: Path, lines: int = 12) -> str:
@@ -980,14 +1206,14 @@ def launch_log(app: ExternalApp) -> Path:
     return Path(tempfile.gettempdir()) / f"lab-hub-launch-{app.key}.log"
 
 
-def startup_log_hint(app: ExternalApp) -> str:
+def startup_log_hint(app: ExternalApp, lab_root: Path | None = None) -> str:
     """Where to look when an app was started but never came up.
 
     A bundle launched through `open` is not our child, so its output goes to
     the unified log rather than to us — naming the command is the difference
     between a dead end and a diagnosis.
     """
-    executable = bundle_executable(app)
+    executable = bundle_executable(app, lab_root)
     if executable is not None:
         return (
             "Console.app, or: log show --predicate "

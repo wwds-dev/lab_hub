@@ -22,11 +22,18 @@ from PySide6.QtWidgets import (
 from lab_hub import config, launcher
 
 from . import theme
+from .web_open import OpenWhenServing
 from .widgets import scroll_column
 
 STATE_LABELS = {
     "installed": ("Installed", "stateOk"),
+    # Built inside its own checkout and never installed — Agent Lab's builder
+    # stops at `dist/`. Nothing wrong with it, so not a warning.
+    "built": ("Built", "stateOk"),
     "source": ("Source only", "stateWarn"),
+    # A web app's checkout is how it always runs, so a stopped server is the
+    # resting state rather than something to warn about.
+    "server": ("Stopped", "hint"),
     "missing": ("Not found", "stateBad"),
 }
 
@@ -57,6 +64,9 @@ UNCONFIRMED_TOOLTIP = (
 # than a slow "Starting…". A source launch is already death-watched inside
 # `launcher.launch`, which reports the exit code outright.
 LAUNCH_CONFIRM_SECONDS = 20.0
+# A dev server compiles before it listens, and the first start after its
+# dependencies change pre-bundles them too. Provisio usually answers in ~5s.
+SERVER_CONFIRM_SECONDS = 60.0
 
 # How long *Did not start* stays on the tile. It is a notice about one launch,
 # not a property of the app, so it has to expire: leaving it up meant a tile
@@ -77,6 +87,30 @@ SUMMARY_HEIGHT = 52
 # rest of the row, and the tiles sit side by side in a grid.
 SERVICE_HEIGHT = 18
 GRID_MAX_WIDTH = 1500
+
+
+def arrange_tiles(grids, columns: int) -> None:
+    """Re-flow every grid of tiles into `columns` columns.
+
+    Shared with the Websites and Dashboards tabs, so every page of tiles
+    drops a column at the same width.
+    """
+    for grid, cards in grids:
+        for card in cards:
+            grid.removeWidget(card)
+        for index, card in enumerate(cards):
+            grid.addWidget(card, index // columns, index % columns)
+        # Equal shares, and no leftover stretch from a wider previous layout
+        # holding open an empty column.
+        for index in range(grid.columnCount()):
+            grid.setColumnStretch(index, 1 if index < columns else 0)
+
+
+def columns_for(width: int, tiles: int) -> int:
+    """How many tiles fit side by side, never more than there are."""
+    usable = width - 48  # the column's own margins
+    fits = max(1, usable // TILE_MIN_WIDTH)
+    return min(tiles or 1, fits)
 
 
 class AppCard(QWidget):
@@ -123,6 +157,19 @@ class AppCard(QWidget):
         self.launch_button.setObjectName("primary")
         self.launch_button.clicked.connect(self._launch)
 
+        # Only a web app has one. A server has no window to close, so without
+        # this one started from here would run until the Mac restarts.
+        self.stop_button: QPushButton | None = None
+        self.opener: OpenWhenServing | None = None
+        if app.served:
+            self.stop_button = QPushButton("Stop")
+            self.stop_button.clicked.connect(self._stop)
+            # Its window is a browser tab, opened the moment the server answers
+            # rather than on the next three-second poll.
+            self.opener = OpenWhenServing(app, self)
+            self.opener.opened.connect(lambda _message: self.refresh(self.lab_root))
+            self.opener.opened.connect(self.launched)
+
         # Name and state on one line, the button along the bottom. Side by side
         # the tiles are too narrow to keep all three on one row without the
         # summary being squeezed into a column of single words.
@@ -161,7 +208,14 @@ class AppCard(QWidget):
         layout.addWidget(summary)
         layout.addWidget(self.detail)
         layout.addWidget(self.service)
-        layout.addWidget(self.launch_button)
+        if self.stop_button is None:
+            layout.addWidget(self.launch_button)
+        else:
+            buttons = QHBoxLayout()
+            buttons.setSpacing(8)
+            buttons.addWidget(self.launch_button, 1)
+            buttons.addWidget(self.stop_button)
+            layout.addLayout(buttons)
 
         # Spare room at the bottom keeps every tile's Launch button on the same
         # line, whatever the summary length.
@@ -182,6 +236,7 @@ class AppCard(QWidget):
         self.refresh_version(lab_root)
         self._update_service(here.service)
         self._settle_pending_launch()
+        self._update_stop(table)
 
         label, style = self._state_label(ready)
         self.state.setText(label)
@@ -291,7 +346,8 @@ class AppCard(QWidget):
             return
         if self._pending_since is None:
             return
-        if time.monotonic() - self._pending_since <= LAUNCH_CONFIRM_SECONDS:
+        window = SERVER_CONFIRM_SECONDS if self.app.served else LAUNCH_CONFIRM_SECONDS
+        if time.monotonic() - self._pending_since <= window:
             return
         self._pending_since = None
 
@@ -306,7 +362,7 @@ class AppCard(QWidget):
         self._failed_at = time.monotonic()
         self.start_failed.emit(
             f"{self.app.name} was started but never came up. "
-            f"Look in {launcher.startup_log_hint(self.app)}"
+            f"Look in {launcher.startup_log_hint(self.app, self.lab_root)}"
         )
 
     def _update_button(self, ready: launcher.Readiness) -> None:
@@ -328,11 +384,22 @@ class AppCard(QWidget):
             self.launch_button.setToolTip(
                 ready.problem
                 or (UNCONFIRMED_TOOLTIP if self._showing_unconfirmed() else "")
+                or (
+                    f"Start its local server and open {self.app.url} once it answers"
+                    if self.app.served else ""
+                )
             )
             self.launch_button.setEnabled(ready.ok)
             return
 
-        if launcher.can_bring_to_front(self.app):
+        if self.app.served:
+            # The browser is its window, and that can always be opened.
+            self.launch_button.setText("Open in browser")
+            self.launch_button.setToolTip(f"Already serving — open {self.app.url}")
+            self.launch_button.setEnabled(True)
+            return
+
+        if launcher.can_bring_to_front(self.app, self.lab_root):
             self.launch_button.setText("Bring to front")
             self.launch_button.setToolTip("Already open — raise its window")
             self.launch_button.setEnabled(True)
@@ -345,6 +412,37 @@ class AppCard(QWidget):
                 "/Applications — switch to it from the Dock or with ⌘-Tab."
             )
             self.launch_button.setEnabled(False)
+
+    def _update_stop(self, table: str | None) -> None:
+        """Offer Stop only for a server this card can actually recognise."""
+        if self.stop_button is None:
+            return
+        marker = launcher.checkout_marker(self.app, self.lab_root)
+        snapshot = launcher.process_table() if table is None else table
+        ours = marker is not None and any(
+            marker in line for line in snapshot.splitlines()
+        )
+        self.stop_button.setEnabled(ours)
+        self.stop_button.setToolTip(
+            "Stop its local server"
+            if ours else
+            "Something is serving it that Lab Hub did not start — stop it "
+            "where it was started (Control-C in its Terminal window)."
+            if self.running else
+            "Not running"
+        )
+
+    def _stop(self) -> None:
+        try:
+            message = launcher.stop(self.app, self.lab_root)
+        except launcher.LaunchError as error:
+            QMessageBox.warning(self, f"Could not stop {self.app.name}", str(error))
+            return
+        self._pending_since = None
+        if self.opener is not None:
+            self.opener.stop()
+        self.refresh(self.lab_root)
+        self.launched.emit(message)
 
     def _launch(self) -> None:
         raising = self.running
@@ -361,6 +459,8 @@ class AppCard(QWidget):
             self._pending_since = time.monotonic()
             self._failed_at = None
             self._unconfirmed_at = None
+            if self.opener is not None:
+                self.opener.start(SERVER_CONFIRM_SECONDS)
             self.refresh(self.lab_root)
         self.launched.emit(message)
 
@@ -613,22 +713,11 @@ class AppsTab(QWidget):
         if columns == self._columns:
             return
         self._columns = columns
-
-        for grid, cards in self.grids:
-            for card in cards:
-                grid.removeWidget(card)
-            for index, card in enumerate(cards):
-                grid.addWidget(card, index // columns, index % columns)
-            # Equal shares, and no leftover stretch from a wider previous layout
-            # holding open an empty column.
-            for index in range(grid.columnCount()):
-                grid.setColumnStretch(index, 1 if index < columns else 0)
+        arrange_tiles(self.grids, columns)
 
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt override
         super().resizeEvent(event)
-        usable = self.width() - 48  # the column's own margins
-        fits = max(1, usable // TILE_MIN_WIDTH)
-        self._arrange(min(len(self.cards) or 1, fits))
+        self._arrange(columns_for(self.width(), len(self.cards)))
 
     def showEvent(self, event) -> None:  # noqa: N802 - Qt override
         super().showEvent(event)

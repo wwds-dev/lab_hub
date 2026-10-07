@@ -35,9 +35,10 @@ class SettingsTab(QWidget):
         card_layout.addWidget(theme.section_title("Lab folder"))
         card_layout.addWidget(
             theme.hint(
-                "Where the project folders live. Only used to launch an app "
-                "from source — an app installed in /Applications is found "
-                "without it. Leave blank to detect it automatically, or set "
+                "Where the project folders live. Used to launch an app from "
+                "source (one installed in /Applications is found without it), "
+                "and to find the dashboard catalog one folder up. Leave blank "
+                "to detect it automatically, or set "
                 f"${config.LAB_ROOT_ENV} in the environment."
             )
         )

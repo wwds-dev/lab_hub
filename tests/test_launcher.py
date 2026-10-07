@@ -996,3 +996,256 @@ def test_the_report_carries_the_command(tmp_path, monkeypatch):
 
     assert row.needs_rebuild
     assert row.command.startswith(f"cd {project} && ./build_app.sh")
+
+
+def test_a_release_line_is_kept_whole(tmp_path, monkeypatch):
+    """Provisio's VERSION is `2.0`, a release line its own footer stamps as
+    `v2.0.<count>`. Only a three-digit tail is a hand-written build."""
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    project = _project(tmp_path, "provisio", entry="scripts/run-framework.mjs")
+    (project / "VERSION").write_text("2.0\n")
+    monkeypatch.setattr(launcher, "_commit_count", lambda _project: 64)
+    app = launcher.ExternalApp(
+        "provisio", "Provisio", "provisio", "scripts/run-framework.mjs", "",
+        url="http://localhost:5173/", runtime="node",
+    )
+
+    assert launcher.version(app, tmp_path).text == "v2.0.064"
+
+
+# ----------------------------------------------------------------------
+# Web apps — a server in the checkout, the browser as the window
+# ----------------------------------------------------------------------
+def _web(tmp_path, monkeypatch, *, modules=True):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    project = _project(tmp_path, "provisio", entry="scripts/run-framework.mjs")
+    if modules:
+        (project / "node_modules").mkdir()
+    app = launcher.ExternalApp(
+        "provisio", "Provisio", "provisio", "scripts/run-framework.mjs", "",
+        url="http://localhost:5173/", runtime="node", args=("dev",),
+    )
+    return app, project
+
+
+def test_a_web_app_is_a_server_not_a_lesser_source_run(tmp_path, monkeypatch):
+    app, project = _web(tmp_path, monkeypatch)
+
+    ready = launcher.readiness(app, tmp_path)
+
+    assert ready.state == "server"
+    assert ready.ok
+    assert "http://localhost:5173/" in ready.detail
+
+
+def test_a_web_app_without_its_dependencies_is_not_ready(tmp_path, monkeypatch):
+    app, _project_dir = _web(tmp_path, monkeypatch, modules=False)
+
+    ready = launcher.readiness(app, tmp_path)
+
+    assert not ready.ok
+    assert "install:ci" in ready.problem
+
+
+def test_a_web_server_is_running_only_once_it_answers(tmp_path, monkeypatch):
+    """Its process is on the table seconds before it listens; calling it
+    running then would offer a page that cannot load yet."""
+    app, project = _web(tmp_path, monkeypatch)
+    table = f"node {project}/scripts/run-framework.mjs dev\n"
+
+    monkeypatch.setattr(launcher, "serving", lambda _app: False)
+    assert not launcher.presence(app, tmp_path, table).window
+
+    monkeypatch.setattr(launcher, "serving", lambda _app: True)
+    assert launcher.presence(app, tmp_path, table).window
+
+
+def test_a_web_server_started_by_hand_counts_by_its_address(tmp_path, monkeypatch):
+    """`start-preview.command` runs it by a relative path no marker can see;
+    the address answering is what says it is up."""
+    app, _project_dir = _web(tmp_path, monkeypatch)
+    monkeypatch.setattr(launcher, "serving", lambda _app: True)
+
+    assert launcher.presence(app, tmp_path, "node scripts/run-framework.mjs dev\n").window
+
+
+def test_a_quiet_address_and_no_process_is_stopped(tmp_path, monkeypatch):
+    app, _project_dir = _web(tmp_path, monkeypatch)
+    monkeypatch.setattr(launcher, "serving", lambda _app: False)
+
+    assert not launcher.presence(app, tmp_path, "/bin/zsh\n").window
+
+
+def test_the_address_probe_reads_a_real_socket():
+    """Not stubbed: a listening socket answers and a closed port does not."""
+    import socket
+
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        port = listener.getsockname()[1]
+        app = launcher.ExternalApp(
+            "w", "W", "w", "x", "", url=f"http://127.0.0.1:{port}/"
+        )
+        assert launcher.serving(app)
+    assert not launcher.serving(app)
+
+
+def test_a_web_app_launches_node_with_its_absolute_entry(tmp_path, monkeypatch):
+    """The absolute path is how its server is recognised and stopped later."""
+    app, project = _web(tmp_path, monkeypatch)
+    started = {}
+
+    class _Process:
+        pid = 4242
+
+        def poll(self):
+            return None
+
+    def popen(command, **kwargs):
+        started["command"] = command
+        started["cwd"] = kwargs["cwd"]
+        started["session"] = kwargs["start_new_session"]
+        return _Process()
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", popen)
+    monkeypatch.setattr(launcher, "STARTUP_GRACE_SECONDS", 0.0)
+
+    launcher.launch(app, tmp_path)
+
+    shell_line = started["command"][-1]
+    assert started["command"][1] == "-lc"
+    assert shell_line == f"exec node {project}/scripts/run-framework.mjs dev"
+    assert started["cwd"] == project
+    assert started["session"], "its own process group, so Stop takes its helpers too"
+
+
+def test_a_web_app_opens_its_address_instead_of_raising(tmp_path, monkeypatch):
+    app, _project_dir = _web(tmp_path, monkeypatch)
+    opened = []
+    monkeypatch.setattr(launcher, "open_url", opened.append)
+
+    message = launcher.bring_to_front(app, tmp_path)
+
+    assert opened == ["http://localhost:5173/"]
+    assert "browser" in message
+    assert launcher.can_bring_to_front(app, tmp_path)
+
+
+def test_stop_only_touches_a_server_it_recognises(tmp_path, monkeypatch):
+    app, project = _web(tmp_path, monkeypatch)
+    table = (
+        f"  101 node {project}/scripts/run-framework.mjs dev\n"
+        "  202 node scripts/run-framework.mjs dev\n"
+        "  303 /bin/zsh\n"
+    )
+    monkeypatch.setattr(
+        launcher.subprocess, "run",
+        lambda *a, **k: type("R", (), {"stdout": table, "returncode": 0})(),
+    )
+    killed = []
+    monkeypatch.setattr(launcher.os, "killpg", lambda pid, sig: killed.append(pid))
+
+    launcher.stop(app, tmp_path)
+
+    assert killed == [101], "a server started by hand is not ours to kill"
+
+
+def test_stop_with_nothing_recognisable_explains_itself(tmp_path, monkeypatch):
+    app, _project_dir = _web(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        launcher.subprocess, "run",
+        lambda *a, **k: type("R", (), {"stdout": "  202 node scripts/x.mjs\n"})(),
+    )
+
+    with pytest.raises(launcher.LaunchError, match="Control-C"):
+        launcher.stop(app, tmp_path)
+
+
+# ----------------------------------------------------------------------
+# A bundle built inside its own checkout (Agent Lab)
+# ----------------------------------------------------------------------
+def _built(tmp_path, monkeypatch, *, with_bundle=True):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    project = _project(tmp_path, "agent_lab", entry="server.py")
+    if with_bundle:
+        (project / "dist").mkdir()
+        make_bundle(project / "dist", "Agent Lab")
+    app = launcher.ExternalApp(
+        "agent_lab", "Agent Lab", "agent_lab", "server.py", "",
+        bundle_dir="dist", runs_from_source=False,
+    )
+    return app, project
+
+
+def test_a_bundle_in_the_checkout_is_found_when_none_is_installed(tmp_path, monkeypatch):
+    app, project = _built(tmp_path, monkeypatch)
+
+    ready = launcher.readiness(app, tmp_path)
+
+    assert ready.state == "built"
+    assert ready.ok
+    assert launcher.bundle_path(app, tmp_path) == (project / "dist" / "Agent Lab.app").resolve()
+
+
+def test_an_installed_copy_still_wins(tmp_path, monkeypatch):
+    app, _project_dir = _built(tmp_path, monkeypatch)
+    applications = tmp_path / "Applications"
+    applications.mkdir()
+    monkeypatch.setattr(launcher, "APPLICATIONS", applications)
+    make_bundle(applications, "Agent Lab")
+
+    assert launcher.readiness(app, tmp_path).state == "installed"
+
+
+def test_a_built_bundle_is_seen_by_its_real_path(tmp_path, monkeypatch):
+    """The checkout is reached through a symlink, and `ps` shows the real
+    path — so the marker has to be the resolved one."""
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    real = _project(tmp_path / "elsewhere", "agent-lab", entry="server.py")
+    (real / "dist").mkdir()
+    make_bundle(real / "dist", "Agent Lab")
+    lab = tmp_path / "lab"
+    lab.mkdir()
+    (lab / "agent_lab").symlink_to(real)
+    app = launcher.ExternalApp(
+        "agent_lab", "Agent Lab", "agent_lab", "server.py", "",
+        bundle_dir="dist", runs_from_source=False,
+    )
+    table = f"{real.resolve()}/dist/Agent Lab.app/Contents/MacOS/Agent Lab\n"
+
+    assert launcher.is_running(app, lab, table)
+
+
+def test_a_checkout_that_is_not_the_app_is_not_launchable(tmp_path, monkeypatch):
+    """Agent Lab's `server.py` is its engine with no window, on the port the
+    Lab Project Monitor already holds — never something to start as the app."""
+    app, _project_dir = _built(tmp_path, monkeypatch, with_bundle=False)
+
+    ready = launcher.readiness(app, tmp_path)
+
+    assert not ready.ok
+    assert "Build it first" in ready.problem
+    with pytest.raises(launcher.LaunchError, match="Build it first"):
+        launcher.launch(app, tmp_path)
+
+
+def test_an_app_outside_the_version_scheme_is_not_told_to_rebuild(tmp_path, monkeypatch):
+    """Rebuilding never stamps Agent Lab, so that advice could not work."""
+    app, _project_dir = _built(tmp_path, monkeypatch)
+
+    status = launcher.build_status(app, tmp_path)
+
+    assert status.verdict == "unknown"
+    assert "version scheme" in status.note
+    assert "rebuild" not in status.note
+
+
+def test_the_new_apps_are_registered_as_umbrella_apps():
+    keys = [app.key for app in launcher.SUITES]
+
+    assert keys[-2:] == ["provisio", "agent_lab"]
+    provisio = next(app for app in launcher.SUITES if app.key == "provisio")
+    agent_lab = next(app for app in launcher.SUITES if app.key == "agent_lab")
+    assert provisio.served and provisio.runtime == "node"
+    assert not agent_lab.runs_from_source and agent_lab.bundle_dir == "dist"

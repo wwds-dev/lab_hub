@@ -14,6 +14,7 @@ from . import appkit_guard, dock, swipe, theme, tray
 from .apps_tab import AppsTab
 from .convert_tab import ConvertTab
 from .images_tab import ImagesTab
+from .links_tab import DashboardsTab, SitesTab
 from .narrator_tab import NarratorTab
 from .settings_tab import SettingsTab
 
@@ -56,9 +57,13 @@ class MainWindow(QMainWindow):
             intro=(
                 "These run in their own window, as their own process — quitting "
                 "Lab Hub leaves them running. An app listed under a suite lives "
-                "inside that project's repository and belongs to it."
+                "inside that project's repository and belongs to it. Provisio "
+                "is the exception to the window: its server runs here and it "
+                "opens in your browser."
             ),
         )
+        self.sites_tab = SitesTab(self.settings)
+        self.dashboards_tab = DashboardsTab(self.settings)
         self.backup_sync_tab = AppsTab(
             self.settings,
             apps=launcher.BACKUP_SYNC_APPS,
@@ -96,6 +101,8 @@ class MainWindow(QMainWindow):
         self.tools_tabs.addTab(self.backstage_tab, "Backstage")
 
         self.tabs.addTab(self.apps_tab, "Apps")
+        self.tabs.addTab(self.sites_tab, "Websites")
+        self.tabs.addTab(self.dashboards_tab, "Dashboards")
         self.tabs.addTab(self.backup_sync_tab, "Backup and Sync")
         self.tabs.addTab(self.tools_tabs, "Tools")
         self.tabs.addTab(self.settings_tab, "Settings")
@@ -117,6 +124,9 @@ class MainWindow(QMainWindow):
         for tab in (self.apps_tab, self.backup_sync_tab, self.unblock_tracker_tab,
                     self.backstage_tab):
             tab.start_failed.connect(self._on_start_failed)
+        for tab in (self.sites_tab, self.dashboards_tab):
+            tab.opened.connect(self._on_launched)
+            tab.failed.connect(self._on_start_failed)
         self.settings_tab.settings_saved.connect(self._on_settings_saved)
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self.tools_tabs.currentChanged.connect(self._on_tool_tab_changed)
@@ -185,6 +195,8 @@ class MainWindow(QMainWindow):
         self.backup_sync_tab.apply_settings(self.settings)
         self.unblock_tracker_tab.apply_settings(self.settings)
         self.backstage_tab.apply_settings(self.settings)
+        self.sites_tab.apply_settings(self.settings)
+        self.dashboards_tab.apply_settings(self.settings)
         self.statusBar().showMessage("Settings saved.", 4000)
 
     def _on_tab_changed(self, index: int) -> None:
@@ -193,7 +205,8 @@ class MainWindow(QMainWindow):
         widget = self.tabs.widget(index)
         if widget is self.tools_tabs:
             self._refresh_tool_tab(self.tools_tabs.currentWidget())
-        elif widget in (self.apps_tab, self.backup_sync_tab):
+        elif widget in (self.apps_tab, self.backup_sync_tab, self.sites_tab,
+                        self.dashboards_tab):
             widget.refresh()
 
     def _on_tool_tab_changed(self, index: int) -> None:

@@ -44,6 +44,24 @@ def isolated_config(tmp_path, monkeypatch):
     return support
 
 
+@pytest.fixture(scope="session", autouse=True)
+def no_site_checks():
+    """Keep the Websites tab off the network for the whole session.
+
+    Its checks start whenever the tab is shown — and a swipe test or a tab
+    switch shows it — so a guard per test would leave whichever test happened
+    to reveal it reaching altmerch.store. Session-scoped, so it is in force
+    before any fixture builds a window. Records what would have been asked.
+    """
+    from ui import links_tab
+
+    asked: list[str] = []
+    original = links_tab.SiteChecker.check
+    links_tab.SiteChecker.check = lambda self, site: asked.append(site.key)
+    yield asked
+    links_tab.SiteChecker.check = original
+
+
 @pytest.fixture
 def fake_tray():
     return FakeTray()
