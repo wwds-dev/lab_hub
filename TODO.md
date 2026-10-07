@@ -301,7 +301,19 @@ copies be one.
   Re-check, on-screen-only polling, swipe, Settings refresh and a menu bar submenu.
   `--selftest` fails a build with no TLS backend. `tests/test_launcher.py`,
   `test_apps_tab.py`, `test_sites.py`, `test_dashboards.py`, `test_links_tab.py`,
-  `test_tray.py`, `test_tab_groups.py`.
+  `test_tray.py`, `test_tab_groups.py`. *The Provisio half was superseded the same day:
+  see the next item.*
+- [x] `P1` `feature` `@ai` **Provisio's tile launches its native app** (2026-10-07).
+  Provisio became `/Applications/Provisio.app`, a window with its own server and a
+  Demo/Real workspace switch (`provisio/docs/DESKTOP.md`). The tile launches it like
+  Imprint's and must not start the browser-mode server: vinext allows one dev server per
+  checkout. The web-app support stays, unused. `--selftest` now probes Provisio's venv
+  ("a real Qt child starts").
+- [ ] `P1` `infra` `@ai` **Rebuild and reinstall Lab Hub** so the installed bundle
+  carries the new Provisio tile. The registry is compiled in, so until then the
+  installed hub's tile still starts the browser-mode server, and that server blocks
+  the app's own. Not done on 2026-10-07 because another session had uncommitted work
+  in this tree that a build would have shipped.
 - [x] `P2` `design` `@ai` **Tools as tiles** (2026-10-07). The Tools tab opens on *All
   tools*: built-in tools as tiles with their state (*Running*, *Needs Calibre*, *Built
   in*) and an Open that moves the tab strip; Unblock Tracker and Backstage as the Apps
