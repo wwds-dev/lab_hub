@@ -58,9 +58,7 @@ class MainWindow(QMainWindow):
             intro=(
                 "These run in their own window, as their own process — quitting "
                 "Lab Hub leaves them running. An app listed under a suite lives "
-                "inside that project's repository and belongs to it. Provisio "
-                "is the exception to the window: its server runs here and it "
-                "opens in your browser."
+                "inside that project's repository and belongs to it."
             ),
         )
         self.sites_tab = SitesTab(self.settings)

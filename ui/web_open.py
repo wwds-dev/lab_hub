@@ -1,10 +1,12 @@
 """Open a web app in the browser once its freshly started server answers.
 
-Shared by the Apps tile and the menu bar, which both start Provisio's server
-and both owe the user the tab it was started for. A dev server compiles before
-it listens, so opening the address straight after `launch` returns lands on
-"can't connect" — and a timer here costs nothing, where waiting on the poll
-would open the page up to three seconds late.
+Shared by the Apps tile and the menu bar, which both start a web app's server
+and both owe the user the tab it was started for. Provisio was the web app it
+was written for; it went native the same day, and none is registered now.
+
+A dev server compiles before it listens, so opening the address straight after
+`launch` returns lands on "can't connect" — and a timer here costs nothing,
+where waiting on the poll would open the page up to three seconds late.
 
 One watcher per owner, restarted for each launch, rather than one per launch
 that deletes itself: a `deleteLater()` still pending when its parent tile was

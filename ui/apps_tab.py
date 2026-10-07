@@ -65,7 +65,8 @@ UNCONFIRMED_TOOLTIP = (
 # `launcher.launch`, which reports the exit code outright.
 LAUNCH_CONFIRM_SECONDS = 20.0
 # A dev server compiles before it listens, and the first start after its
-# dependencies change pre-bundles them too. Provisio usually answers in ~5s.
+# dependencies change pre-bundles them too. Provisio's answered in ~5s, back
+# when it was a web app.
 SERVER_CONFIRM_SECONDS = 60.0
 
 # How long *Did not start* stays on the tile. It is a notice about one launch,

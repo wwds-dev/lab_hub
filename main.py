@@ -103,8 +103,9 @@ def _probe_child_launches(lab_root) -> list[tuple[str, bool | None, str]]:
 
     results = []
     for app in launcher.APPS:
-        # Not every tile is a Qt app started from a venv: Provisio's server is
-        # node, and Agent Lab only ever opens its own built bundle.
+        # Not every tile is a Qt app started from a venv: a web app's server is
+        # node (none is registered since Provisio went native), and Agent Lab
+        # only ever opens its own built bundle.
         if app.runtime != "python":
             results.append((app.name, None, f"runs on {app.runtime}, not Qt"))
             continue

@@ -312,11 +312,12 @@ copies be one.
   hosted copy of the app now on the Apps tab. The hosted deployment itself was left
   alone — see the next item.
 - [ ] `P3` `infra` `@me` **Decide whether to keep Provisio's hosted copy** on ChatGPT
-  Sites (`provisio-protection-studio…chatgpt.site`, private). It is the same app, deployed;
-  its D1/R2 hold whatever was saved there, and it is the only copy reachable away from
-  this Mac. Deleting it is done in ChatGPT and cannot be undone. Provisio's build reads
-  `.openai/hosting.json` and its Sites plugin, so keep those either way unless the build
-  is changed too.
+  Sites (`provisio-protection-studio…chatgpt.site`, private). It only ever shows the demo
+  workspace, and the native app's real workspace never touches it (`provisio/docs/
+  DESKTOP.md`), so deleting it does not break the app. It is also the only copy reachable
+  away from this Mac. Deleting it is done in ChatGPT and cannot be undone. Keep
+  `.openai/hosting.json` either way: Provisio's Vite config imports it, so the build
+  fails without it.
 - [ ] `P2` `feature` `@me` **Decide Agent Lab's real name.** The tile, the bundle and the
   `active/agent_lab` link all carry the working name. Renaming means its builder's
   `CFBundleName`/bundle path, `ExternalApp.name` in `launcher.py`, the link, then
