@@ -78,8 +78,9 @@ class SwipeTabs(QObject):
         # to the garbage collector means a closed window's filter can still be
         # deciding what a later window's swipes do.
         super().__init__(parent)
-        # Innermost first: a swipe inside Tools should move the tools, and only
-        # fall through to the window's own tabs when the tools run out.
+        # Innermost first, when more than one is registered: a swipe inside the
+        # inner tabs moves them, and falls through to the outer ones only when
+        # they run out. The window registers only its top row.
         self._tabs = list(tab_widgets)
         self._accumulated = 0.0
         self._armed = True

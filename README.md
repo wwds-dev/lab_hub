@@ -51,10 +51,13 @@ Three rules it keeps:
 
 * **It never wraps.** The macOS page swipe does not, and a navigation gesture
   that loops makes the ends indistinguishable from the middle.
-* **Innermost tabs first.** A swipe inside Tools moves between the tools, and
-  reaches the window's own tabs only once the tools run out — otherwise Tools
-  is a room you can swipe into and never back out of. The tab strip itself is
-  inside no tool, so a swipe there always moves the window's tabs.
+* **Only the top row moves.** Apps through Settings, and nothing else: a swipe
+  inside Tools — on *All tools* or any tool's page — moves the window's tabs,
+  never the Tools sub-tabs, which are reached by clicking (the user's call,
+  2026-10-07). Until then the window registered both rows, innermost first, so
+  a swipe inside Tools walked the tools before falling out to the top row.
+  `SwipeTabs` still supports that — pass several tab widgets, innermost first,
+  and `tests/test_swipe.py` keeps it working — but the window passes one.
 * **A widget that can genuinely use the gesture keeps it.** A table wide enough
   to scroll sideways (the Narrator library's eight columns) takes the swipe;
   one whose content fits does not, because it is not using it for anything.

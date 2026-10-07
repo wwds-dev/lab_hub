@@ -140,11 +140,10 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.settings_tab, "Settings")
         self.setCentralWidget(self.tabs)
 
-        # Trackpad swipes change tab. Innermost first, so a swipe inside Tools
-        # moves between the tools and only reaches the window's own tabs once
-        # they run out — otherwise Tools is a room you can swipe into and not
-        # back out of.
-        self.swipe = swipe.SwipeTabs(self.tools_tabs, self.tabs, parent=self)
+        # Trackpad swipes change tab — the top row only, Apps to Settings (the
+        # user's call, 2026-10-07). A swipe anywhere, a tool's page included,
+        # moves that row; the Tools sub-tabs are reached by clicking.
+        self.swipe = swipe.SwipeTabs(self.tabs, parent=self)
         self.swipe.install()
 
         self.setStatusBar(QStatusBar())

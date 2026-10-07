@@ -314,6 +314,11 @@ copies be one.
   installed hub's tile still starts the browser-mode server, and that server blocks
   the app's own. Not done on 2026-10-07 because another session had uncommitted work
   in this tree that a build would have shipped.
+- [x] `P3` `design` `@ai` **Swipes move the top row only** (2026-10-07, the user's call):
+  Apps through Settings. A swipe on a tool's page moves the window's tabs, never the
+  Tools sub-tabs. `SwipeTabs` keeps its innermost-first support for several rows; the
+  window registers one. `tests/test_swipe.py` — the three new tests fail against the old
+  two-row wiring.
 - [x] `P2` `design` `@ai` **Tools as tiles** (2026-10-07). The Tools tab opens on *All
   tools*: built-in tools as tiles with their state (*Running*, *Needs Calibre*, *Built
   in*) and an Open that moves the tab strip; Unblock Tracker and Backstage as the Apps

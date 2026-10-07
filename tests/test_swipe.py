@@ -287,11 +287,33 @@ def test_the_outer_tab_bar_always_moves_the_outer_tabs(nested):
 # ---------------------------------------------------------------------------
 
 
-def test_the_window_installs_it_over_both_tab_levels(window):
+def test_the_window_swipes_the_top_row_only(window):
+    """Apps to Settings, and nothing else (the user's call, 2026-10-07)."""
     assert isinstance(window.swipe, SwipeTabs)
-    assert window.swipe._tabs == [window.tools_tabs, window.tabs], (
-        "innermost first, or a swipe inside Tools moves the wrong tabs"
-    )
+    assert window.swipe._tabs == [window.tabs]
+
+
+def test_a_swipe_on_a_tool_page_moves_the_top_row(window):
+    """Not the Tools sub-tabs: those are reached by clicking."""
+    window.tabs.setCurrentWidget(window.tools_tabs)
+    window.tools_tabs.setCurrentWidget(window.convert_tab)
+
+    assert swipe_across(window.swipe, window.convert_tab, -STEP) is True
+
+    assert window.tabs.tabText(window.tabs.currentIndex()) == "Settings"
+    assert window.tools_tabs.currentWidget() is window.convert_tab
+
+
+def test_a_swipe_back_from_tools_leaves_the_tool_where_it_was(window):
+    """Started mid-row on purpose: from the first tool page the old two-row
+    wiring fell through to the top row as well, and could not be told apart."""
+    window.tabs.setCurrentWidget(window.tools_tabs)
+    window.tools_tabs.setCurrentWidget(window.narrator_tab)
+
+    assert swipe_across(window.swipe, window.narrator_tab, STEP) is True
+
+    assert window.tabs.tabText(window.tabs.currentIndex()) == "Backup and Sync"
+    assert window.tools_tabs.currentWidget() is window.narrator_tab
 
 
 def test_a_swipe_moves_the_real_window_tabs(window):
