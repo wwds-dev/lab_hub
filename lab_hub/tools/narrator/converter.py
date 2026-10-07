@@ -8,6 +8,7 @@ import shutil
 import argparse
 import subprocess
 import hashlib
+import threading
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -28,9 +29,36 @@ BOOKS_DIR = BASE_DIR / "books"
 # The UI supplies an output folder. Keep the CLI fallback portable.
 OUTPUT_ROOT = Path.cwd() / "Narrator Output"
 
+TTS_PROVIDER = "openai"
 TTS_MODEL = "gpt-4o-mini-tts"
 TTS_VOICE = "alloy"
 TTS_INSTRUCTIONS = None
+
+# Narration routes. `max_chars` caps a chunk's characters on top of the token
+# budget, for a provider with a per-request character limit; None leaves
+# chunking exactly as it always was, so a book paused under OpenAI keeps the
+# same chunk boundaries (and text_sha256) and resumes without re-paying.
+# OpenAI removes gpt-4o-mini-tts on 2027-01-06, which is why a second route
+# exists at all. Pricing lives in the host app, not here: this module is
+# shared and a price table in two repositories would drift.
+TTS_PROVIDERS = {
+    "openai": {"model": "gpt-4o-mini-tts", "voice": "alloy",
+               "max_chars": None, "keys": ("OPENAI_API_KEY",)},
+    # eleven_multilingual_v2 is the model ElevenLabs documents as most stable
+    # on long-form; 10,000 characters per request, so 9,000 leaves headroom.
+    # The default voice is the premade "Rachel".
+    "elevenlabs": {"model": "eleven_multilingual_v2",
+                   "voice": "21m00Tcm4TlvDq8ikWAM",
+                   "max_chars": 9000, "keys": ("ELEVENLABS_API_KEY",)},
+}
+# What a manifest written before routes existed was narrated with.
+LEGACY_TTS_PROVIDER = "openai"
+ELEVENLABS_TTS_URL = ("https://api.elevenlabs.io/v1/text-to-speech/{voice}"
+                      "?output_format=mp3_44100_128")
+# Neighbouring text ElevenLabs is shown so the voice carries across a chunk
+# join. Text, not request ids: ids expire after two hours, which a resumed book
+# outlives, and they would force the chunks to be narrated in order.
+ELEVENLABS_CONTEXT_CHARS = 300
 
 RETRIES = 2
 MAX_WORKERS = 4
@@ -85,6 +113,14 @@ class BookLocked(RuntimeError):
     """Another running conversion holds the book's folder."""
 
 
+class ProviderRefused(RuntimeError):
+    """The provider rejected the key, or the account is out of credit.
+
+    Retrying cannot fix either, and every queued chunk would hit the same
+    wall, so the run stops at once.
+    """
+
+
 USD_PER_1M_INPUT_TOKENS = 0.60
 USD_PER_1M_OUTPUT_AUDIO_TOKENS = 12.00
 # Aligned with services/per_unit_pricing.DEFAULT_EUR_PER_USD — the two
@@ -118,6 +154,16 @@ def get_client():
             )
         client = OpenAI(api_key=api_key)
     return client
+
+
+def provider_key(provider: str) -> str:
+    """The first configured key for `provider`, read the way get_client does."""
+    names = TTS_PROVIDERS[provider]["keys"]
+    if not any(os.getenv(name) for name in names):
+        load_dotenv(override=False)
+        if _ENV_PATH.exists():
+            load_dotenv(dotenv_path=_ENV_PATH, override=False)
+    return next((os.getenv(name) for name in names if os.getenv(name)), "")
 
 
 # ------------------------------------------------------
@@ -506,7 +552,8 @@ def print_cost_estimate(label: str, text_tokens: int, audio_seconds: float):
 # TOKEN-SAFE CHUNKING
 # ------------------------------------------------------
 
-def chunk_text(text: str, max_tokens: int = MAX_INPUT_TOKENS_PER_CHUNK) -> list[str]:
+def chunk_text(text: str, max_tokens: int = MAX_INPUT_TOKENS_PER_CHUNK,
+               max_chars: int | None = None) -> list[str]:
     enc = get_token_encoder()
     words = text.split()
 
@@ -518,7 +565,8 @@ def chunk_text(text: str, max_tokens: int = MAX_INPUT_TOKENS_PER_CHUNK) -> list[
         candidate_text = f"{current_text} {word}".strip()
         token_count = len(enc.encode(candidate_text))
 
-        if token_count <= max_tokens:
+        if token_count <= max_tokens and (
+                max_chars is None or len(candidate_text) <= max_chars):
             current_words.append(word)
             current_text = candidate_text
         else:
@@ -546,10 +594,12 @@ def build_manifest(book_name: str, source_file: Path, chunks: list[str]) -> dict
         "book_name": book_name,
         "source_file": str(source_file),
         "text_sha256": hashlib.sha256("\0".join(chunks).encode()).hexdigest(),
+        "tts_provider": TTS_PROVIDER,
         "tts_model": TTS_MODEL,
         "tts_voice": TTS_VOICE,
         "tts_instructions": TTS_INSTRUCTIONS,
         "max_input_tokens_per_chunk": MAX_INPUT_TOKENS_PER_CHUNK,
+        "max_chars_per_chunk": TTS_PROVIDERS[TTS_PROVIDER]["max_chars"],
         "total_chunks": len(chunks),
         "format": MANIFEST_FORMAT,
         "chunks": [
@@ -583,6 +633,11 @@ def load_or_create_manifest(
         existing.get("book_name") == expected["book_name"]
         and existing.get("source_file") == expected["source_file"]
         and existing.get("text_sha256") == expected["text_sha256"]
+        # A manifest from before routes existed was narrated by OpenAI and
+        # had no character cap; reading the missing keys as exactly that is
+        # what keeps those paused books resumable.
+        and existing.get("tts_provider", LEGACY_TTS_PROVIDER) == expected["tts_provider"]
+        and existing.get("max_chars_per_chunk") == expected["max_chars_per_chunk"]
         and existing.get("tts_model") == expected["tts_model"]
         and existing.get("tts_voice") == expected["tts_voice"]
         and existing.get("tts_instructions") == expected["tts_instructions"]
@@ -647,8 +702,13 @@ def sync_manifest_with_files(manifest: dict, temp_dir: Path) -> dict:
 # TTS WITH RETRIES
 # ------------------------------------------------------
 
-def generate_tts_chunk(text: str, temp_path: Path, retries: int = RETRIES) -> bool:
+def generate_tts_chunk(text: str, temp_path: Path, retries: int = RETRIES,
+                       previous_text: str | None = None,
+                       next_text: str | None = None) -> bool:
     partial_path = temp_path.with_name(temp_path.name + CHUNK_PARTIAL_SUFFIX)
+    if TTS_PROVIDER != "openai":
+        return _generate_with_route(text, temp_path, partial_path, retries,
+                                    previous_text, next_text)
     for attempt in range(1, retries + 1):
         try:
             kwargs = {
@@ -688,6 +748,74 @@ def generate_tts_chunk(text: str, temp_path: Path, retries: int = RETRIES) -> bo
 
     print("\n❌ All retries failed for this chunk.")
     return False
+
+
+def _generate_with_route(text: str, temp_path: Path, partial_path: Path,
+                         retries: int, previous_text: str | None,
+                         next_text: str | None) -> bool:
+    """The non-OpenAI routes, with the same partial-file and retry contract."""
+    synthesise = {"elevenlabs": _elevenlabs_chunk}[TTS_PROVIDER]
+    for attempt in range(1, retries + 1):
+        try:
+            synthesise(text, partial_path, previous_text, next_text)
+            if not partial_path.exists() or partial_path.stat().st_size == 0:
+                raise RuntimeError("the provider returned no audio")
+            os.replace(partial_path, temp_path)
+            return True
+        except ProviderRefused as e:
+            partial_path.unlink(missing_ok=True)
+            print(f"\n❌ {e}")
+            print("   Fix the key or the account, then run again — "
+                  "progress will resume automatically.")
+            return False
+        except Exception as e:
+            partial_path.unlink(missing_ok=True)
+            print(f"\n⚠️ Error generating chunk (attempt {attempt}/{retries}): {e}")
+            if attempt < retries:
+                wait = 2 + random.random() * 2
+                print(f"   Waiting {wait:.1f}s before retry...")
+                time.sleep(wait)
+
+    print("\n❌ All retries failed for this chunk.")
+    return False
+
+
+def _elevenlabs_chunk(text: str, partial_path: Path,
+                      previous_text: str | None, next_text: str | None) -> None:
+    """One chunk from ElevenLabs as MP3, streamed into `partial_path`.
+
+    The standard library rather than `requests`, so neither repository that
+    carries this module gains a dependency for it.
+    """
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    key = provider_key("elevenlabs")
+    if not key:
+        raise ProviderRefused(
+            "ELEVENLABS_API_KEY not found. Set it in the app's environment or "
+            f"in a .env file (cwd or {_ENV_PATH}).")
+    body = {"text": text, "model_id": TTS_MODEL}
+    if previous_text:
+        body["previous_text"] = previous_text
+    if next_text:
+        body["next_text"] = next_text
+    request = urllib.request.Request(
+        ELEVENLABS_TTS_URL.format(voice=urllib.parse.quote(TTS_VOICE, safe="")),
+        data=json.dumps(body).encode("utf-8"), method="POST",
+        headers={"xi-api-key": key, "Content-Type": "application/json",
+                 "Accept": "audio/mpeg"})
+    try:
+        with urllib.request.urlopen(request, timeout=300) as response, \
+                open(partial_path, "wb") as out:
+            shutil.copyfileobj(response, out, 64 * 1024)
+    except urllib.error.HTTPError as e:
+        detail = e.read(2000).decode("utf-8", "replace")
+        if e.code in (401, 402, 403) or "quota" in detail.lower():
+            raise ProviderRefused(
+                f"ElevenLabs refused the request ({e.code}): {detail[:300]}") from e
+        raise RuntimeError(f"ElevenLabs HTTP {e.code}: {detail[:300]}") from e
 
 
 # ------------------------------------------------------
@@ -815,7 +943,8 @@ def text_to_audio(
     chunks: list[str] = []
     chapter_starts: list[tuple[str, int]] = []
     for title, chapter_text in chapters:
-        chapter_chunks = chunk_text(chapter_text, MAX_INPUT_TOKENS_PER_CHUNK)
+        chapter_chunks = chunk_text(chapter_text, MAX_INPUT_TOKENS_PER_CHUNK,
+                                    TTS_PROVIDERS[TTS_PROVIDER]["max_chars"])
         if chapter_chunks:
             chapter_starts.append((title, len(chunks)))
             chunks.extend(chapter_chunks)
@@ -854,9 +983,27 @@ def text_to_audio(
     completed_now = completed_before
     save_counter = 0
 
+    # Set by the first chunk that fails, before its thread takes another job:
+    # a queued chunk checks it and is skipped rather than narrated (and paid
+    # for). Cancelling futures from the main thread alone lost that race to a
+    # worker already pulling the next job.
+    stop = threading.Event()
+
     def worker(job):
         i, chunk, temp_path = job
-        ok = generate_tts_chunk(chunk, temp_path, retries=RETRIES)
+        if stop.is_set():
+            return i, None
+        if TTS_PROVIDER == "elevenlabs":
+            ok = generate_tts_chunk(
+                chunk, temp_path, retries=RETRIES,
+                previous_text=(chunks[i - 1][-ELEVENLABS_CONTEXT_CHARS:]
+                               if i > 0 else None),
+                next_text=(chunks[i + 1][:ELEVENLABS_CONTEXT_CHARS]
+                           if i + 1 < len(chunks) else None))
+        else:
+            ok = generate_tts_chunk(chunk, temp_path, retries=RETRIES)
+        if not ok:
+            stop.set()
         return i, ok
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -865,10 +1012,18 @@ def text_to_audio(
         for future in as_completed(futures):
             i, ok = future.result()
 
+            if ok is None:
+                continue        # skipped: a chunk before it had already failed
+
             if not ok:
                 manifest["chunks"][i]["status"] = "pending"
                 json_dump(manifest_path, manifest)
                 print("\n❌ Stopping now. Resume will continue automatically next run.")
+                # Leaving the with-block waits for every queued chunk, so
+                # "stopping" used to go on generating — and paying for — the
+                # rest of the book. Drop what has not started; the few in
+                # flight finish and their files are picked up on resume.
+                executor.shutdown(wait=False, cancel_futures=True)
                 return False
 
             manifest["chunks"][i]["status"] = "done"
@@ -936,10 +1091,24 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--provider",
+        choices=list(TTS_PROVIDERS),
+        default=None,
+        help=f"Narration route. Default: {TTS_PROVIDER}"
+    )
+
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Narration model. Default: the route's own default model."
+    )
+
+    parser.add_argument(
         "--voice",
         type=str,
-        default=TTS_VOICE,
-        help=f"TTS voice to use. Default: {TTS_VOICE}"
+        default=None,
+        help=f"TTS voice to use (an ElevenLabs voice id for that route). Default: {TTS_VOICE}"
     )
 
     parser.add_argument(
@@ -974,7 +1143,7 @@ def parse_args():
 # ------------------------------------------------------
 
 def convert(input=None, output=None, voice=None, chunk_tokens=None,
-            force_rebuild=None, audio_format=None):
+            force_rebuild=None, audio_format=None, provider=None, model=None):
     """Convert one ebook file, or a folder of ebooks, into audiobook(s).
 
     `audio_format` is "mp3" (default: a lossless stream copy that plays
@@ -984,13 +1153,30 @@ def convert(input=None, output=None, voice=None, chunk_tokens=None,
     Importable in-process entry point used by the app's ToolRunner and GUI.
     Returns True on full success, False if it failed / paused / found nothing.
     """
-    global TTS_VOICE, MAX_INPUT_TOKENS_PER_CHUNK  # allow callers to override global defaults
+    global TTS_VOICE, MAX_INPUT_TOKENS_PER_CHUNK, TTS_PROVIDER, TTS_MODEL  # allow callers to override global defaults
 
     input_path = Path(input).expanduser() if input else BOOKS_DIR  # use given input or default books folder
     output_root = Path(output).expanduser() if output else OUTPUT_ROOT  # use given output or default output root
 
+    provider = (provider or TTS_PROVIDER).lower()
+    if provider not in TTS_PROVIDERS:
+        print(f"❌ Unknown narration route: {provider!r}. "
+              f"Expected one of {', '.join(TTS_PROVIDERS)}.")
+        return False
+    if provider != TTS_PROVIDER:
+        # A new route brings its own model and voice; an OpenAI voice name is
+        # not an ElevenLabs voice id.
+        TTS_PROVIDER = provider
+        TTS_MODEL = TTS_PROVIDERS[provider]["model"]
+        TTS_VOICE = TTS_PROVIDERS[provider]["voice"]
+    if model:
+        TTS_MODEL = model
     if voice:
         TTS_VOICE = voice  # override voice
+    if TTS_PROVIDER != "openai" and not provider_key(TTS_PROVIDER):
+        keys = " or ".join(TTS_PROVIDERS[TTS_PROVIDER]["keys"])
+        print(f"❌ The {TTS_PROVIDER} route needs {keys}. Nothing was sent.")
+        return False
     if chunk_tokens:
         MAX_INPUT_TOKENS_PER_CHUNK = chunk_tokens  # override chunk token size
 
@@ -1012,6 +1198,7 @@ def convert(input=None, output=None, voice=None, chunk_tokens=None,
 
     print(f"\n📚 Input path: {input_path}")  # show chosen input path
     print(f"🎧 Output root: {output_root}")  # show chosen output folder
+    print(f"🎙️ Route: {TTS_PROVIDER} · {TTS_MODEL}")  # show chosen narration route
     print(f"🗣️ Voice: {TTS_VOICE}")  # show chosen voice
     print(f"🧩 Chunk token limit: {MAX_INPUT_TOKENS_PER_CHUNK}")  # show chunk token limit
     print(f"📦 Format: {audio_format}")  # show chosen output format
@@ -1087,7 +1274,11 @@ def convert(input=None, output=None, voice=None, chunk_tokens=None,
 
                 text_tokens = count_text_tokens(text)
                 est_seconds = estimate_audio_seconds_from_text(text, words_per_minute=150.0)
-                print_cost_estimate("Estimated cost before conversion:", text_tokens, est_seconds)
+                if TTS_PROVIDER == "openai":
+                    print_cost_estimate("Estimated cost before conversion:", text_tokens, est_seconds)
+                else:
+                    # Priced per character by the app that started this run.
+                    print(f"  Characters to narrate: {len(text):,}")
 
                 try:
                     success = text_to_audio(
@@ -1114,7 +1305,10 @@ def convert(input=None, output=None, voice=None, chunk_tokens=None,
 
                 try:
                     final_seconds = get_audio_duration_seconds(output_path)
-                    print_cost_estimate("Final estimated cost after conversion:", text_tokens, final_seconds)
+                    if TTS_PROVIDER == "openai":
+                        print_cost_estimate("Final estimated cost after conversion:", text_tokens, final_seconds)
+                    else:
+                        print(f"  Narrated: {final_seconds / 60:.1f} min")
                 except Exception as e:
                     print(f"  ⚠️ Could not calculate final duration/cost: {e}")
 
@@ -1142,6 +1336,8 @@ def main():
             chunk_tokens=args.chunk_tokens,
             force_rebuild=args.force_rebuild,
             audio_format=args.audio_format,
+            provider=args.provider,
+            model=args.model,
         )
     except Exception as e:
         print(f"\n❌ Fatal error: {e}")
