@@ -404,6 +404,103 @@ def test_nothing_to_match_means_not_running(tmp_path, monkeypatch):
 
 
 # ----------------------------------------------------------------------
+# A checkout that has been renamed since this build
+# ----------------------------------------------------------------------
+def _stub_bundle(tmp_path, name: str, runs: Path):
+    """A bundle of the shape that execs the checkout and exits, recording it."""
+    bundle = make_bundle(tmp_path, name)
+    resources = bundle / "Contents" / "Resources"
+    resources.mkdir(parents=True, exist_ok=True)
+    (resources / launcher.PROJECT_ROOT_FILE).write_text(f"{runs}\n")
+    return bundle
+
+
+def test_a_renamed_checkout_is_found_through_the_bundle(tmp_path, monkeypatch):
+    """The *Did not start* bug's second coming, in one assertion.
+
+    `ExternalApp.project` is a directory name baked in when Lab Hub was built.
+    Sentinel's folder was renamed from `sentinel_fork` to `sentinel` while the
+    installed Lab Hub still said the old one, so the checkout marker vanished
+    and only the bundle was left to match — and that bundle execs and exits.
+    A running Sentinel was reported dead. The bundle itself knew where its code
+    was the whole time, because its installer rewrites that file on the way.
+    """
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    _project(tmp_path, "sentinel")
+    _stub_bundle(tmp_path, "Sentinel", tmp_path / "sentinel")
+    stale = launcher.ExternalApp("sf", "Sentinel", "sentinel_fork", "main.py", "")
+
+    assert launcher.source_dir(stale, tmp_path) == tmp_path / "sentinel"
+    assert str(tmp_path / "sentinel" / "main.py") in launcher.running_markers(
+        stale, tmp_path
+    )
+    assert launcher.is_running(
+        stale,
+        tmp_path,
+        f"{tmp_path}/sentinel/.venv/bin/python {tmp_path}/sentinel/main.py\n",
+    )
+
+
+def test_the_configured_lab_folder_still_wins(tmp_path, monkeypatch):
+    """The bundle's record is the fallback, not the authority. Settings decides
+    where projects are looked for, and a second copy of a checkout under the
+    chosen lab folder is the one that tile is about."""
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    _project(tmp_path, "sentinel")
+    _project(tmp_path / "elsewhere", "sentinel")
+    _stub_bundle(tmp_path, "Sentinel", tmp_path / "elsewhere" / "sentinel")
+    app = launcher.ExternalApp("sf", "Sentinel", "sentinel", "main.py", "")
+
+    assert launcher.source_dir(app, tmp_path) == tmp_path / "sentinel"
+
+
+def test_a_record_pointing_nowhere_is_ignored(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    _stub_bundle(tmp_path, "Sentinel", tmp_path / "gone")
+    app = launcher.ExternalApp("sf", "Sentinel", "sentinel", "main.py", "")
+
+    assert launcher.source_dir(app, tmp_path) is None
+
+
+# ----------------------------------------------------------------------
+# Whether an absence is evidence at all
+# ----------------------------------------------------------------------
+def test_a_stub_with_no_checkout_cannot_be_watched(tmp_path, monkeypatch):
+    """Nothing it leaves behind lasts, so a launch that worked and one that
+    died look identical. The tile must not pick one."""
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    _stub_bundle(tmp_path, "Sentinel", tmp_path / "gone")
+    app = launcher.ExternalApp("sf", "Sentinel", "sentinel", "main.py", "")
+
+    assert not launcher.launch_is_observable(app, tmp_path)
+
+
+def test_a_stub_with_a_checkout_can_be_watched(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    _project(tmp_path, "sentinel")
+    _stub_bundle(tmp_path, "Sentinel", tmp_path / "sentinel")
+    app = launcher.ExternalApp("sf", "Sentinel", "sentinel", "main.py", "")
+
+    assert launcher.launch_is_observable(app, tmp_path)
+
+
+def test_a_self_contained_bundle_can_be_watched(tmp_path, monkeypatch):
+    """It keeps its own process, so its absence really does mean something."""
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    make_bundle(tmp_path, "SONAR")
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    assert launcher.launch_is_observable(app, tmp_path)
+
+
+def test_an_app_that_is_nowhere_cannot_be_watched(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    app = launcher.ExternalApp("ghost", "Ghost", "ghost", "main.py", "")
+
+    assert not launcher.launch_is_observable(app, tmp_path)
+
+
+# ----------------------------------------------------------------------
 # A headless daemon is not an open app
 # ----------------------------------------------------------------------
 def _sonar(tmp_path, monkeypatch):

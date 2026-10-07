@@ -90,8 +90,16 @@ def test_a_missing_app_cannot_be_launched(qapp, tmp_path, monkeypatch):
     assert not card.launch_button.isEnabled()
 
 
-def _tab(qapp, tmp_path, monkeypatch):
+def _tab(qapp, tmp_path, monkeypatch, with_checkouts=False):
+    """Four cards. `with_checkouts` gives each one a real entry script.
+
+    Without it the apps are nowhere at all, which is the right shape for the
+    layout tests and the wrong one for anything about launching: a card with no
+    bundle and no checkout has nothing to watch for, so it is never entitled to
+    say an app failed to start.
+    """
     from lab_hub import config
+
     from ui.apps_tab import AppsTab
 
     monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
@@ -99,7 +107,13 @@ def _tab(qapp, tmp_path, monkeypatch):
         launcher.ExternalApp(f"a{i}", f"App {i}", f"a{i}", "main.py", "summary")
         for i in range(4)
     )
-    tab = AppsTab(config.Settings(), apps, "Apps", "intro")
+    settings = config.Settings()
+    if with_checkouts:
+        for app in apps:
+            (tmp_path / app.project).mkdir(parents=True, exist_ok=True)
+            (tmp_path / app.project / app.entry).write_text("pass\n")
+        settings = config.Settings(lab_root=str(tmp_path))
+    tab = AppsTab(settings, apps, "Apps", "intro")
     # Qt defers the resize event until the widget is shown, so a hidden tab
     # never re-arranges and every one of these tests would read one column.
     tab.show()
@@ -165,6 +179,82 @@ def test_an_app_that_comes_up_ends_the_wait(qapp, tmp_path, monkeypatch):
 
     assert card.state.text() == "Running"
     assert card._pending_since is None
+
+
+def _stub_card(tmp_path, monkeypatch, project="sentinel"):
+    """A card for the bundle shape that execs its checkout and exits."""
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    bundle = make_bundle(tmp_path, "Sentinel")
+    resources = bundle / "Contents" / "Resources"
+    resources.mkdir(parents=True, exist_ok=True)
+    # Pointing nowhere: the case where the tile is left with nothing to watch.
+    (resources / launcher.PROJECT_ROOT_FILE).write_text(str(tmp_path / "gone"))
+    return launcher.ExternalApp("sf", "Sentinel", project, "main.py", "summary")
+
+
+def test_a_launch_nobody_can_watch_is_not_called_a_failure(
+    qapp, tmp_path, monkeypatch
+):
+    """Sentinel running, the tile saying *Did not start*, twice over.
+
+    The stub bundle hands off and exits and there is no checkout left to watch,
+    so the process table says nothing either way. The old card read that silence
+    as death and put a red notice under an app that was open on screen.
+    """
+    import time
+
+    from ui.apps_tab import LAUNCH_CONFIRM_SECONDS
+
+    app = _stub_card(tmp_path, monkeypatch)
+    card = AppCard(app)
+    reported = []
+    card.start_failed.connect(reported.append)
+    card._pending_since = time.monotonic() - LAUNCH_CONFIRM_SECONDS - 1
+
+    card.refresh(tmp_path, table="/bin/zsh\n")
+
+    assert card.state.text() == "Started"
+    assert reported == [], "nothing was observed, so nothing can be reported"
+
+
+def test_an_unwatchable_launch_still_flips_to_running(qapp, tmp_path, monkeypatch):
+    """The neutral notice is not a dead end: the moment the app does show up,
+    the tile says so."""
+    import time
+
+    from ui.apps_tab import LAUNCH_CONFIRM_SECONDS
+
+    _project = tmp_path / "sentinel"
+    _project.mkdir()
+    (_project / "main.py").write_text("pass\n")
+    app = _stub_card(tmp_path, monkeypatch)
+    card = AppCard(app)
+    card._pending_since = time.monotonic() - LAUNCH_CONFIRM_SECONDS - 1
+    card.refresh(tmp_path, table="/bin/zsh\n")
+
+    card.refresh(
+        tmp_path, table=f"{tmp_path}/sentinel/.venv/bin/python {_project}/main.py\n"
+    )
+
+    assert card.state.text() == "Running"
+
+
+def test_the_unconfirmed_notice_expires(qapp, tmp_path, monkeypatch):
+    """Like the failure notice, it describes one launch, not the app."""
+    import time
+
+    from ui.apps_tab import FAILURE_NOTICE_SECONDS, LAUNCH_CONFIRM_SECONDS
+
+    app = _stub_card(tmp_path, monkeypatch)
+    card = AppCard(app)
+    card._pending_since = time.monotonic() - LAUNCH_CONFIRM_SECONDS - 1
+    card.refresh(tmp_path, table="/bin/zsh\n")
+    assert card.state.text() == "Started"
+
+    card._unconfirmed_at -= FAILURE_NOTICE_SECONDS + 1
+    card.refresh(tmp_path, table="/bin/zsh\n")
+
+    assert card.state.text() == "Installed"
 
 
 def test_an_app_that_never_comes_up_is_reported(qapp, tmp_path, monkeypatch):
@@ -302,7 +392,7 @@ def test_re_check_clears_the_notices(qapp, tmp_path, monkeypatch):
 
     from ui.apps_tab import LAUNCH_CONFIRM_SECONDS
 
-    tab = _tab(qapp, tmp_path, monkeypatch)
+    tab = _tab(qapp, tmp_path, monkeypatch, with_checkouts=True)
     for card in tab.cards:
         card._pending_since = time.monotonic() - LAUNCH_CONFIRM_SECONDS - 1
     tab.refresh()

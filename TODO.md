@@ -8,6 +8,20 @@
 
 ## v2 — complete (2026-09-14)
 
+- [x] `P0` `bug` `@ai` **A running Sentinel reported as *Did not start*, twice.** The
+  first time it was `running_markers()` matching the bundle alone, when Sentinel's stub
+  execs the project's python and exits. The second (2026-10-07) reached the identical
+  tile through the other half: `ExternalApp.project` is a directory name baked into the
+  build, the checkout was renamed `sentinel_fork` → `sentinel`, and the installed v2.049
+  was left with no checkout marker and only the bundle again — which also blanked the
+  version label and the build report. Three changes, because one of them would only
+  have postponed it: `source_dir()` falls back to the checkout the bundle records in
+  `Contents/Resources/project_root.txt` (the configured lab folder still wins, so
+  Settings keeps deciding); `launch_is_observable()` stops the card claiming failure
+  when nothing durable was there to watch — it says *Started* and admits it cannot tell;
+  and `--selftest` fails the build when a registered `project` is gone while the
+  bundle's record points somewhere that works, so the next rename is caught at build
+  time rather than on a tile. `tests/test_launcher.py`, `tests/test_apps_tab.py`.
 - [x] `P1` `feature` `@ai` **Health check per app, before the button is pressed** —
   `launcher.readiness()` answers "would this start at all", where `status()` only
   answered "where from". Catches a checkout with no `.venv` and no `python3` on PATH,

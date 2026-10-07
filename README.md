@@ -83,7 +83,7 @@ A tile shows where its app will start from:
 | Starting… | launched, waiting for it to appear |
 | Running | its process is in the table; the button raises it instead |
 | Did not start | it was launched and never came up — a notice, and it expires |
-| Did not start | it was launched and never came up |
+| Started | it was launched and nothing here could watch for it — also a notice, and it expires |
 
 Source runs never use Lab Hub's own interpreter. Frozen, that is this app's
 binary, and it would run the other project inside this bundle's dependencies.
@@ -94,8 +94,8 @@ catches the two cases that used to look fine right up until the press: a
 checkout with no `.venv` and no `python3` on `PATH`, and a bundle that is still
 a directory but has lost the executable inside it. Either disables Launch and
 says why on the tile itself. The executable is read from `CFBundleExecutable`,
-not assumed to share the app's name — Sentinel is wrapped by an applet and
-its binary is called `applet`.
+not assumed to share the app's name — Sentinel's binary is `SentinelLauncher`,
+and an `osacompile` applet's is always `applet`.
 
 **Two kinds of bundle, and *Bring to front* has to tell them apart.** A
 PyInstaller bundle owns its own window, so `open -a` raises it. Sentinel's does
@@ -119,6 +119,35 @@ Sentinel as *Did not start* and went on reporting it for as long as the window
 stayed open. Checking both is also what survives the next change of launcher —
 this one bundle has been a PyInstaller build, an AppleScript applet and a
 compiled C stub inside a month, while the checkout path stayed put.
+
+**The checkout half comes from the bundle when the name here is stale.** The
+same bug came back on 2026-10-07 by a different road. `ExternalApp.project` is a
+directory name written by hand in `launcher.py`, so it is only as current as the
+last Lab Hub build: the Sentinel folder was renamed from `sentinel_fork` to
+`sentinel`, the installed v2.049 went on looking for the old one, `source_dir()`
+found nothing, the checkout marker disappeared and the tile was left matching
+the bundle alone — the exact failure above, reached without touching
+`running_markers()` at all. `source_dir()` now falls back to the checkout the
+bundle records in `Contents/Resources/project_root.txt`, which Sentinel's own
+installer rewrites the day the folder moves. The configured lab folder is still
+asked first, so the Settings tab keeps deciding where projects are looked for;
+the record is the fallback, not the authority. This also restores the version
+label and the build report, which went blank for the same reason.
+
+**Silence is only evidence when there was something to listen for.**
+`launch_is_observable()` asks whether a missing process means anything at all.
+For a stub bundle that execs and exits, with no checkout left to watch, a launch
+that worked and a launch that died look identical from here — so the tile says
+*Started*, with a tooltip saying it cannot tell, rather than accusing a running
+app of dying. *Did not start* is reserved for the cases where the app really was
+being watched.
+
+**A stale `project` fails the build.** `main.py --selftest` prints a
+`registered paths` line per app and fails when one's configured directory is
+gone while the bundle's own record points at a working checkout — the signature
+of a rename that was made everywhere except here. `build_app.sh` runs the
+self-test against the built bundle before installing it, so the next rename is
+caught at build time instead of on a tile.
 
 **A headless daemon is not an open app.** A command line carrying a flag in
 `NO_WINDOW_FLAGS` (`--headless`) is skipped: SONAR ships a launchd agent running
@@ -176,6 +205,14 @@ no longer exists, falls back to the checkout, and reads *Source only* — which
 looks like a fault in the renamed app rather than a stale hub. This has now
 happened twice, with `Create & Publish` → `Imprint` and `Sentinel Fork` →
 `Sentinel`.
+
+Renaming the *checkout folder* is the sharper version of the same thing, and it
+used to be worse than *Source only*: a stale `project` cost the tile its running
+marker and produced a confident *Did not start* under an app that was open on
+screen (`sentinel_fork` → `sentinel`, 2026-10-07). A stub bundle's own
+`project_root.txt` now covers the gap until Lab Hub is rebuilt, and the
+self-test fails the next build that is still wrong about it — but rebuild
+anyway, because that record only exists for the bundles that have one.
 
 **A launch is not believed until the app shows up.** `launch()` returning only
 means something was started. A source run is watched for a second and a half

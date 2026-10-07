@@ -149,6 +149,8 @@ def selftest() -> int:
 
     from lab_hub import version
 
+    problems = []
+
     print(f"{APP_NAME} self-test")
     print(f"  version:         {version.version_string()} ({version.tooltip()})")
 
@@ -177,7 +179,6 @@ def selftest() -> int:
     stripped = sorted(set(os.environ) - set(launcher.child_env()))
     print(f"  child env strips: {', '.join(stripped) if stripped else 'nothing'}")
 
-    problems = []
     if not icon.exists():
         problems.append("icon asset missing from the bundle")
     if not tray_icon.exists():
@@ -250,6 +251,30 @@ def selftest() -> int:
         ready = launcher.readiness(app, lab_root)
         note = ready.problem or ready.detail
         print(f"    {app.name:<24} {ready.state:<10} {note}")
+
+    # The one thing in that list that *is* this build's fault. `project` is a
+    # directory name written here by hand, so a checkout renamed since the last
+    # build leaves it pointing at nothing — which is how a running Sentinel came
+    # to be reported as *Did not start*: the marker it is actually recognised by
+    # went with the name. The app still runs, because the bundle records where
+    # its code is and the launcher falls back to that; this build is simply
+    # wrong about it, and silently. Say so while it is cheap to correct.
+    print("  registered paths:")
+    for app in launcher.APPS:
+        configured = lab_root / app.project
+        found = launcher.source_dir(app, lab_root)
+        if found is None:
+            print(f"    {app.name:<24} no checkout at {configured}")
+            continue
+        if found == configured:
+            print(f"    {app.name:<24} ok")
+            continue
+        print(f"    {app.name:<24} STALE — this build says {configured}")
+        problems.append(
+            f"{app.name}: `project` is '{app.project}', but its checkout is at "
+            f"{found} — rename it here, or every tile that depends on the "
+            "checkout path is guessing"
+        )
 
     if problems:
         print("\nFAILED:")

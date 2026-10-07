@@ -216,10 +216,48 @@ def bundle_executable(app: ExternalApp) -> Path | None:
     return None if bundle is None else _bundle_executable_path(bundle)
 
 
+# A stub bundle writes the checkout it runs into its own Resources. That file
+# is maintained by the project's installer, so it is right the moment the
+# project moves — which is more than can be said for `ExternalApp.project`,
+# a directory name hard-coded here and only corrected on the next Lab Hub build.
+PROJECT_ROOT_FILE = "project_root.txt"
+
+
+def recorded_project_root(bundle: Path) -> Path | None:
+    """The checkout a bundle says it runs, read from inside the bundle.
+
+    Only stub bundles carry this. It is the authority on where their code
+    lives: when `sentinel_fork` was renamed to `sentinel`, Sentinel's installer
+    rewrote this file the same day, while the copy of Lab Hub in /Applications
+    went on looking for a directory that no longer existed.
+    """
+    stamp = bundle / "Contents" / "Resources" / PROJECT_ROOT_FILE
+    try:
+        recorded = stamp.read_text().strip()
+    except OSError:
+        return None
+    return Path(recorded) if recorded else None
+
+
 def source_dir(app: ExternalApp, lab_root: Path) -> Path | None:
-    """The project checkout, if it has the entry script we expect."""
+    """The project checkout, if it has the entry script we expect.
+
+    The configured lab folder is asked first, so the Settings tab still decides
+    where projects are looked for. A stub bundle's own record is the fallback,
+    and it is what survives a renamed checkout: the name here is a guess baked
+    in at build time, and a stale guess used to take the version label, the
+    build report and — worst — the running check down with it.
+    """
     project = lab_root / app.project
-    return project if (project / app.entry).is_file() else None
+    if (project / app.entry).is_file():
+        return project
+
+    bundle = bundle_path(app)
+    if bundle is not None:
+        recorded = recorded_project_root(bundle)
+        if recorded is not None and (recorded / app.entry).is_file():
+            return recorded
+    return None
 
 
 def venv_python(project: Path) -> Path | None:
@@ -261,16 +299,56 @@ def running_markers(app: ExternalApp, lab_root: Path) -> tuple[str, ...]:
 
     Source runs are the entry script, which is why `launch` hands the
     interpreter an absolute path — with a relative one every project shows up
-    as a bare `python main.py` and they cannot be told apart.
+    as a bare `python main.py` and they cannot be told apart. That half comes
+    from `source_dir`, which falls back to the checkout the bundle itself
+    records: without that, a checkout renamed since this build drops the
+    marker and leaves only the bundle — exactly the half that does not last.
     """
-    markers = []
+    markers = (bundle_marker(app), checkout_marker(app, lab_root))
+    return tuple(marker for marker in markers if marker is not None)
+
+
+def bundle_marker(app: ExternalApp) -> str | None:
+    """The installed bundle's own process, if there is a bundle."""
     bundle = bundle_path(app)
-    if bundle is not None:
-        markers.append(str(bundle / "Contents" / "MacOS"))
+    return None if bundle is None else str(bundle / "Contents" / "MacOS")
+
+
+def checkout_marker(app: ExternalApp, lab_root: Path) -> str | None:
+    """The entry script a source run shows on its command line."""
     project = source_dir(app, lab_root)
-    if project is not None:
-        markers.append(str(project / app.entry))
-    return tuple(markers)
+    return None if project is None else str(project / app.entry)
+
+
+def hands_off_and_exits(bundle: Path) -> bool:
+    """True when the bundle's own process is gone moments after the launch.
+
+    Sentinel's stub execs the project's python and exits, so its
+    `Contents/MacOS` path is in the process table for a fraction of a second
+    and never again. Absence of that marker is therefore not evidence of
+    anything, and `launch_is_observable` refuses to read it as such.
+
+    Recording a project root is the tell: a bundle that names the checkout it
+    runs holds no code of its own. The applet shape keeps its own process alive
+    beside the app it started and embeds the path in its script instead, which
+    is why it is not caught here and does not need to be.
+    """
+    return recorded_project_root(bundle) is not None
+
+
+def launch_is_observable(app: ExternalApp, lab_root: Path) -> bool:
+    """Whether *not* finding this app in the process table means anything.
+
+    The honest answer is no for a stub bundle with no checkout to watch
+    instead: nothing it leaves behind is durable, so a launch that worked and a
+    launch that died look identical from here. Saying "Did not start" on that
+    evidence is how a running Sentinel was reported dead for a minute at a
+    time, and the caller is expected to say nothing rather than guess.
+    """
+    if checkout_marker(app, lab_root) is not None:
+        return True
+    bundle = bundle_path(app)
+    return bundle is not None and not hands_off_and_exits(bundle)
 
 
 # A process started with one of these has no window and never will, so it is
@@ -453,7 +531,7 @@ def bundle_runs_checkout(bundle: Path) -> bool:
     Deliberately separate from `is_launcher_bundle`, which asks whether `open`
     can raise the app. Same two bundles today, different questions.
     """
-    if (bundle / "Contents" / "Resources" / "project_root.txt").is_file():
+    if recorded_project_root(bundle) is not None:
         return True
     executable = _bundle_executable_path(bundle)
     return executable is not None and executable.name == "applet"

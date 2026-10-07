@@ -40,6 +40,17 @@ RUNNING_LABEL = ("Running", "stateOk")
 STARTING_LABEL = ("Starting…", "stateWarn")
 FAILED_LABEL = ("Did not start", "stateBad")
 
+# Started, and there is no way from here to tell whether it came up. Not the
+# same claim as *Did not start*, and the difference is the whole point: a stub
+# bundle with no checkout to watch leaves nothing durable in the process table,
+# so a launch that worked looks exactly like one that died. Guessing "failed"
+# there is what put a red notice under a running Sentinel.
+UNCONFIRMED_LABEL = ("Started", "stateWarn")
+UNCONFIRMED_TOOLTIP = (
+    "Lab Hub started it and cannot see whether it came up — this app leaves "
+    "nothing behind to watch for. Check your Dock or ⌘-Tab."
+)
+
 # How long to wait for a launched app to appear in the process table before
 # saying it never came up. Generous on purpose: a cold PyInstaller bundle
 # unpacks itself before it execs, and a false "Did not start" would be worse
@@ -83,6 +94,8 @@ class AppCard(QWidget):
         # in the process table — or turned into a failure notice if it never does.
         self._pending_since: float | None = None
         self._failed_at: float | None = None
+        # Set instead of `_failed_at` when the launch could not be watched.
+        self._unconfirmed_at: float | None = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -172,6 +185,9 @@ class AppCard(QWidget):
 
         label, style = self._state_label(ready)
         self.state.setText(label)
+        self.state.setToolTip(
+            UNCONFIRMED_TOOLTIP if self._showing_unconfirmed() else ""
+        )
         self.state.setObjectName(style)
         # A changed objectName only takes effect after the style is re-applied.
         self.state.style().unpolish(self.state)
@@ -188,6 +204,8 @@ class AppCard(QWidget):
             return STARTING_LABEL
         if self._showing_failure():
             return FAILED_LABEL
+        if self._showing_unconfirmed():
+            return UNCONFIRMED_LABEL
         return STATE_LABELS[ready.state]
 
     @staticmethod
@@ -250,21 +268,41 @@ class AppCard(QWidget):
             return False
         return True
 
+    def _showing_unconfirmed(self) -> bool:
+        """Whether the last launch is still unaccounted for. Expires alike."""
+        if self._unconfirmed_at is None:
+            return False
+        if time.monotonic() - self._unconfirmed_at > FAILURE_NOTICE_SECONDS:
+            self._unconfirmed_at = None
+            return False
+        return True
+
     def forget_failure(self) -> None:
-        """Drop the failure notice. Re-check asks for the state as it is now."""
+        """Drop the launch notices. Re-check asks for the state as it is now."""
         self._failed_at = None
+        self._unconfirmed_at = None
 
     def _settle_pending_launch(self) -> None:
         """Decide whether a launch we started has come up, or never will."""
         if self.running:
             self._pending_since = None
             self._failed_at = None
+            self._unconfirmed_at = None
             return
         if self._pending_since is None:
             return
         if time.monotonic() - self._pending_since <= LAUNCH_CONFIRM_SECONDS:
             return
         self._pending_since = None
+
+        # Silence is only evidence when there was something to listen for.
+        # Where there was not, say so plainly instead of accusing the app of
+        # dying: it is usually up, and a red "Did not start" under a running
+        # window is worse than admitting the tile cannot tell.
+        if not launcher.launch_is_observable(self.app, self.lab_root):
+            self._unconfirmed_at = time.monotonic()
+            return
+
         self._failed_at = time.monotonic()
         self.start_failed.emit(
             f"{self.app.name} was started but never came up. "
@@ -284,8 +322,13 @@ class AppCard(QWidget):
             self.launch_button.setText("Launch")
             # Checked before the press, not discovered during it: a checkout
             # with no interpreter used to offer a working-looking button that
-            # could only ever produce a dialog.
-            self.launch_button.setToolTip(ready.problem or "")
+            # could only ever produce a dialog. Left enabled after an
+            # unconfirmed launch on purpose — these apps hand off to the copy
+            # already running rather than opening a second window.
+            self.launch_button.setToolTip(
+                ready.problem
+                or (UNCONFIRMED_TOOLTIP if self._showing_unconfirmed() else "")
+            )
             self.launch_button.setEnabled(ready.ok)
             return
 
@@ -317,6 +360,7 @@ class AppCard(QWidget):
             # stayed up. The card watches for it to appear from here.
             self._pending_since = time.monotonic()
             self._failed_at = None
+            self._unconfirmed_at = None
             self.refresh(self.lab_root)
         self.launched.emit(message)
 
