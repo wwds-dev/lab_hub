@@ -1247,5 +1247,7 @@ def test_the_new_apps_are_registered_as_umbrella_apps():
     assert keys[-2:] == ["provisio", "agent_lab"]
     provisio = next(app for app in launcher.SUITES if app.key == "provisio")
     agent_lab = next(app for app in launcher.SUITES if app.key == "agent_lab")
-    assert provisio.served and provisio.runtime == "node"
+    # A native app since 2026-10-07: its own window and server, not a browser tab.
+    assert not provisio.served and provisio.runtime == "python"
+    assert provisio.entry == "main.py"
     assert not agent_lab.runs_from_source and agent_lab.bundle_dir == "dist"

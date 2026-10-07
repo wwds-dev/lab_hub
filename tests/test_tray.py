@@ -87,11 +87,20 @@ def test_the_dashboards_come_from_the_catalog_each_time(qapp, tmp_path):
     assert not actions[1].isEnabled(), "a missing file cannot be opened"
 
 
+def _web_app(launcher):
+    """A served app. Provisio was the registry's one until it became a native
+    app (2026-10-07); the menu bar's web-app handling is kept and tested here."""
+    return launcher.ExternalApp(
+        "provisio", "Provisio", "provisio", "scripts/run-framework.mjs", "",
+        url="http://localhost:5173/", runtime="node", args=("dev",),
+    )
+
+
 def test_a_running_web_app_is_opened_not_started_again(qapp, monkeypatch):
     """A second launch would start a second server on the next port."""
     from lab_hub import launcher
 
-    provisio = next(app for app in launcher.MENU_BAR_APPS if app.key == "provisio")
+    provisio = _web_app(launcher)
     monkeypatch.setattr(launcher, "is_running", lambda app, root, table=None: True)
     calls = []
     monkeypatch.setattr(launcher, "open_url", lambda url: calls.append(("open", url)))
@@ -106,7 +115,7 @@ def test_a_running_web_app_is_opened_not_started_again(qapp, monkeypatch):
 def test_a_stopped_web_app_is_started_then_opened(qapp, monkeypatch):
     from lab_hub import launcher
 
-    provisio = next(app for app in launcher.MENU_BAR_APPS if app.key == "provisio")
+    provisio = _web_app(launcher)
     monkeypatch.setattr(launcher, "is_running", lambda app, root, table=None: False)
     monkeypatch.setattr(launcher, "launch", lambda app, root: "launched")
     item = Tray(lambda: Path("/tmp"))

@@ -67,28 +67,19 @@ lift — is swallowed. Without that, inertia alone walks several tabs.
 One tile per umbrella app: **Sentinel**, **Imprint**, **SONAR**, **Provisio**,
 **Agent Lab** (the last two added 2026-10-07).
 
-**Provisio is a web app, and its tile behaves like one.** Its checkout runs a
-local server (`scripts/run-framework.mjs dev`, port 5173) and the browser is its
-window. Launch starts that server — through a login shell, because node lives
-wherever the user's profile puts it and a frozen app's `PATH` is bare — and
-`ui/web_open.py` opens `http://localhost:5173/` the moment the address answers,
-rather than on the next three-second poll. *Running* means **the address
-answers** and nothing else: the process is on the table seconds before it
-listens, and calling it running then offered a page that could not load yet. The
-button then reads **Open in browser**. A stopped server is the resting state
-(*Stopped*, not the *Source only* warning). Two things only this tile has:
-
-* **Stop.** A server has no window to close, so one started from here would
-  otherwise run until the Mac restarted. It sends SIGTERM to the process group
-  (`launch` makes the server a group leader), which takes Wrangler's `workerd`
-  with it. It only ever stops a server it can recognise — the one started with
-  the absolute entry path Lab Hub uses. A server started by hand from
-  `start-preview.command` runs by a relative path; the tile still sees it (the
-  address answers) and opens it, but Stop is disabled and says to use Control-C
-  where it was started, because killing whatever holds a port could be anything.
-* **A longer wait.** A dev server compiles before it listens, so *Did not start*
-  waits 60 seconds (`SERVER_CONFIRM_SECONDS`) instead of 20. It usually answers
-  in about five.
+**Provisio is a native app** as of 2026-10-07: `/Applications/Provisio.app`
+(its own `scripts/install_app.sh`), a window that starts and stops its own local
+server and switches between a demo and a real workspace. Its tile launches it
+like Imprint's, from the bundle when installed and from the checkout's `.venv`
+(`main.py`) otherwise. Until then it was this hub's one **web app**, and that
+support is kept for any served app (`ExternalApp.url`): *Running* means the
+address answers, Launch starts the server through a login shell and
+`ui/web_open.py` opens the page once it answers, **Stop** sends SIGTERM to the
+server's process group (only for a server started with the absolute entry path
+Lab Hub uses), and *Did not start* waits 60 seconds (`SERVER_CONFIRM_SECONDS`)
+because a dev server compiles before it listens. The tile must not start
+Provisio's browser-mode server any more: vinext allows one dev server per
+checkout, so it would stop the app's own server from starting.
 
 **Headroom has no tile.** It is Provisio's `engine/` — a sub-module, reached
 through Provisio, under the same rule as Tunnel and Bug Spray below.
@@ -444,9 +435,10 @@ menu opens the window and launches apps directly — **umbrella apps only**
 here; listing VPN Agent, Bug Spray and vidforge turned a six-item menu into a
 nine-item one and buried what is actually reached for.
 
-Picking Provisio there opens its page if its server already answers — a second
-launch would start a second server on the next port — and otherwise starts it
-and opens the page once it does. Below the apps, a **Websites** submenu opens
+A served app picked there opens its page if its server already answers — a
+second launch would start a second server on the next port — and otherwise
+starts it and opens the page once it does (no registered app is served since
+Provisio became a native app). Below the apps, a **Websites** submenu opens
 each site and a **Dashboards** submenu opens each catalog entry; the dashboards
 are re-read from the catalog every time the menu opens, and a missing local file
 is listed but disabled.
@@ -607,8 +599,8 @@ each project, so each venv is its own answer; running the apps themselves would
 open six windows on every build and would prove nothing extra, because the crash
 happens inside `QApplication()` before any of them reaches its own code. An app
 with no checkout or no venv is reported as skipped, not as a pass — and so is one
-that is not a Qt app started from a venv at all (Provisio runs on node; Agent Lab
-only ever opens its own bundle).
+that is not a Qt app started from a venv at all (Agent Lab only ever opens its own
+bundle). Provisio is probed like the others since it became a PySide6 app.
 
 It also fails a build with **no TLS backend**: the Websites tab's checks need
 Qt's `tls` plugin, which a bundle has only if PyInstaller collected it, and

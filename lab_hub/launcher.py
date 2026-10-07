@@ -145,19 +145,19 @@ SUITES: tuple[ExternalApp, ...] = (
         service="Background engine",
     ),
     # Headroom is Provisio's `engine/`, not an app of its own — it gets no tile
-    # for the same reason Tunnel does not. Started with its own runner rather
-    # than `start-preview.command`, which runs it by a relative path: the
-    # absolute one is how the tile recognises its server among every `node`.
+    # for the same reason Tunnel does not. Provisio was a web app here (its
+    # node server, opened in the browser) until 2026-10-07; it is now a native
+    # window, /Applications/Provisio.app from its scripts/install_app.sh, that
+    # starts and stops its own server and switches between a demo and a real
+    # workspace. The browser-mode server and the app cannot run at once (vinext
+    # allows one dev server per checkout), so this tile must not start one.
     ExternalApp(
         key="provisio",
         name="Provisio",
         project="provisio",
-        entry="scripts/run-framework.mjs",
-        summary="Income-protection product design and review, opened in your "
-        "browser. Headroom, its solvency-filings engine, lives inside it.",
-        url="http://localhost:5173/",
-        runtime="node",
-        args=("dev",),
+        entry="main.py",
+        summary="Income-protection product design and review, with a Demo/Real "
+        "workspace switch. Headroom, its solvency-filings engine, lives inside it.",
     ),
     # The Antfarm workstation. "Agent Lab" is a working name until the brand is
     # decided; renaming it means rebuilding its bundle and changing it here.
