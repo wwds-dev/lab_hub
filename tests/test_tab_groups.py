@@ -32,7 +32,10 @@ def test_backup_and_sync_apps_have_their_own_tab(window):
 def test_tools_include_built_in_tools_and_unblock_tracker(window):
     assert [
         window.tools_tabs.tabText(i) for i in range(window.tools_tabs.count())
-    ] == ["Convert Files", "Narrator", "Prepare Images", "Unblock Tracker", "Backstage"]
+    ] == [
+        "All tools", "Convert Files", "Narrator", "Prepare Images",
+        "Unblock Tracker", "Backstage",
+    ]
     assert _keys(window.unblock_tracker_tab) == ["unblock_tracker"]
 
 

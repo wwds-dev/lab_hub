@@ -50,7 +50,7 @@ def short_path(path: str) -> str:
     """A path short enough to wrap inside a tile.
 
     A label cannot break inside a word, and a path is one long word: the
-    Antfarm workstation's sits five generated folders deep, and at full length
+    Codex visualizations sit five generated folders deep, and at full length
     it set the minimum width of the whole tab. Home becomes `~`, and anything
     deeper than four folders keeps its first two and its file name. The full
     path is the tooltip, and Show in Finder goes straight to it.

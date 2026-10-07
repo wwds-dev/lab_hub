@@ -67,7 +67,7 @@ def test_a_link_opens_as_itself():
 
 
 def test_a_local_file_goes_through_the_monitor_when_it_is_up(tmp_path):
-    """Its route wraps an HTML fragment — the Antfarm workstation is one — in
+    """Its route wraps an HTML fragment — the Prompt injection taxonomy is one — in
     a proper page."""
     entry = dashboards.Dashboard("antfarm workstation", "A", "", "", "", path=str(tmp_path / "a.html"))
 

@@ -17,6 +17,7 @@ from .images_tab import ImagesTab
 from .links_tab import DashboardsTab, SitesTab
 from .narrator_tab import NarratorTab
 from .settings_tab import SettingsTab
+from .tools_tab import BuiltInTool, ToolsOverview, convert_state, running_or_idle
 
 # Long enough for macOS's fullscreen-exit animation to finish before the
 # window is hidden out from under it.
@@ -94,6 +95,39 @@ class MainWindow(QMainWindow):
 
         self.tools_tabs = QTabWidget()
         self.tools_tabs.tabBar().setExpanding(False)
+        # Every tool as a tile, first, so Tools opens on the same kind of page
+        # as Apps, Websites and Dashboards. The pages below stay as they were.
+        self.tools_overview = ToolsOverview(
+            self.settings,
+            tools=[
+                BuiltInTool(
+                    "Convert Files",
+                    "Any document format Calibre reads into any it writes — "
+                    "EPUB, AZW3, MOBI, DOCX, PDF and the long tail.",
+                    self.convert_tab,
+                    lambda: convert_state(self.convert_tab),
+                ),
+                BuiltInTool(
+                    "Narrator",
+                    "Turn an ebook into an audiobook, in a separate process you "
+                    "can stop. Paid text-to-speech; it checks its keys on start.",
+                    self.narrator_tab,
+                    running_or_idle(lambda: self.narrator_tab.is_running(), "Narrating now."),
+                ),
+                BuiltInTool(
+                    "Prepare Images",
+                    "Resize artwork for print, rename a folder in sequence, and "
+                    "set small images aside.",
+                    self.images_tab,
+                    running_or_idle(
+                        lambda: self.images_tab.run_panel.is_running(), "Working now."
+                    ),
+                ),
+            ],
+            apps=launcher.UTILITIES + launcher.TOOLS_ONLY_APPS,
+            open_page=self.tools_tabs.setCurrentWidget,
+        )
+        self.tools_tabs.addTab(self.tools_overview, "All tools")
         self.tools_tabs.addTab(self.convert_tab, "Convert Files")
         self.tools_tabs.addTab(self.narrator_tab, "Narrator")
         self.tools_tabs.addTab(self.images_tab, "Prepare Images")
@@ -127,6 +161,8 @@ class MainWindow(QMainWindow):
         for tab in (self.sites_tab, self.dashboards_tab):
             tab.opened.connect(self._on_launched)
             tab.failed.connect(self._on_start_failed)
+        self.tools_overview.launched.connect(self._on_launched)
+        self.tools_overview.start_failed.connect(self._on_start_failed)
         self.settings_tab.settings_saved.connect(self._on_settings_saved)
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self.tools_tabs.currentChanged.connect(self._on_tool_tab_changed)
@@ -197,6 +233,7 @@ class MainWindow(QMainWindow):
         self.backstage_tab.apply_settings(self.settings)
         self.sites_tab.apply_settings(self.settings)
         self.dashboards_tab.apply_settings(self.settings)
+        self.tools_overview.apply_settings(self.settings)
         self.statusBar().showMessage("Settings saved.", 4000)
 
     def _on_tab_changed(self, index: int) -> None:
@@ -215,7 +252,7 @@ class MainWindow(QMainWindow):
     def _refresh_tool_tab(self, widget) -> None:
         if widget is self.convert_tab:
             self.convert_tab.refresh_calibre()
-        elif widget in (self.unblock_tracker_tab, self.backstage_tab):
+        elif widget in (self.unblock_tracker_tab, self.backstage_tab, self.tools_overview):
             widget.refresh()
 
     def _check_for_wake(self) -> None:

@@ -5,9 +5,9 @@ Dashboards section and this tab both read it, so a dashboard added there shows
 up here with no Lab Hub rebuild. Nothing is copied into this app.
 
 A local entry opens through the Monitor's own server when that is up, because
-its `/dashboards/<id>` route wraps an HTML fragment (the Antfarm workstation is
-one) in a proper page. When the server is down the file opens directly — the
-same fallback the Monitor's own page uses.
+its `/dashboards/<id>` route wraps an HTML fragment (the Prompt injection
+taxonomy is one) in a proper page. When the server is down the file opens
+directly — the same fallback the Monitor's own page uses.
 """
 
 from __future__ import annotations

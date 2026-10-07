@@ -302,6 +302,21 @@ copies be one.
   `--selftest` fails a build with no TLS backend. `tests/test_launcher.py`,
   `test_apps_tab.py`, `test_sites.py`, `test_dashboards.py`, `test_links_tab.py`,
   `test_tray.py`, `test_tab_groups.py`.
+- [x] `P2` `design` `@ai` **Tools as tiles** (2026-10-07). The Tools tab opens on *All
+  tools*: built-in tools as tiles with their state (*Running*, *Needs Calibre*, *Built
+  in*) and an Open that moves the tab strip; Unblock Tracker and Backstage as the Apps
+  tab's own `AppCard`. Same grid, Re-check and poll as the other tile pages.
+  `ui/tools_tab.py`, `tests/test_tools_tab.py`.
+- [x] `P3` `docs` `@ai` **Dashboards catalog trimmed** (2026-10-07): the Antfarm
+  workstation concept (file moved to the Trash) and Provisio · Protection Studio, the
+  hosted copy of the app now on the Apps tab. The hosted deployment itself was left
+  alone — see the next item.
+- [ ] `P3` `infra` `@me` **Decide whether to keep Provisio's hosted copy** on ChatGPT
+  Sites (`provisio-protection-studio…chatgpt.site`, private). It is the same app, deployed;
+  its D1/R2 hold whatever was saved there, and it is the only copy reachable away from
+  this Mac. Deleting it is done in ChatGPT and cannot be undone. Provisio's build reads
+  `.openai/hosting.json` and its Sites plugin, so keep those either way unless the build
+  is changed too.
 - [ ] `P2` `feature` `@me` **Decide Agent Lab's real name.** The tile, the bundle and the
   `active/agent_lab` link all carry the working name. Renaming means its builder's
   `CFBundleName`/bundle path, `ExternalApp.name` in `launcher.py`, the link, then

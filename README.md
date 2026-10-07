@@ -304,14 +304,17 @@ folder. Nothing is copied into Lab Hub: add a dashboard to the catalog and it is
 on this tab (and in the menu bar) without a rebuild; the tab rebuilds itself when
 the catalog's modification time changes. A tile shows its source and kind, and a
 state: *Link*, *Local file*, or *File missing* (Open disabled). **Show catalog**
-reveals the file to edit.
+reveals the file to edit. On 2026-10-07 the Antfarm workstation concept (superseded
+by the Agent Lab app) and Provisio · Protection Studio (the hosted copy of the
+Provisio app, which now has its own tile) were taken out of the catalog.
 
 A local dashboard opens through the Monitor's own server
 (`127.0.0.1:8765/dashboards/<id>`) when that is up, because its route wraps an
-HTML fragment — the Antfarm workstation is one — in a proper page; otherwise the
+HTML fragment — the Prompt injection taxonomy is one — in a proper page; otherwise the
 file opens directly, which is the Monitor page's own fallback. Long paths are
 shortened on the tile (full path in the tooltip): a path is one unbreakable word,
-and at full length the Antfarm workstation's set the whole tab's minimum width.
+and at full length the Antfarm workstation's (since removed from the catalog) set
+the whole tab's minimum width.
 
 ### Backup and Sync
 
@@ -326,6 +329,17 @@ the tab carries its own **Check builds** and Update now
 The built-in utilities and occasional standalone tools are grouped under one
 tab: **Convert Files**, **Narrator**, **Prepare Images**, **Unblock Tracker** and
 **Backstage**.
+
+It opens on **All tools** (`ui/tools_tab.py`, added 2026-10-07): every tool as a
+tile, on the same grid as Apps, Websites and Dashboards, with Re-check and an
+on-screen-only poll. A built-in tool's tile says only what can be known without
+asking it to do anything — *Running* while a job is going, *Needs Calibre* when
+Convert Files has no `ebook-convert`, and otherwise *Built in*; Narrator checks
+its keys and ffmpeg when it starts, so *Ready* before that would be a guess.
+**Open** moves the tab strip to that tool's page. Unblock Tracker and Backstage
+get the Apps tab's own tile (`AppCard`), so Launch, *Running*, *Bring to front*
+and the version behave as they do there. Their own pages are unchanged —
+Backstage's still carries Check build — and neither gains a menu bar entry.
 
 #### Convert Files
 Any document format Calibre reads into any format it writes — **47 in, 19 out**.
