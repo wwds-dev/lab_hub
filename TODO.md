@@ -309,16 +309,10 @@ copies be one.
   Imprint's and must not start the browser-mode server: vinext allows one dev server per
   checkout. The web-app support stays, unused. `--selftest` now probes Provisio's venv
   ("a real Qt child starts").
-- [ ] `P1` `infra` `@ai` **Rebuild and reinstall Lab Hub** so the installed bundle
-  carries the new Provisio tile. The registry is compiled in, so until then the
-  installed hub's tile still starts the browser-mode server, and that server blocks
-  the app's own. Not done on 2026-10-07 because another session had uncommitted work
-  in this tree that a build would have shipped.
-- [x] `P3` `design` `@ai` **Swipes move the top row only** (2026-10-07, the user's call):
-  Apps through Settings. A swipe on a tool's page moves the window's tabs, never the
-  Tools sub-tabs. `SwipeTabs` keeps its innermost-first support for several rows; the
-  window registers one. `tests/test_swipe.py` — the three new tests fail against the old
-  two-row wiring.
+- [x] `P1` `infra` `@ai` **Rebuild and reinstall Lab Hub** with the new Provisio tile.
+  Done 2026-10-07 17:58: the installed bundle is v2.075, stamped from `ff8a26b`, which
+  includes the tile change (`ee33ea7`); its `--selftest` probes Provisio as a Qt app,
+  which only the new tile does. Checked 2026-10-09.
 - [x] `P2` `design` `@ai` **Tools as tiles** (2026-10-07). The Tools tab opens on *All
   tools*: built-in tools as tiles with their state (*Running*, *Needs Calibre*, *Built
   in*) and an Open that moves the tab strip; Unblock Tracker and Backstage as the Apps
