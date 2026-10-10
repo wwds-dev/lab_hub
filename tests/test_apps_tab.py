@@ -797,12 +797,12 @@ def test_a_desktop_app_has_no_stop_button(qapp, tmp_path, monkeypatch):
 
 def test_a_bundle_built_in_its_checkout_reads_built(qapp, tmp_path, monkeypatch):
     monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
-    project = tmp_path / "agent_lab"
+    project = tmp_path / "syndustryx"
     (project / "dist").mkdir(parents=True)
     (project / "server.py").write_text("\n")
     make_bundle(project / "dist", "SYNDUSTRYX")
     app = launcher.ExternalApp(
-        "agent_lab", "SYNDUSTRYX", "agent_lab", "server.py", "summary",
+        "syndustryx", "SYNDUSTRYX", "syndustryx", "server.py", "summary",
         bundle_dir="dist", runs_from_source=False,
     )
     card = AppCard(app)

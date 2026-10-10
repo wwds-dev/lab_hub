@@ -287,13 +287,13 @@ copies be one.
 
 ## v3 — later
 
-- [x] `P1` `feature` `@ai` **Provisio and Agent Lab on the Apps tab; new Websites and
+- [x] `P1` `feature` `@ai` **Provisio and SYNDUSTRYX on the Apps tab; new Websites and
   Dashboards tabs** (2026-10-07). Provisio is a *web app* tile: Launch starts its local
   server through a login shell with the absolute entry path, `ui/web_open.py` opens
   `localhost:5173` once it answers, *Running* means the address answers, **Open in
   browser** replaces Bring to front, and **Stop** ends a server Lab Hub can recognise
-  (process group, so `workerd` goes too). Headroom stays inside it — no tile. Agent Lab
-  (the Antfarm workstation, working name) is linked in as `active/agent_lab`; its bundle is
+  (process group, so `workerd` goes too). Headroom stays inside it — no tile. SYNDUSTRYX
+  (the Antfarm workstation, working name) is linked in as `active/syndustryx`; its bundle is
   found in `dist/` (`bundle_dir`, state *Built*) and its checkout is never run
   (`runs_from_source=False` — `server.py` would take the Monitor's port). **Websites**
   (altmerch.store, bookadatewithme.com) checks each site with a non-blocking `HEAD`;
@@ -329,10 +329,10 @@ copies be one.
   away from this Mac. Deleting it is done in ChatGPT and cannot be undone. Keep
   `.openai/hosting.json` either way: Provisio's Vite config imports it, so the build
   fails without it.
-- [ ] `P2` `feature` `@me` **Decide Agent Lab's real name.** The tile, the bundle and the
-  `active/agent_lab` link all carry the working name. Renaming means its builder's
-  `CFBundleName`/bundle path, `ExternalApp.name` in `launcher.py`, the link, then
-  rebuilding Lab Hub (the registry is compiled in).
+- [x] `P2` `feature` `@ai` **SYNDUSTRYX identity applied end to end (2026-10-10).**
+  Owner selected the name; active source, executable/icon/bundle, deployment defaults,
+  `active/syndustryx` link and compiled Lab Hub registration now match. Preserve
+  old records/credentials through explicit migration readers and path compatibility.
 - [ ] `P2` `bug` `@me` **bookadatewithme.com answers 404.** Netlify serves the domain with
   no site deployed behind it (checked 2026-10-07); the Websites tile reports it as *Error
   404*. Redeploy from `~/Documents/Websites/bookadatewithme` or point the domain elsewhere.

@@ -1163,16 +1163,16 @@ def test_stop_with_nothing_recognisable_explains_itself(tmp_path, monkeypatch):
 
 
 # ----------------------------------------------------------------------
-# A bundle built inside its own checkout (Agent Lab)
+# A bundle built inside its own checkout (SYNDUSTRYX)
 # ----------------------------------------------------------------------
 def _built(tmp_path, monkeypatch, *, with_bundle=True):
     monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
-    project = _project(tmp_path, "agent_lab", entry="server.py")
+    project = _project(tmp_path, "syndustryx", entry="server.py")
     if with_bundle:
         (project / "dist").mkdir()
         make_bundle(project / "dist", "SYNDUSTRYX")
     app = launcher.ExternalApp(
-        "agent_lab", "SYNDUSTRYX", "agent_lab", "server.py", "",
+        "syndustryx", "SYNDUSTRYX", "syndustryx", "server.py", "",
         bundle_dir="dist", runs_from_source=False,
     )
     return app, project
@@ -1202,14 +1202,14 @@ def test_a_built_bundle_is_seen_by_its_real_path(tmp_path, monkeypatch):
     """The checkout is reached through a symlink, and `ps` shows the real
     path — so the marker has to be the resolved one."""
     monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
-    real = _project(tmp_path / "elsewhere", "agent-lab", entry="server.py")
+    real = _project(tmp_path / "elsewhere", "syndustryx", entry="server.py")
     (real / "dist").mkdir()
     make_bundle(real / "dist", "SYNDUSTRYX")
     lab = tmp_path / "lab"
     lab.mkdir()
-    (lab / "agent_lab").symlink_to(real)
+    (lab / "syndustryx").symlink_to(real)
     app = launcher.ExternalApp(
-        "agent_lab", "SYNDUSTRYX", "agent_lab", "server.py", "",
+        "syndustryx", "SYNDUSTRYX", "syndustryx", "server.py", "",
         bundle_dir="dist", runs_from_source=False,
     )
     table = f"{real.resolve()}/dist/SYNDUSTRYX.app/Contents/MacOS/SYNDUSTRYX\n"
@@ -1218,7 +1218,7 @@ def test_a_built_bundle_is_seen_by_its_real_path(tmp_path, monkeypatch):
 
 
 def test_a_checkout_that_is_not_the_app_is_not_launchable(tmp_path, monkeypatch):
-    """Agent Lab's `server.py` is its engine with no window, on the port the
+    """SYNDUSTRYX's `server.py` is its engine with no window, on the port the
     Lab Project Monitor already holds — never something to start as the app."""
     app, _project_dir = _built(tmp_path, monkeypatch, with_bundle=False)
 
@@ -1231,7 +1231,7 @@ def test_a_checkout_that_is_not_the_app_is_not_launchable(tmp_path, monkeypatch)
 
 
 def test_an_app_outside_the_version_scheme_is_not_told_to_rebuild(tmp_path, monkeypatch):
-    """Rebuilding never stamps Agent Lab, so that advice could not work."""
+    """Rebuilding never stamps SYNDUSTRYX, so that advice could not work."""
     app, _project_dir = _built(tmp_path, monkeypatch)
 
     status = launcher.build_status(app, tmp_path)
@@ -1244,10 +1244,10 @@ def test_an_app_outside_the_version_scheme_is_not_told_to_rebuild(tmp_path, monk
 def test_the_new_apps_are_registered_as_umbrella_apps():
     keys = [app.key for app in launcher.SUITES]
 
-    assert keys[-2:] == ["provisio", "agent_lab"]
+    assert keys[-2:] == ["provisio", "syndustryx"]
     provisio = next(app for app in launcher.SUITES if app.key == "provisio")
-    agent_lab = next(app for app in launcher.SUITES if app.key == "agent_lab")
+    syndustryx = next(app for app in launcher.SUITES if app.key == "syndustryx")
     # A native app since 2026-10-07: its own window and server, not a browser tab.
     assert not provisio.served and provisio.runtime == "python"
     assert provisio.entry == "main.py"
-    assert not agent_lab.runs_from_source and agent_lab.bundle_dir == "dist"
+    assert not syndustryx.runs_from_source and syndustryx.bundle_dir == "dist"

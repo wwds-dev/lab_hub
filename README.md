@@ -68,7 +68,7 @@ lift — is swallowed. Without that, inertia alone walks several tabs.
 
 ### Apps
 One tile per umbrella app: **Sentinel**, **Imprint**, **SONAR**, **Provisio**,
-**Agent Lab** (the last two added 2026-10-07).
+**SYNDUSTRYX** (the last two added 2026-10-07).
 
 **Provisio is a native app** as of 2026-10-07: `/Applications/Provisio.app`
 (its own `scripts/install_app.sh`), a window that starts and stops its own local
@@ -87,13 +87,13 @@ checkout, so it would stop the app's own server from starting.
 **Headroom has no tile.** It is Provisio's `engine/` — a sub-module, reached
 through Provisio, under the same rule as Tunnel and Bug Spray below.
 
-**Agent Lab is the Antfarm workstation, under a working name.** The brand is not
-decided; when it is, rename the bundle in its builder and `ExternalApp.name`
-here, then rebuild Lab Hub. Its source is a Codex project outside the lab, linked
-in as `active/agent_lab` (a real symlink, the `altmerch_store` pattern — which
-also puts it on the Lab Project Monitor). Two registry fields exist for it:
+**SYNDUSTRYX is the Antfarm workstation, named by the owner.** Its current
+source and Lab registration use `syndustryx`; the source stays in the Codex
+workspace and `active/syndustryx` links to it. Desktop records and credentials
+migrate compatibly; historical releases remain intact. Two registry fields
+exist for it:
 
-* `bundle_dir="dist"` — its builder stops at `dist/Agent Lab.app` and has no
+* `bundle_dir="dist"` — its builder stops at `dist/SYNDUSTRYX.app` and has no
   installer, so a bundle there counts when none is installed. The tile says
   *Built* rather than *Installed*, and shows the path the lab reaches it by; the
   running marker uses the resolved path, because `ps` only ever shows the real
@@ -102,8 +102,8 @@ also puts it on the Lab Project Monitor). Two registry fields exist for it:
   on port 8765, which the Lab Project Monitor already holds. Only the built
   bundle is ever launched; with none built, Launch is disabled and says so.
 
-Its builder stamps no version and it has no git history, so its tile shows no
-number and Check builds reports it *unknown* — with a note that it does not use
+Its builder stamps its own release version and it has no git history, so
+Check builds reports comparison with the lab version scheme as *unknown* — with a note that it does not use
 the lab's version scheme, not the usual "rebuild it once", which could not work.
 
 A `VERSION` file holding a release line rather than an arc is kept whole:
@@ -308,7 +308,7 @@ on this tab (and in the menu bar) without a rebuild; the tab rebuilds itself whe
 the catalog's modification time changes. A tile shows its source and kind, and a
 state: *Link*, *Local file*, or *File missing* (Open disabled). **Show catalog**
 reveals the file to edit. On 2026-10-07 the Antfarm workstation concept (superseded
-by the Agent Lab app) and Provisio · Protection Studio (the hosted copy of the
+by the SYNDUSTRYX app) and Provisio · Protection Studio (the hosted copy of the
 Provisio app, which now has its own tile) were taken out of the catalog.
 
 A local dashboard opens through the Monitor's own server
@@ -616,7 +616,7 @@ each project, so each venv is its own answer; running the apps themselves would
 open six windows on every build and would prove nothing extra, because the crash
 happens inside `QApplication()` before any of them reaches its own code. An app
 with no checkout or no venv is reported as skipped, not as a pass — and so is one
-that is not a Qt app started from a venv at all (Agent Lab only ever opens its own
+that is not a Qt app started from a venv at all (SYNDUSTRYX only ever opens its own
 bundle). Provisio is probed like the others since it became a PySide6 app.
 
 It also fails a build with **no TLS backend**: the Websites tab's checks need

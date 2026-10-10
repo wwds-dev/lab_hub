@@ -27,7 +27,7 @@ from .widgets import scroll_column
 
 STATE_LABELS = {
     "installed": ("Installed", "stateOk"),
-    # Built inside its own checkout and never installed — Agent Lab's builder
+    # Built inside its own checkout and never installed — SYNDUSTRYX's builder
     # stops at `dist/`. Nothing wrong with it, so not a warning.
     "built": ("Built", "stateOk"),
     "source": ("Source only", "stateWarn"),

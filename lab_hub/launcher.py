@@ -100,9 +100,9 @@ class ExternalApp:
     args: tuple[str, ...] = ()
     # Where inside the checkout a built bundle is looked for when none is
     # installed in /Applications — for an app whose builder stops at its own
-    # `dist/` and has no installer, like Agent Lab's.
+    # `dist/` and has no installer, like SYNDUSTRYX's.
     bundle_dir: str | None = None
-    # Whether the checkout itself is the app. Agent Lab's `server.py` is its
+    # Whether the checkout itself is the app. SYNDUSTRYX's `server.py` is its
     # engine without the window, on the port the Lab Project Monitor already
     # holds, so only its built bundle is ever launched.
     runs_from_source: bool = True
@@ -159,15 +159,12 @@ SUITES: tuple[ExternalApp, ...] = (
         summary="Income-protection product design and review, with a Demo/Real "
         "workspace switch. Headroom, its solvency-filings engine, lives inside it.",
     ),
-    # The Antfarm workstation, named SYNDUSTRYX by the owner on 2026-10-09
-    # (trademark/domain clearance still open). The key and project folder keep
-    # the legacy `agent_lab` name, as the app's own bundle id and storage do.
-    # Its source is a Codex project outside the lab, linked in as
-    # `active/agent_lab` the way `altmerch_store` is.
+    # SYNDUSTRYX: renamed source, bundle and Lab registration together.
+    # Source remains in the Codex workspace, linked as active/syndustryx.
     ExternalApp(
-        key="agent_lab",
+        key="syndustryx",
         name="SYNDUSTRYX",
-        project="agent_lab",
+        project="syndustryx",
         entry="server.py",
         summary="The Antfarm workstation: an animated factory over a local "
         "fulfilment engine, storefront and departments.",
@@ -973,7 +970,7 @@ def build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
         )
     if not found.known:
         # Rebuilding only helps a project whose build stamps a version. One
-        # outside the lab's scheme (Agent Lab: no VERSION file, no git) never
+        # outside the lab's scheme (SYNDUSTRYX: no VERSION file, no git) never
         # will, and telling the user to rebuild it would be advice that cannot
         # work.
         note = (
@@ -1026,7 +1023,7 @@ def status(app: ExternalApp, lab_root: Path) -> tuple[str, str]:
         if bundle.parent == APPLICATIONS:
             return "installed", str(bundle)
         # Shown by the way the lab reaches it, not by where the symlink lands
-        # (Agent Lab's real home is a generated Codex project folder).
+        # (SYNDUSTRYX's real home is a generated Codex project folder).
         return "built", str(lab_root / app.project / app.bundle_dir / bundle.name)
     project = source_dir(app, lab_root)
     if project is not None:

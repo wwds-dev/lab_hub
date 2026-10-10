@@ -55,11 +55,11 @@ def test_the_apps_tab_lists_the_suites(window):
     """Only the suites get a tile; their companions are nested inside them.
 
     `sentinel_ai` is archived and `create_and_publish` was renamed to
-    `imprint`, so neither belongs here any more. Provisio and Agent Lab (the
+    `imprint`, so neither belongs here any more. Provisio and SYNDUSTRYX (the
     Antfarm workstation) joined on 2026-10-07.
     """
     assert _keys(window.apps_tab) == [
-        "sentinel", "imprint", "sonar", "provisio", "agent_lab",
+        "sentinel", "imprint", "sonar", "provisio", "syndustryx",
     ]
 
 
