@@ -800,9 +800,9 @@ def test_a_bundle_built_in_its_checkout_reads_built(qapp, tmp_path, monkeypatch)
     project = tmp_path / "agent_lab"
     (project / "dist").mkdir(parents=True)
     (project / "server.py").write_text("\n")
-    make_bundle(project / "dist", "Agent Lab")
+    make_bundle(project / "dist", "SYNDUSTRYX")
     app = launcher.ExternalApp(
-        "agent_lab", "Agent Lab", "agent_lab", "server.py", "summary",
+        "agent_lab", "SYNDUSTRYX", "agent_lab", "server.py", "summary",
         bundle_dir="dist", runs_from_source=False,
     )
     card = AppCard(app)

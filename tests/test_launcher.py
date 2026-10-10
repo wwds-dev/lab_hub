@@ -1170,9 +1170,9 @@ def _built(tmp_path, monkeypatch, *, with_bundle=True):
     project = _project(tmp_path, "agent_lab", entry="server.py")
     if with_bundle:
         (project / "dist").mkdir()
-        make_bundle(project / "dist", "Agent Lab")
+        make_bundle(project / "dist", "SYNDUSTRYX")
     app = launcher.ExternalApp(
-        "agent_lab", "Agent Lab", "agent_lab", "server.py", "",
+        "agent_lab", "SYNDUSTRYX", "agent_lab", "server.py", "",
         bundle_dir="dist", runs_from_source=False,
     )
     return app, project
@@ -1185,7 +1185,7 @@ def test_a_bundle_in_the_checkout_is_found_when_none_is_installed(tmp_path, monk
 
     assert ready.state == "built"
     assert ready.ok
-    assert launcher.bundle_path(app, tmp_path) == (project / "dist" / "Agent Lab.app").resolve()
+    assert launcher.bundle_path(app, tmp_path) == (project / "dist" / "SYNDUSTRYX.app").resolve()
 
 
 def test_an_installed_copy_still_wins(tmp_path, monkeypatch):
@@ -1193,7 +1193,7 @@ def test_an_installed_copy_still_wins(tmp_path, monkeypatch):
     applications = tmp_path / "Applications"
     applications.mkdir()
     monkeypatch.setattr(launcher, "APPLICATIONS", applications)
-    make_bundle(applications, "Agent Lab")
+    make_bundle(applications, "SYNDUSTRYX")
 
     assert launcher.readiness(app, tmp_path).state == "installed"
 
@@ -1204,15 +1204,15 @@ def test_a_built_bundle_is_seen_by_its_real_path(tmp_path, monkeypatch):
     monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
     real = _project(tmp_path / "elsewhere", "agent-lab", entry="server.py")
     (real / "dist").mkdir()
-    make_bundle(real / "dist", "Agent Lab")
+    make_bundle(real / "dist", "SYNDUSTRYX")
     lab = tmp_path / "lab"
     lab.mkdir()
     (lab / "agent_lab").symlink_to(real)
     app = launcher.ExternalApp(
-        "agent_lab", "Agent Lab", "agent_lab", "server.py", "",
+        "agent_lab", "SYNDUSTRYX", "agent_lab", "server.py", "",
         bundle_dir="dist", runs_from_source=False,
     )
-    table = f"{real.resolve()}/dist/Agent Lab.app/Contents/MacOS/Agent Lab\n"
+    table = f"{real.resolve()}/dist/SYNDUSTRYX.app/Contents/MacOS/SYNDUSTRYX\n"
 
     assert launcher.is_running(app, lab, table)
 

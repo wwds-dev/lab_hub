@@ -159,17 +159,18 @@ SUITES: tuple[ExternalApp, ...] = (
         summary="Income-protection product design and review, with a Demo/Real "
         "workspace switch. Headroom, its solvency-filings engine, lives inside it.",
     ),
-    # The Antfarm workstation. "Agent Lab" is a working name until the brand is
-    # decided; renaming it means rebuilding its bundle and changing it here.
+    # The Antfarm workstation, named SYNDUSTRYX by the owner on 2026-10-09
+    # (trademark/domain clearance still open). The key and project folder keep
+    # the legacy `agent_lab` name, as the app's own bundle id and storage do.
     # Its source is a Codex project outside the lab, linked in as
     # `active/agent_lab` the way `altmerch_store` is.
     ExternalApp(
         key="agent_lab",
-        name="Agent Lab",
+        name="SYNDUSTRYX",
         project="agent_lab",
         entry="server.py",
-        summary="The Antfarm workstation (name still to be decided): an animated "
-        "factory over a local fulfilment engine, storefront and departments.",
+        summary="The Antfarm workstation: an animated factory over a local "
+        "fulfilment engine, storefront and departments.",
         bundle_dir="dist",
         runs_from_source=False,
     ),
@@ -714,6 +715,22 @@ def _stamped_build(bundle: Path) -> int | None:
     return None
 
 
+def _plist_version(bundle: Path) -> Version:
+    """The release number in a bundle's Info.plist, for apps with no lab stamp."""
+    try:
+        with (bundle / "Contents" / "Info.plist").open("rb") as handle:
+            raw = plistlib.load(handle).get("CFBundleShortVersionString")
+    except (OSError, plistlib.InvalidFileException, AttributeError):
+        return Version()
+    if not isinstance(raw, str) or not raw.strip():
+        return Version()
+    return Version(
+        text=f"v{raw.strip().lstrip('vV')}",
+        origin="bundle",
+        detail=f"the release number in {bundle.name}'s Info.plist",
+    )
+
+
 def _stamped_version(bundle: Path) -> Version | None:
     """The build a frozen bundle was packaged from, if it recorded one."""
     for holder in ("Resources", "Frameworks"):
@@ -833,6 +850,10 @@ def version(app: ExternalApp, lab_root: Path) -> Version:
     project = source_dir(app, lab_root)
     if bundle is not None and not bundle_runs_checkout(bundle):
         stamped = _stamped_version(bundle)
+        if stamped is None and (project is None or _major(project) is None):
+            # Outside the lab's scheme (SYNDUSTRYX): the bundle's own release
+            # number is the only honest one, and it is not compared to a source.
+            return _plist_version(bundle)
         if stamped is None:
             return Version()
         # A frozen bundle is only as new as its last build. Saying so is the
@@ -942,6 +963,13 @@ def build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
         return BuildStatus(
             app, found, "missing",
             "no checkout here, so there is nothing to compare it against.",
+        )
+    if found.origin == "bundle" and _major(project) is None:
+        return BuildStatus(
+            app, found, "unknown",
+            "its release number comes from the bundle; it does not use the "
+            "lab's version scheme, so there is nothing to compare it against.",
+            script, command,
         )
     if not found.known:
         # Rebuilding only helps a project whose build stamps a version. One
