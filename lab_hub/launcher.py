@@ -816,7 +816,10 @@ def _major(project: Path) -> str | None:
             if line.startswith("## v") and line[4:5].isdigit() is False:
                 continue
             if line.startswith("## v"):
-                return line[4:].split()[0].split("—")[0].strip()
+                # Only a bare integer is a lab arc; SYNDUSTRYX's `## v0.6.20`
+                # is its own release number, not a v<MAJOR>.<BUILD> arc.
+                arc = line[4:].split()[0].split("—")[0].strip()
+                return arc if arc.isdigit() else None
     except OSError:
         pass
     return None
