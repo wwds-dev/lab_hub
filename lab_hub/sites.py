@@ -30,7 +30,7 @@ SITES: tuple[Website, ...] = (
         url="https://altmerch.store/",
         summary="Shopify print-on-demand store for the streetwear sub-brands. "
         "Artwork and redesign docs live in its folder.",
-        # The lab's symlink to ~/Documents/Business/Merch/altmerch.store.
+        # The lab's symlink to ~/Documents/Websites/altmerch.store.
         source="altmerch_store",
         host="Shopify",
     ),
