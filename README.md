@@ -330,7 +330,7 @@ the tab carries its own **Check builds** and Update now
 ### Tools
 
 The built-in utilities and occasional standalone tools are grouped under one
-tab: **Convert Files**, **Narrator**, **Prepare Images**, **Unblock Tracker** and
+tab: **Convert Files**, **Narrator**, **Prepare Images**, **Convert Video**, **Unblock Tracker** and
 **Backstage**.
 
 It opens on **All tools** (`ui/tools_tab.py`, added 2026-10-07): every tool as a
@@ -414,6 +414,16 @@ Three tools sharing one log:
 - **Move small aside** — moves images at or under a size threshold into a `Delete`
   subfolder. Moved, not deleted: a filter on pixel size alone will occasionally
   catch something wanted.
+
+#### Convert Video
+Converts every video in a source folder into an output folder, changing format and
+size with `ffmpeg` (MP4, MOV, MKV, WebM, AVI or GIF). Height presets (2160p down to
+360p) never upscale; a custom `WxH` overrides the preset and can stretch the
+picture. Output files are named `name_<size>.<ext>`; existing files are skipped
+unless *Replace* is ticked, and a file is never written over its own source. ffmpeg
+is looked for on PATH and in Homebrew's folders, since a built .app does not inherit
+the shell's PATH; without it the tab says to `brew install ffmpeg`. Ported from a
+standalone browser app — the engine is `lab_hub/tools/video.py`.
 
 #### Unblock Tracker
 
@@ -552,6 +562,7 @@ suppressed.
       dashboards.py      reading the lab's dashboard catalog
       tools/convert/     any format to any format (vendored engine)
       tools/images.py    resizing, renaming, moving small files aside
+      tools/video.py     video format and size conversion (ffmpeg)
     ui/                  the only package that imports PySide6
       widgets.py         folder field, run/log panel
       worker.py          runs any tool off the GUI thread
