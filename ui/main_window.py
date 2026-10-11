@@ -14,6 +14,7 @@ from . import appkit_guard, dock, swipe, theme, tray
 from .apps_tab import AppsTab
 from .convert_tab import ConvertTab
 from .images_tab import ImagesTab
+from .video_tab import VideoTab
 from .links_tab import DashboardsTab, SitesTab
 from .narrator_tab import NarratorTab
 from .settings_tab import SettingsTab
@@ -76,6 +77,7 @@ class MainWindow(QMainWindow):
         self.convert_tab = ConvertTab(self.settings)
         self.narrator_tab = NarratorTab(self.settings)
         self.images_tab = ImagesTab(self.settings)
+        self.video_tab = VideoTab(self.settings)
         self.unblock_tracker_tab = AppsTab(
             self.settings,
             apps=launcher.UTILITIES,
@@ -121,6 +123,15 @@ class MainWindow(QMainWindow):
                         lambda: self.images_tab.run_panel.is_running(), "Working now."
                     ),
                 ),
+                BuiltInTool(
+                    "Convert Video",
+                    "Change a folder of videos to another format and size — "
+                    "MP4, MOV, MKV, WebM, AVI or GIF, up to 4K down to 360p.",
+                    self.video_tab,
+                    running_or_idle(
+                        lambda: self.video_tab.run_panel.is_running(), "Converting now."
+                    ),
+                ),
             ],
             apps=launcher.UTILITIES + launcher.TOOLS_ONLY_APPS,
             open_page=self.tools_tabs.setCurrentWidget,
@@ -129,6 +140,7 @@ class MainWindow(QMainWindow):
         self.tools_tabs.addTab(self.convert_tab, "Convert Files")
         self.tools_tabs.addTab(self.narrator_tab, "Narrator")
         self.tools_tabs.addTab(self.images_tab, "Prepare Images")
+        self.tools_tabs.addTab(self.video_tab, "Convert Video")
         self.tools_tabs.addTab(self.unblock_tracker_tab, "Unblock Tracker")
         self.tools_tabs.addTab(self.backstage_tab, "Backstage")
 
@@ -277,7 +289,12 @@ class MainWindow(QMainWindow):
     def _running_panels(self):
         return [
             panel
-            for panel in (self.convert_tab.run_panel, self.images_tab.run_panel, self.narrator_tab)
+            for panel in (
+                self.convert_tab.run_panel,
+                self.images_tab.run_panel,
+                self.video_tab.run_panel,
+                self.narrator_tab,
+            )
             if panel.is_running()
         ]
 

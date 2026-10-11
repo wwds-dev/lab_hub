@@ -63,6 +63,14 @@ class Settings:
     move_max_width: int = 200
     move_max_height: int = 200
 
+    # Video converter
+    video_input: str = ""
+    video_output: str = ""
+    video_format: str = "mp4"
+    video_resolution: str = "original"
+    video_custom_size: str = ""
+    video_overwrite: bool = False
+
     recent_logs: list[str] = field(default_factory=list)
 
     def resolved_lab_root(self) -> Path:
