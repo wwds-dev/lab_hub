@@ -93,7 +93,7 @@ class Tile(QWidget):
         self.header.setSpacing(12)
         self.name = QLabel(name)
         self.name.setObjectName("appName")
-        self.state = QLabel()
+        self.state = theme.mark_status(QLabel())
         self.state.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.header.addWidget(self.name)
         self.header.addStretch(1)

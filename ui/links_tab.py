@@ -112,7 +112,7 @@ class LinksTab(TilePage):
         self.intro = theme.hint(intro)
         self.column.addWidget(self.intro)
         # Says why there are no tiles, when there are none.
-        self.notice = theme.hint("")
+        self.notice = theme.empty_state("")
         self.notice.hide()
         self.column.addWidget(self.notice)
 

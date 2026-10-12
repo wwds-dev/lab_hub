@@ -29,7 +29,13 @@ from __future__ import annotations
 import time
 
 from PySide6.QtCore import QEvent, QObject, QPointF, Qt
-from PySide6.QtWidgets import QAbstractScrollArea, QApplication, QTabWidget, QWidget
+from PySide6.QtWidgets import (
+    QAbstractScrollArea,
+    QApplication,
+    QStackedWidget,
+    QTabWidget,
+    QWidget,
+)
 
 # How far the fingers must travel before the tab changes. Trackpad scrolls
 # arrive as a stream of small deltas, so this is the accumulated total over one
@@ -65,6 +71,9 @@ def _can_scroll_horizontally(widget: QWidget) -> bool:
 class SwipeTabs(QObject):
     """Turns horizontal trackpad swipes into tab changes.
 
+    Works on anything with the tab widget's index API — a ``QTabWidget``, or the
+    ``QStackedWidget`` pages the window's sidebar drives.
+
     Installed on the ``QApplication`` rather than on the tab widgets. A wheel
     event is delivered to the deepest widget under the pointer and only reaches
     an ancestor if that widget ignores it, which the widgets inside a tab are
@@ -72,7 +81,7 @@ class SwipeTabs(QObject):
     first, and consume the event so nothing sees it twice.
     """
 
-    def __init__(self, *tab_widgets: QTabWidget, parent: QObject | None = None):
+    def __init__(self, *tab_widgets: QTabWidget | QStackedWidget, parent: QObject | None = None):
         # Parented so the filter dies with the window that owns it. Qt removes
         # an event filter when the filter object is destroyed, and leaving that
         # to the garbage collector means a closed window's filter can still be

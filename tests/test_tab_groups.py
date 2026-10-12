@@ -10,7 +10,7 @@ def _keys(tab):
 
 
 def test_top_level_tabs_are_grouped(window):
-    assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == [
+    assert window.sidebar.titles(window.tabs) == [
         "Apps",
         "Websites",
         "Dashboards",
@@ -30,9 +30,7 @@ def test_backup_and_sync_apps_have_their_own_tab(window):
 
 
 def test_tools_include_built_in_tools_and_unblock_tracker(window):
-    assert [
-        window.tools_tabs.tabText(i) for i in range(window.tools_tabs.count())
-    ] == [
+    assert window.sidebar.titles(window.tools_tabs) == [
         "All tools", "Convert Textfiles", "Narrator", "Prepare Images", "Convert Video",
         "Unblock Tracker", "Backstage",
     ]
@@ -116,6 +114,6 @@ def test_every_launchable_app_is_reachable(window):
 def test_no_tab_label_hides_an_accelerator(window):
     """Qt treats "&" in a tab label as a mnemonic marker, so "Backup & Sync"
     renders as "Backup _Sync" with the S underlined."""
-    labels = [window.tabs.tabText(i) for i in range(window.tabs.count())]
+    labels = window.sidebar.titles(window.tabs)
 
     assert not any("&" in label for label in labels)

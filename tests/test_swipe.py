@@ -300,7 +300,7 @@ def test_a_swipe_on_a_tool_page_moves_the_top_row(window):
 
     assert swipe_across(window.swipe, window.convert_tab, -STEP) is True
 
-    assert window.tabs.tabText(window.tabs.currentIndex()) == "Settings"
+    assert window.sidebar.title_of(window.tabs.currentWidget()) == "Settings"
     assert window.tools_tabs.currentWidget() is window.convert_tab
 
 
@@ -312,14 +312,14 @@ def test_a_swipe_back_from_tools_leaves_the_tool_where_it_was(window):
 
     assert swipe_across(window.swipe, window.narrator_tab, STEP) is True
 
-    assert window.tabs.tabText(window.tabs.currentIndex()) == "Backup and Sync"
+    assert window.sidebar.title_of(window.tabs.currentWidget()) == "Backup and Sync"
     assert window.tools_tabs.currentWidget() is window.narrator_tab
 
 
 def test_a_swipe_moves_the_real_window_tabs(window):
     window.tabs.setCurrentIndex(0)
     assert swipe_across(window.swipe, window.apps_tab, -STEP) is True
-    assert window.tabs.tabText(window.tabs.currentIndex()) == "Websites"
+    assert window.sidebar.title_of(window.tabs.currentWidget()) == "Websites"
 
 
 def test_the_filter_dies_with_the_window(window):

@@ -36,7 +36,7 @@ class FolderField(QWidget):
         super().__init__(parent)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(theme.SPACE_S)
 
         self.edit = QLineEdit()
         self.edit.setPlaceholderText(placeholder)
@@ -76,10 +76,10 @@ class RunPanel(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
+        layout.setSpacing(theme.SPACE_M)
 
         controls = QHBoxLayout()
-        controls.setSpacing(10)
+        controls.setSpacing(theme.SPACE_M)
 
         self.run_button = QPushButton(run_label)
         self.run_button.setObjectName("primary")
@@ -197,12 +197,12 @@ class RunPanel(QWidget):
         self.append("\nStopped.")
 
 
-def scroll_column(spacing: int = 18, max_width: int | None = None) -> tuple[QWidget, QVBoxLayout]:
+def scroll_column(spacing: int = theme.SPACE_L, max_width: int | None = None) -> tuple[QWidget, QVBoxLayout]:
     """A centred content column inside a vertical scroll area."""
     from PySide6.QtWidgets import QScrollArea
 
     inner, layout = theme.column(spacing, max_width)
-    layout.setContentsMargins(24, 20, 24, 24)
+    layout.setContentsMargins(theme.SPACE_XL, theme.SPACE_XL, theme.SPACE_XL, theme.SPACE_XL)
 
     area = QScrollArea()
     area.setWidgetResizable(True)

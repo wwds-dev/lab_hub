@@ -14,7 +14,7 @@ def _names(window):
 
 def test_tools_open_on_the_tiles(window):
     assert window.tools_tabs.widget(0) is window.tools_overview
-    assert window.tools_tabs.tabText(0) == "All tools"
+    assert window.sidebar.title_of(window.tools_tabs.widget(0)) == "All tools"
 
 
 def test_every_tool_has_a_tile_in_tab_order(window):
