@@ -80,9 +80,10 @@ def test_websites_and_dashboards_have_their_own_tabs(window):
     assert {site.name for site in sites.SITES} == {
         "altmerch.store", "bookadatewithme.com",
     }
-    # The same features as the app pages: a state on every tile and Re-check.
+    # The same features as the app pages: a state on every tile, re-checked
+    # by the window's Refresh rather than a button of their own.
     for tab in (window.sites_tab, window.dashboards_tab):
-        assert tab.recheck_button.text() == "Re-check"
+        assert tab in window.refreshables
         assert all(card.state.text() for card in tab.cards)
 
 

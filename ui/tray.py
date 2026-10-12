@@ -61,16 +61,17 @@ class Tray(QObject):
         # Top-level apps only. Companions (VPN Agent, Bug Spray, vidforge) are
         # reached from their suite; listing them here as peers makes the menu
         # half again as long and hides what is actually reached for.
+        # Filled by `_fill_apps`, between these two separators, and refilled on
+        # the window's Refresh when apps.toml has changed.
         menu.addSeparator()
-        for app in launcher.MENU_BAR_APPS:
-            action = QAction(app.name, menu)
-            action.triggered.connect(lambda _checked=False, a=app: self._launch(a))
-            menu.addAction(action)
+        self._app_actions: list[QAction] = []
+        self._apps_end = menu.addSeparator()
+        self._menu = menu
+        self._fill_apps()
 
         # The two link tabs, one submenu each. Websites are fixed; dashboards
         # are re-read from the catalog every time the menu opens, so one added
         # there is here without a restart.
-        menu.addSeparator()
         self.sites_menu = menu.addMenu("Websites")
         for site in sites.SITES:
             action = QAction(site.name, self.sites_menu)
@@ -104,6 +105,23 @@ class Tray(QObject):
 
     def notify(self, title: str, message: str) -> None:
         self.icon.showMessage(title, message, _icon(), 4000)
+
+    def refresh(self) -> None:
+        """What the window's Refresh asks of the menu: re-read both lists."""
+        self._fill_apps()
+        self._fill_dashboards()
+
+    def _fill_apps(self) -> None:
+        """One entry per menu bar app, from the list in force."""
+        for action in self._app_actions:
+            self._menu.removeAction(action)
+            action.deleteLater()
+        self._app_actions = []
+        for app in launcher.MENU_BAR_APPS:
+            action = QAction(app.name, self._menu)
+            action.triggered.connect(lambda _checked=False, a=app: self._launch(a))
+            self._menu.insertAction(self._apps_end, action)
+            self._app_actions.append(action)
 
     def _launch(self, app: launcher.ExternalApp) -> None:
         lab_root = self._resolve_lab_root()

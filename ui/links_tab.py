@@ -2,7 +2,7 @@
 
 They are built like the Apps tab on purpose — the same tile, the same grid
 that drops a column at the same width, a state on every tile that is re-read
-rather than remembered, Re-check, and a poll that runs only while the tab is on
+rather than remembered, and a poll that runs only while the tab is on
 screen. What differs is what a tile's state *means*:
 
 * a website's is whether it answers right now, checked over the network;
@@ -19,23 +19,18 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QTimer, QUrl, Qt, Signal
+from PySide6.QtCore import QObject, QUrl, Signal
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import (
-    QGridLayout,
-    QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
-    QVBoxLayout,
-    QWidget,
 )
 
 from lab_hub import config, dashboards, launcher, sites
 
 from . import theme
-from .apps_tab import GRID_MAX_WIDTH, POLL_MS, SUMMARY_HEIGHT, arrange_tiles, columns_for
-from .widgets import scroll_column
+from .tiles import POLL_MS, Tile, TilePage
 
 # How long a site check may take before it counts as no answer.
 SITE_TIMEOUT_MS = 10_000
@@ -63,7 +58,7 @@ def short_path(path: str) -> str:
     return text
 
 
-class LinkCard(QWidget):
+class LinkCard(Tile):
     """Name, what it is, a state, where it lives, and an Open button."""
 
     open_requested = Signal()
@@ -77,21 +72,7 @@ class LinkCard(QWidget):
         reveal_label: str = "Show in Finder",
         parent=None,
     ) -> None:
-        super().__init__(parent)
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        frame, layout = theme.card()
-        outer.addWidget(frame)
-
-        header = QHBoxLayout()
-        header.setSpacing(12)
-        self.name = QLabel(name)
-        self.name.setObjectName("appName")
-        self.state = QLabel()
-        self.state.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        header.addWidget(self.name)
-        header.addStretch(1)
-        header.addWidget(self.state)
+        super().__init__(name, summary, parent)
 
         # What kind of thing this is, on a line of its own. Beside the title,
         # where an app tile keeps its version, it made a header row that cannot
@@ -99,49 +80,19 @@ class LinkCard(QWidget):
         # set the tab's minimum width wider than its column.
         self.meta = QLabel()
         self.meta.setObjectName("hint")
-
-        self.summary = theme.hint(summary)
-        self.summary.setMinimumHeight(SUMMARY_HEIGHT)
-        self.summary.setAlignment(Qt.AlignmentFlag.AlignTop)
-
-        self.detail = QLabel()
-        self.detail.setObjectName("hint")
-        self.detail.setWordWrap(True)
-        self.detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.heading.addWidget(self.meta)
 
         self.open_button = QPushButton(open_label)
         self.open_button.setObjectName("primary")
         self.open_button.clicked.connect(self.open_requested)
         self.reveal_button = QPushButton(reveal_label)
         self.reveal_button.clicked.connect(self.reveal_requested)
-
-        buttons = QHBoxLayout()
-        buttons.setSpacing(8)
-        buttons.addWidget(self.open_button, 1)
-        buttons.addWidget(self.reveal_button)
-
-        heading = QVBoxLayout()
-        heading.setSpacing(2)
-        heading.addLayout(header)
-        heading.addWidget(self.meta)
-        layout.addLayout(heading)
-        layout.addWidget(self.summary)
-        layout.addWidget(self.detail)
-        layout.addLayout(buttons)
-        layout.addStretch(1)
-
-    def set_state(self, label: str, style: str, tooltip: str = "") -> None:
-        self.state.setText(label)
-        self.state.setToolTip(tooltip)
-        if self.state.objectName() != style:
-            # A changed objectName only takes effect once the style is re-applied.
-            self.state.setObjectName(style)
-            self.state.style().unpolish(self.state)
-            self.state.style().polish(self.state)
+        self.buttons.addWidget(self.open_button, 1)
+        self.buttons.addWidget(self.reveal_button)
 
 
-class LinksTab(QWidget):
-    """A page of link tiles with Re-check and an on-screen-only poll."""
+class LinksTab(TilePage):
+    """A page of link tiles, polled only while on screen."""
 
     opened = Signal(str)  # a status-bar line
     failed = Signal(str)
@@ -154,72 +105,31 @@ class LinksTab(QWidget):
         poll_ms: int = POLL_MS,
         parent=None,
     ) -> None:
-        super().__init__(parent)
+        super().__init__(poll_ms, parent)
         self.settings = settings
-        self.cards: list[LinkCard] = []
 
-        area, column = scroll_column(max_width=GRID_MAX_WIDTH)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(area)
-
-        column.addWidget(theme.section_title(title))
+        self.column.addWidget(theme.section_title(title))
         self.intro = theme.hint(intro)
-        column.addWidget(self.intro)
+        self.column.addWidget(self.intro)
         # Says why there are no tiles, when there are none.
         self.notice = theme.hint("")
         self.notice.hide()
-        column.addWidget(self.notice)
+        self.column.addWidget(self.notice)
 
-        self.grid = QGridLayout()
-        self.grid.setSpacing(16)
-        column.addLayout(self.grid)
-        self._columns = 0
-
-        refresh = QPushButton("Re-check")
-        refresh.clicked.connect(self.recheck)
-        self.recheck_button = refresh
-        self.buttons = QHBoxLayout()
-        self.buttons.addWidget(refresh)
-        self.buttons.addStretch(1)
-        column.addLayout(self.buttons)
-        column.addStretch(1)
-
-        self._poll = QTimer(self)
-        self._poll.setInterval(poll_ms)
-        self._poll.timeout.connect(self.refresh)
+        self.grid = self.add_grid()
+        self.finish()
 
     # ------------------------------------------------------------------
+    @property
+    def cards(self) -> list[LinkCard]:
+        return self.tiles()
+
     def lab_root(self) -> Path:
         return self.settings.resolved_lab_root()
 
     def set_cards(self, cards: list[LinkCard]) -> None:
         """Replace every tile — the Dashboards tab re-reads its catalog."""
-        for card in self.cards:
-            self.grid.removeWidget(card)
-            card.deleteLater()
-        self.cards = cards
-        self._columns = 0
-        self._arrange(columns_for(self.width(), len(cards)))
-
-    def _arrange(self, columns: int) -> None:
-        if columns == self._columns:
-            return
-        self._columns = columns
-        arrange_tiles([(self.grid, self.cards)], columns)
-
-    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt override
-        super().resizeEvent(event)
-        self._arrange(columns_for(self.width(), len(self.cards)))
-
-    def showEvent(self, event) -> None:  # noqa: N802 - Qt override
-        super().showEvent(event)
-        self.refresh()
-        self._poll.start()
-
-    def hideEvent(self, event) -> None:  # noqa: N802 - Qt override
-        super().hideEvent(event)
-        self._poll.stop()
+        self.set_tiles(0, cards)
 
     def apply_settings(self, settings: config.Settings) -> None:
         self.settings = settings
@@ -237,12 +147,9 @@ class LinksTab(QWidget):
             return
         self.opened.emit(f"Opened {name}")
 
-    # Subclasses fill these in.
+    # Subclasses fill this in.
     def refresh(self) -> None:
         raise NotImplementedError
-
-    def recheck(self) -> None:
-        self.refresh()
 
 
 # ----------------------------------------------------------------------
@@ -300,12 +207,11 @@ class SitesTab(LinksTab):
             intro=(
                 "The public sites. Each tile asks its site whether it answers "
                 "when the tab is opened, every five minutes while it stays "
-                "open, and on Re-check."
+                "open, and on Refresh."
             ),
             poll_ms=SITE_POLL_MS,
             parent=parent,
         )
-        self.recheck_button.setToolTip("Ask every site again now")
         self.checker = SiteChecker(self)
         self.checker.checked.connect(self._on_checked)
         self.statuses: dict[str, sites.SiteStatus] = {}
@@ -392,14 +298,13 @@ class DashboardsTab(LinksTab):
             ),
             parent=parent,
         )
-        self.recheck_button.setToolTip("Read the catalog again")
         self.entries: tuple[dashboards.Dashboard, ...] = ()
         self._catalog_stamp: tuple[str, int] | None = None
 
         edit = QPushButton("Show catalog")
         edit.setToolTip("Show dashboard_catalog.json in Finder")
         edit.clicked.connect(self._reveal_catalog)
-        self.buttons.insertWidget(1, edit)
+        self.buttons.insertWidget(0, edit)
         self.catalog_button = edit
 
         self.reload()

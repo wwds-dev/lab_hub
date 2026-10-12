@@ -24,6 +24,7 @@ from .video_tab import VideoTab
 from .links_tab import DashboardsTab, SitesTab
 from .narrator_tab import NarratorTab
 from .settings_tab import SettingsTab
+from .tiles import Refreshable
 from .tools_tab import BuiltInTool, ToolsOverview, convert_state, running_or_idle
 
 # Long enough for macOS's fullscreen-exit animation to finish before the
@@ -60,7 +61,7 @@ class MainWindow(QMainWindow):
 
         self.apps_tab = AppsTab(
             self.settings,
-            apps=launcher.SUITES,
+            apps=lambda: launcher.SUITES,
             check_builds=True,
             intro=(
                 "These run in their own window, as their own process — quitting "
@@ -72,7 +73,7 @@ class MainWindow(QMainWindow):
         self.dashboards_tab = DashboardsTab(self.settings)
         self.backup_sync_tab = AppsTab(
             self.settings,
-            apps=launcher.BACKUP_SYNC_APPS,
+            apps=lambda: launcher.BACKUP_SYNC_APPS,
             title="Backup & Sync",
             intro=(
                 "Run backups and keep the lab's repositories synchronized. "
@@ -86,13 +87,13 @@ class MainWindow(QMainWindow):
         self.video_tab = VideoTab(self.settings)
         self.unblock_tracker_tab = AppsTab(
             self.settings,
-            apps=launcher.UTILITIES,
+            apps=lambda: launcher.UTILITIES,
             title="Unblock Tracker",
             intro="Open the tracker to monitor an Instagram profile's block status.",
         )
         self.backstage_tab = AppsTab(
             self.settings,
-            apps=launcher.TOOLS_ONLY_APPS,
+            apps=lambda: launcher.TOOLS_ONLY_APPS,
             title="Backstage",
             intro="Open Backstage in its own window.",
             check_own_builds=True,
@@ -139,7 +140,7 @@ class MainWindow(QMainWindow):
                     ),
                 ),
             ],
-            apps=launcher.UTILITIES + launcher.TOOLS_ONLY_APPS,
+            apps=lambda: launcher.UTILITIES + launcher.TOOLS_ONLY_APPS,
             open_page=self.tools_tabs.setCurrentWidget,
         )
         self.tools_tabs.addTab(self.tools_overview, "All tools")
@@ -158,12 +159,21 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.settings_tab, "Settings")
         self.setCentralWidget(self.tabs)
 
+        # Every page the window's Refresh re-checks, in tab order: whatever in
+        # either tab strip implements Refreshable. A new tab joins by being one.
+        self.refreshables: list[Refreshable] = [
+            widget
+            for strip in (self.tabs, self.tools_tabs)
+            for widget in (strip.widget(i) for i in range(strip.count()))
+            if isinstance(widget, Refreshable)
+        ]
+
         # Everything the hub reads from disk or the process table, re-read on
         # demand — the alternative was quitting and reopening.
         self.refresh_button = QPushButton("Refresh")
         self.refresh_button.setToolTip(
-            "Re-read installed apps, checkouts, the dashboard catalog and "
-            "running state (Cmd+R)"
+            "Re-read the app list, installed apps, checkouts, the dashboard "
+            "catalog and running state (Cmd+R)"
         )
         self.refresh_button.setAutoDefault(False)
         self.refresh_button.clicked.connect(self.refresh_all)
@@ -264,39 +274,40 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Settings saved.", 4000)
 
     def refresh_all(self) -> None:
-        """Re-check every tab, not only the visible one, and the menu bar."""
-        for tab in (
-            self.apps_tab,
-            self.backup_sync_tab,
-            self.unblock_tracker_tab,
-            self.backstage_tab,
-            self.sites_tab,
-            self.dashboards_tab,
-            self.tools_overview,
-        ):
+        """Re-check every tab, not only the visible one, and the menu bar.
+
+        The app list is read first, so a tile for an app just added to
+        apps.toml is there by the time the tabs look again.
+        """
+        changed = launcher.reload(self.settings.resolved_lab_root())
+        for tab in self.refreshables:
             tab.recheck()
-        self.convert_tab.refresh_calibre()
         if self.tray is not None:
-            self.tray._fill_dashboards()
-        self.statusBar().showMessage("Refreshed.", 4000)
+            self.tray.refresh()
+        problem = launcher.registry.last_error
+        if problem:
+            self.statusBar().showMessage(
+                f"Refreshed, but the app list was not read: {problem}", 30000
+            )
+        else:
+            self.statusBar().showMessage(
+                "Refreshed — the app list changed." if changed else "Refreshed.", 4000
+            )
 
     def _on_tab_changed(self, index: int) -> None:
         # Calibre may have been installed since startup, and an app may have
         # been built since the tab was last looked at.
         widget = self.tabs.widget(index)
         if widget is self.tools_tabs:
-            self._refresh_tool_tab(self.tools_tabs.currentWidget())
-        elif widget in (self.apps_tab, self.backup_sync_tab, self.sites_tab,
-                        self.dashboards_tab):
-            widget.refresh()
+            widget = self.tools_tabs.currentWidget()
+        self._refresh_page(widget)
 
     def _on_tool_tab_changed(self, index: int) -> None:
-        self._refresh_tool_tab(self.tools_tabs.widget(index))
+        self._refresh_page(self.tools_tabs.widget(index))
 
-    def _refresh_tool_tab(self, widget) -> None:
-        if widget is self.convert_tab:
-            self.convert_tab.refresh_calibre()
-        elif widget in (self.unblock_tracker_tab, self.backstage_tab, self.tools_overview):
+    @staticmethod
+    def _refresh_page(widget) -> None:
+        if isinstance(widget, Refreshable):
             widget.refresh()
 
     def _check_for_wake(self) -> None:

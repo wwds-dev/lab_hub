@@ -10,10 +10,11 @@ from lab_hub import config
 from lab_hub.tools import video
 
 from . import theme
+from .tiles import Refreshable
 from .widgets import FolderField, RunPanel, scroll_column
 
 
-class VideoTab(QWidget):
+class VideoTab(QWidget, Refreshable):
     def __init__(self, settings: config.Settings, parent=None) -> None:
         super().__init__(parent)
         self.settings = settings

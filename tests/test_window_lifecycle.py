@@ -443,3 +443,62 @@ def test_the_menu_bar_quit_still_ends_the_app(window, fake_tray, qapp, quit_guar
 
     assert code == 0, "the menu bar's Quit did not end the event loop"
     assert window._quitting
+
+
+# ----------------------------------------------------------------------
+# Refresh (Cmd+R): one interface, every tab
+# ----------------------------------------------------------------------
+def test_no_page_has_its_own_recheck_button(window):
+    """The window's Refresh re-checks every tab; a per-tab copy is noise."""
+    from PySide6.QtWidgets import QPushButton
+
+    labels = {button.text() for button in window.findChildren(QPushButton)}
+
+    assert "Re-check" not in labels
+    assert "Check builds" in labels  # the launchpad's build report stays
+
+
+def test_refresh_rechecks_every_tab_and_the_menu_bar(window, fake_tray, monkeypatch):
+    from ui.tiles import Refreshable
+
+    pages = [
+        w
+        for strip in (window.tabs, window.tools_tabs)
+        for w in (strip.widget(i) for i in range(strip.count()))
+        if not isinstance(w, type(window.tools_tabs))
+    ]
+    assert all(isinstance(page, Refreshable) for page in pages)
+    assert window.refreshables == pages
+
+    asked = []
+    for page in pages:
+        monkeypatch.setattr(page, "recheck", lambda p=page: asked.append(p))
+    window.tray = fake_tray
+
+    window.refresh_all()
+
+    assert asked == pages
+    assert fake_tray.refreshed == 1
+
+
+def test_refresh_gives_a_newly_listed_app_its_tile(window, tmp_path, monkeypatch):
+    """apps.toml is re-read on Refresh, so a new app needs no rebuild."""
+    from lab_hub import launcher
+    from lab_hub.launcher import registry
+
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    listing = tmp_path / "apps.toml"
+    listing.write_text(
+        registry.PACKAGE_REGISTRY.read_text()
+        + '\n[[suites]]\nkey = "newcomer"\nname = "Newcomer"\n'
+        'project = "newcomer"\nentry = "main.py"\nsummary = "Just added."\n'
+    )
+    monkeypatch.setattr(registry, "candidates", lambda lab_root=None: [listing])
+    try:
+        window.refresh_all()
+
+        assert "newcomer" in {card.app.key for card in window.apps_tab.cards}
+        assert "app list changed" in window.statusBar().currentMessage()
+        assert "newcomer" not in {card.app.key for card in window.backstage_tab.cards}
+    finally:
+        registry.use(None)

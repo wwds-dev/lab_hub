@@ -1,6 +1,6 @@
 """The Tools tab's landing page: every tool as a tile.
 
-The same tile page as Apps, Websites and Dashboards — one grid, Re-check, and a
+The same tile page as Apps, Websites and Dashboards — one grid and a
 poll that runs only while the page is on screen — over two kinds of tool:
 
 * the built-in ones (Convert Textfiles, Narrator, Prepare Images) run inside Lab
@@ -23,16 +23,16 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from PySide6.QtCore import QTimer, Signal
-from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QWidget
 
 from lab_hub import config, launcher
 from lab_hub.tools import convert
 
 from . import theme
-from .apps_tab import GRID_MAX_WIDTH, POLL_MS, AppCard, arrange_tiles, columns_for
+from .apps_tab import AppCard, AppSource, resolve_apps
 from .links_tab import LinkCard
-from .widgets import scroll_column
+from .tiles import POLL_MS, TilePage, columns_for
 
 
 @dataclass(frozen=True)
@@ -65,7 +65,7 @@ def running_or_idle(is_running: Callable[[], bool], busy: str) -> Callable[[], t
     return state
 
 
-class ToolsOverview(QWidget):
+class ToolsOverview(TilePage):
     """Tiles for every tool; Open moves the tab strip, Launch starts an app."""
 
     launched = Signal(str)
@@ -75,21 +75,18 @@ class ToolsOverview(QWidget):
         self,
         settings: config.Settings,
         tools: list[BuiltInTool],
-        apps: tuple[launcher.ExternalApp, ...],
+        apps: AppSource,
         open_page: Callable[[QWidget], None],
         parent=None,
     ) -> None:
-        super().__init__(parent)
+        super().__init__(POLL_MS, parent)
         self.settings = settings
         self.tools = tools
+        self._apps_source = apps
+        self._apps_shown: tuple[launcher.ExternalApp, ...] | None = None
 
-        area, column = scroll_column(max_width=GRID_MAX_WIDTH)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(area)
-
-        column.addWidget(theme.section_title("Tools"))
-        column.addWidget(
+        self.column.addWidget(theme.section_title("Tools"))
+        self.column.addWidget(
             theme.hint(
                 "The built-in tools run inside Lab Hub — Open goes to their page "
                 "above. Unblock Tracker and Backstage are apps of their own and "
@@ -108,59 +105,43 @@ class ToolsOverview(QWidget):
             self.tool_tiles.append(tile)
 
         self.app_cards: list[AppCard] = []
-        for app in apps:
+        self.grid = self.add_grid()
+        self._sync_apps()
+        self._arrange(1)
+        self.finish()
+
+        self.refresh()
+
+    @property
+    def cards(self) -> list[QWidget]:
+        return self.tiles()
+
+    def _sync_apps(self) -> None:
+        """Rebuild the app tiles when the registered list has changed."""
+        wanted = resolve_apps(self._apps_source)
+        if wanted == self._apps_shown:
+            return
+        # The built-in tiles are kept; only the app cards are replaced.
+        for card in self.app_cards:
+            self.grid.removeWidget(card)
+            card.deleteLater()
+        self.app_cards = []
+        for app in wanted:
             card = AppCard(app)
             card.launched.connect(self.launched)
             card.start_failed.connect(self.start_failed)
             self.app_cards.append(card)
-
-        self.cards: list[QWidget] = [*self.tool_tiles, *self.app_cards]
-        self.grid = QGridLayout()
-        self.grid.setSpacing(16)
-        column.addLayout(self.grid)
+        self._apps_shown = wanted
+        self.grids[0] = (self.grid, [*self.tool_tiles, *self.app_cards])
         self._columns = 0
-        self._arrange(1)
-
-        refresh = QPushButton("Re-check")
-        refresh.setToolTip("Look again at what is running and installed")
-        refresh.clicked.connect(self.recheck)
-        self.recheck_button = refresh
-        row = QHBoxLayout()
-        row.addWidget(refresh)
-        row.addStretch(1)
-        column.addLayout(row)
-        column.addStretch(1)
-
-        self._poll = QTimer(self)
-        self._poll.setInterval(POLL_MS)
-        self._poll.timeout.connect(self.refresh)
-
-        self.refresh()
-
-    def _arrange(self, columns: int) -> None:
-        if columns == self._columns:
-            return
-        self._columns = columns
-        arrange_tiles([(self.grid, self.cards)], columns)
-
-    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt override
-        super().resizeEvent(event)
         self._arrange(columns_for(self.width(), len(self.cards)))
-
-    def showEvent(self, event) -> None:  # noqa: N802 - Qt override
-        super().showEvent(event)
-        self.refresh()
-        self._poll.start()
-
-    def hideEvent(self, event) -> None:  # noqa: N802 - Qt override
-        super().hideEvent(event)
-        self._poll.stop()
 
     def apply_settings(self, settings: config.Settings) -> None:
         self.settings = settings
         self.recheck()
 
     def recheck(self) -> None:
+        self._sync_apps()
         lab_root = self.settings.resolved_lab_root()
         for card in self.app_cards:
             card.forget_failure()

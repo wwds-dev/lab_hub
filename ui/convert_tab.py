@@ -26,6 +26,7 @@ from lab_hub import config
 from lab_hub.tools import convert
 
 from . import theme
+from .tiles import Refreshable
 from .widgets import FolderField, RunPanel, scroll_column
 
 
@@ -68,7 +69,7 @@ class DropList(QListWidget):
             self.pathsDropped.emit(paths)
 
 
-class ConvertTab(QWidget):
+class ConvertTab(QWidget, Refreshable):
     """Queue up files and folders, pick a target format, convert them."""
 
     def __init__(self, settings: config.Settings, parent=None) -> None:
@@ -293,6 +294,10 @@ class ConvertTab(QWidget):
         )
 
     # ------------------------------------------------------------------
+    def refresh(self) -> None:
+        """Calibre may have been installed since the tab was last looked at."""
+        self.refresh_calibre()
+
     def refresh_calibre(self) -> None:
         """Calibre is an external dependency; say so before the user hits Run."""
         binary = convert.converter_path()

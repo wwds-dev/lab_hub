@@ -28,6 +28,7 @@ from lab_hub import config
 from lab_hub.tools.convert import calibre
 
 from . import theme
+from .tiles import Refreshable
 from .widgets import FolderField, LOG_LIMIT, scroll_column
 from .narrator_library import NarratorLibrary
 
@@ -35,7 +36,7 @@ SUPPORTED_BOOKS = "Ebooks (*.epub *.pdf *.mobi *.azw3 *.txt);;All files (*)"
 VOICES = ("alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer")
 
 
-class NarratorTab(QWidget):
+class NarratorTab(QWidget, Refreshable):
     """Own the complete Narrator workflow and its stoppable worker process."""
 
     def __init__(self, settings: config.Settings, parent=None) -> None:
@@ -132,6 +133,10 @@ class NarratorTab(QWidget):
         chosen, _ = QFileDialog.getOpenFileName(self, "Choose a book", start, SUPPORTED_BOOKS)
         if chosen:
             self.input_edit.setText(chosen)
+
+    def recheck(self) -> None:
+        """Re-read the library's catalogue; nothing else here is cached."""
+        self.library.load_catalog()
 
     def is_running(self) -> bool:
         return self.process is not None and self.process.state() != QProcess.ProcessState.NotRunning

@@ -63,8 +63,8 @@ def test_an_idle_built_in_tool_claims_nothing_more(window, monkeypatch):
     assert window.tools_overview.tool_tiles[1].state.text() == "Built in"
 
 
-def test_the_tile_page_has_recheck(window):
-    assert window.tools_overview.recheck_button.text() == "Re-check"
+def test_the_tile_page_is_rechecked_by_refresh(window):
+    assert window.tools_overview in window.refreshables
 
 
 def test_no_tool_app_gains_a_menu_bar_entry(window):

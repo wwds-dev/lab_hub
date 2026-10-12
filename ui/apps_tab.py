@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QProcess, QProcessEnvironment, QTimer, Qt, Signal
+from PySide6.QtCore import QProcess, QProcessEnvironment, QTimer, Signal
 from PySide6.QtWidgets import (
     QDialog,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -22,8 +22,17 @@ from PySide6.QtWidgets import (
 from lab_hub import config, launcher
 
 from . import theme
+from .tiles import (  # noqa: F401 - the layout constants are re-exported
+    GRID_MAX_WIDTH,
+    POLL_MS,
+    SUMMARY_HEIGHT,
+    TILE_MIN_WIDTH,
+    Tile,
+    TilePage,
+    arrange_tiles,
+    columns_for,
+)
 from .web_open import OpenWhenServing
-from .widgets import scroll_column
 
 STATE_LABELS = {
     "installed": ("Installed", "stateOk"),
@@ -72,56 +81,23 @@ SERVER_CONFIRM_SECONDS = 60.0
 # How long *Did not start* stays on the tile. It is a notice about one launch,
 # not a property of the app, so it has to expire: leaving it up meant a tile
 # still reading "Did not start" long after the app had been opened and closed
-# again by hand. Pressing Re-check clears it outright.
+# again by hand. Refresh (Cmd+R) clears it outright.
 FAILURE_NOTICE_SECONDS = 60.0
 
-# Slow enough to be invisible in Activity Monitor, quick enough that the card
-# is right by the time you have finished reading it.
-POLL_MS = 3000
-
-# A tile narrower than this squeezes the summary into a ragged column of
-# single words, so the grid drops a column instead of going narrower.
-TILE_MIN_WIDTH = 380
-SUMMARY_HEIGHT = 52
 # Reserved on every tile, even where there is nothing to say. A line that
 # appeared on one card only would push its Launch button out of line with the
 # rest of the row, and the tiles sit side by side in a grid.
 SERVICE_HEIGHT = 18
-GRID_MAX_WIDTH = 1500
 
 
-def arrange_tiles(grids, columns: int) -> None:
-    """Re-flow every grid of tiles into `columns` columns.
-
-    Shared with the Websites and Dashboards tabs, so every page of tiles
-    drops a column at the same width.
-    """
-    for grid, cards in grids:
-        for card in cards:
-            grid.removeWidget(card)
-        for index, card in enumerate(cards):
-            grid.addWidget(card, index // columns, index % columns)
-        # Equal shares, and no leftover stretch from a wider previous layout
-        # holding open an empty column.
-        for index in range(grid.columnCount()):
-            grid.setColumnStretch(index, 1 if index < columns else 0)
-
-
-def columns_for(width: int, tiles: int) -> int:
-    """How many tiles fit side by side, never more than there are."""
-    usable = width - 48  # the column's own margins
-    fits = max(1, usable // TILE_MIN_WIDTH)
-    return min(tiles or 1, fits)
-
-
-class AppCard(QWidget):
+class AppCard(Tile):
     """Name, what it does, where it will be started from, and a Launch button."""
 
     launched = Signal(str)
     start_failed = Signal(str)
 
     def __init__(self, app: launcher.ExternalApp, parent=None) -> None:
-        super().__init__(parent)
+        super().__init__(app.name, app.summary, parent)
         self.app = app
         self.lab_root = config.DEFAULT_LAB_ROOT
         self.running = False
@@ -132,31 +108,18 @@ class AppCard(QWidget):
         # Set instead of `_failed_at` when the launch could not be watched.
         self._unconfirmed_at: float | None = None
 
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-
-        frame, layout = theme.card()
-        outer.addWidget(frame)
-
-        header = QHBoxLayout()
-        header.setSpacing(12)
-
-        name = QLabel(app.name)
-        name.setObjectName("appName")
-
         # Which build the button would actually open. Resolved once here and on
-        # Re-check, never on the poll: it shells out to `git rev-list`, and a
+        # Refresh, never on the poll: it shells out to `git rev-list`, and a
         # subprocess every three seconds to restate a number that changes on
         # rebuild would be pure waste.
         self.version = QLabel()
         self.version.setObjectName("hint")
-
-        self.state = QLabel()
-        self.state.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.header.insertWidget(1, self.version)
 
         self.launch_button = QPushButton("Launch")
         self.launch_button.setObjectName("primary")
         self.launch_button.clicked.connect(self._launch)
+        self.buttons.addWidget(self.launch_button, 1)
 
         # Only a web app has one. A server has no window to close, so without
         # this one started from here would run until the Mac restarts.
@@ -165,30 +128,12 @@ class AppCard(QWidget):
         if app.served:
             self.stop_button = QPushButton("Stop")
             self.stop_button.clicked.connect(self._stop)
+            self.buttons.addWidget(self.stop_button)
             # Its window is a browser tab, opened the moment the server answers
             # rather than on the next three-second poll.
             self.opener = OpenWhenServing(app, self)
             self.opener.opened.connect(lambda _message: self.refresh(self.lab_root))
             self.opener.opened.connect(self.launched)
-
-        # Name and state on one line, the button along the bottom. Side by side
-        # the tiles are too narrow to keep all three on one row without the
-        # summary being squeezed into a column of single words.
-        header.addWidget(name)
-        header.addWidget(self.version)
-        header.addStretch(1)
-        header.addWidget(self.state)
-
-        summary = theme.hint(app.summary)
-        # The tiles sit in a grid, so they must agree on a height; the summaries
-        # differ in length and would otherwise give every row a ragged edge.
-        summary.setMinimumHeight(SUMMARY_HEIGHT)
-        summary.setAlignment(Qt.AlignmentFlag.AlignTop)
-
-        self.detail = QLabel()
-        self.detail.setObjectName("hint")
-        self.detail.setWordWrap(True)
-        self.detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
         # An app's windowless background copy, reported separately from the app
         # itself. SONAR's engine runs under launchd around the clock and is the
@@ -204,23 +149,7 @@ class AppCard(QWidget):
                 "the clock. It runs whether or not you open the app, and Launch "
                 "neither starts nor stops it — that is its launchd agent's job."
             )
-
-        layout.addLayout(header)
-        layout.addWidget(summary)
-        layout.addWidget(self.detail)
-        layout.addWidget(self.service)
-        if self.stop_button is None:
-            layout.addWidget(self.launch_button)
-        else:
-            buttons = QHBoxLayout()
-            buttons.setSpacing(8)
-            buttons.addWidget(self.launch_button, 1)
-            buttons.addWidget(self.stop_button)
-            layout.addLayout(buttons)
-
-        # Spare room at the bottom keeps every tile's Launch button on the same
-        # line, whatever the summary length.
-        layout.addStretch(1)
+        self.extra.addWidget(self.service)
 
         self.refresh_version(self.lab_root)
 
@@ -240,14 +169,9 @@ class AppCard(QWidget):
         self._update_stop(table)
 
         label, style = self._state_label(ready)
-        self.state.setText(label)
-        self.state.setToolTip(
-            UNCONFIRMED_TOOLTIP if self._showing_unconfirmed() else ""
+        self.set_state(
+            label, style, UNCONFIRMED_TOOLTIP if self._showing_unconfirmed() else ""
         )
-        self.state.setObjectName(style)
-        # A changed objectName only takes effect after the style is re-applied.
-        self.state.style().unpolish(self.state)
-        self.state.style().polish(self.state)
 
         # A reason it cannot run beats a path it would have run from.
         self.detail.setText(ready.problem or ready.detail)
@@ -264,15 +188,6 @@ class AppCard(QWidget):
             return UNCONFIRMED_LABEL
         return STATE_LABELS[ready.state]
 
-    @staticmethod
-    def _restyle(widget, name: str) -> None:
-        """A changed objectName only takes effect once the style is re-applied."""
-        if widget.objectName() == name:
-            return
-        widget.setObjectName(name)
-        widget.style().unpolish(widget)
-        widget.style().polish(widget)
-
     def refresh_version(self, lab_root: Path) -> None:
         """Re-read which build this tile would launch.
 
@@ -286,7 +201,7 @@ class AppCard(QWidget):
             self.version.setToolTip(
                 f"Lab Hub cannot tell which build of {self.app.name} is installed."
             )
-            self._restyle(self.version, "hint")
+            self.restyle(self.version, "hint")
             return
 
         # An installed build older than its source is the answer to the question
@@ -303,7 +218,7 @@ class AppCard(QWidget):
                 else ""
             )
         )
-        self._restyle(self.version, "stateWarn" if found.stale else "hint")
+        self.restyle(self.version, "stateWarn" if found.stale else "hint")
 
     def _update_service(self, running: bool) -> None:
         """Report the background copy, for the apps that have one."""
@@ -313,7 +228,7 @@ class AppCard(QWidget):
         self.service.setText(
             f"{self.app.service} · {'running' if running else 'stopped'}"
         )
-        self._restyle(self.service, "stateOk" if running else "hint")
+        self.restyle(self.service, "stateOk" if running else "hint")
 
     def _showing_failure(self) -> bool:
         """Whether the last launch's failure notice is still worth showing."""
@@ -334,7 +249,7 @@ class AppCard(QWidget):
         return True
 
     def forget_failure(self) -> None:
-        """Drop the launch notices. Re-check asks for the state as it is now."""
+        """Drop the launch notices. Refresh asks for the state as it is now."""
         self._failed_at = None
         self._unconfirmed_at = None
 
@@ -602,7 +517,17 @@ class RebuildDialog(QDialog):
         super().closeEvent(event)
 
 
-class AppsTab(QWidget):
+# Which apps a page shows: a fixed tuple, or a callable read again on every
+# Refresh — `lambda: launcher.SUITES` — so an app added to apps.toml gets its
+# tile without a restart.
+AppSource = tuple[launcher.ExternalApp, ...] | Callable[[], tuple[launcher.ExternalApp, ...]]
+
+
+def resolve_apps(source: AppSource) -> tuple[launcher.ExternalApp, ...]:
+    return tuple(source() if callable(source) else source)
+
+
+class AppsTab(TilePage):
     """A page of launch cards. Used for the launchpad and for one-off apps."""
 
     launched = Signal(str)
@@ -611,62 +536,38 @@ class AppsTab(QWidget):
     def __init__(
         self,
         settings: config.Settings,
-        apps: tuple[launcher.ExternalApp, ...] = launcher.LAUNCHPAD,
+        apps: AppSource | None = None,
         title: str = "Standalone apps",
         intro: str = LAUNCHPAD_INTRO,
-        sections: tuple[tuple[str, str, tuple[launcher.ExternalApp, ...]], ...] | None = None,
+        sections: tuple[tuple[str, str, AppSource], ...] | None = None,
         check_builds: bool = False,
         check_own_builds: bool = False,
         parent=None,
     ) -> None:
-        super().__init__(parent)
+        super().__init__(POLL_MS, parent)
         self.settings = settings
-
-        area, column = scroll_column(max_width=GRID_MAX_WIDTH)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(area)
 
         # One page, several headed sections. Suites, the sync companions and the
         # small utilities are different kinds of thing and reading them as one
         # undifferentiated wall of tiles was the problem with the flat grid.
+        if apps is None:
+            apps = lambda: launcher.LAUNCHPAD  # noqa: E731
         groups = sections if sections is not None else ((title, intro, apps),)
-
-        self.cards = []
-        self.grids = []
-        for group_title, group_intro, group_apps in groups:
-            column.addWidget(theme.section_title(group_title))
+        self._sources: list[AppSource] = [source for _t, _i, source in groups]
+        for group_title, group_intro, _source in groups:
+            self.column.addWidget(theme.section_title(group_title))
             if group_intro:
-                column.addWidget(theme.hint(group_intro))
-
-            grid = QGridLayout()
-            grid.setSpacing(16)
-            column.addLayout(grid)
-            self.grids.append((grid, []))
-
-            for app in group_apps:
-                card = AppCard(app)
-                card.launched.connect(self.launched)
-                card.start_failed.connect(self.start_failed)
-                self.cards.append(card)
-                self.grids[-1][1].append(card)
-
+                self.column.addWidget(theme.hint(group_intro))
+            self.add_grid()
         # Tests and the resize logic reach for the first grid by name.
         self.grid = self.grids[0][0]
-        # Which apps the build check reports: None is every registered app (the
-        # launchpad's question), a tuple is only this tab's own.
-        self._build_apps: tuple[launcher.ExternalApp, ...] | None = (
-            None if check_builds or not check_own_builds
-            else tuple(app for _t, _i, group in groups for app in group)
-        )
-        self._columns = 0
+        self._shown: list[tuple[launcher.ExternalApp, ...]] = []
+        self._sync_cards()
         self._arrange(1)
 
-        refresh = QPushButton("Re-check")
-        refresh.setToolTip("Look again for installed apps and source checkouts")
-        refresh.clicked.connect(self.recheck)
-        row = QHBoxLayout()
-        row.addWidget(refresh)
+        # Which apps the build check reports: None is every registered app (the
+        # launchpad's question), otherwise only this tab's own.
+        self._own_builds = check_own_builds and not check_builds
         self.check_button: QPushButton | None = None
         # One button reports every registered app, and it is the launchpad's:
         # the question it answers — "am I opening the newest of everything?" —
@@ -677,7 +578,7 @@ class AppsTab(QWidget):
                 "Compare every installed app against its source checkout"
             )
             check.clicked.connect(self.show_build_report)
-            row.addWidget(check)
+            self.buttons.addWidget(check)
             self.check_button = check
         elif check_own_builds:
             # Backstage and the two sync companions have no launchpad tile, so
@@ -694,40 +595,39 @@ class AppsTab(QWidget):
                 "and rebuild any that are behind"
             )
             check.clicked.connect(self.show_build_report)
-            row.addWidget(check)
+            self.buttons.addWidget(check)
             self.check_button = check
-        row.addStretch(1)
-        column.addLayout(row)
-        column.addStretch(1)
-
-        # An app can start or quit without Lab Hub being told, so the state has
-        # to be re-read rather than remembered. Only while the tab is on screen:
-        # polling a page nobody is looking at is pure waste.
-        self._poll = QTimer(self)
-        self._poll.setInterval(POLL_MS)
-        self._poll.timeout.connect(self.refresh)
+        self.finish()
 
         self.refresh()
 
-    def _arrange(self, columns: int) -> None:
-        """Lay the tiles out in `columns` columns, if that is a change."""
-        if columns == self._columns:
-            return
-        self._columns = columns
-        arrange_tiles(self.grids, columns)
+    @property
+    def cards(self) -> list[AppCard]:
+        return self.tiles()
 
-    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt override
-        super().resizeEvent(event)
-        self._arrange(columns_for(self.width(), len(self.cards)))
+    @property
+    def _build_apps(self) -> tuple[launcher.ExternalApp, ...] | None:
+        if not self._own_builds:
+            return None
+        return tuple(app for group in self._shown for app in group)
 
-    def showEvent(self, event) -> None:  # noqa: N802 - Qt override
-        super().showEvent(event)
-        self.refresh()
-        self._poll.start()
-
-    def hideEvent(self, event) -> None:  # noqa: N802 - Qt override
-        super().hideEvent(event)
-        self._poll.stop()
+    def _sync_cards(self) -> bool:
+        """Rebuild a section's tiles when its app list has changed."""
+        wanted = [resolve_apps(source) for source in self._sources]
+        if wanted == self._shown:
+            return False
+        for index, apps in enumerate(wanted):
+            if index < len(self._shown) and apps == self._shown[index]:
+                continue
+            cards = []
+            for app in apps:
+                card = AppCard(app)
+                card.launched.connect(self.launched)
+                card.start_failed.connect(self.start_failed)
+                cards.append(card)
+            self.set_tiles(index, cards)
+        self._shown = wanted
+        return True
 
     def apply_settings(self, settings: config.Settings) -> None:
         self.settings = settings
@@ -849,7 +749,9 @@ class AppsTab(QWidget):
         )
 
     def recheck(self) -> None:
-        """What the Re-check button does: forget stale notices, then look."""
+        """What Refresh asks of this tab: pick up added or removed apps,
+        forget stale notices, then look."""
+        self._sync_cards()
         lab_root = self.settings.resolved_lab_root()
         for card in self.cards:
             card.forget_failure()

@@ -23,6 +23,7 @@ from lab_hub import config
 from lab_hub.tools import images
 
 from . import theme
+from .tiles import Refreshable
 from .widgets import FolderField, RunPanel, scroll_column
 
 PRINT, RENAME, SWEEP = 0, 1, 2
@@ -43,7 +44,7 @@ def _spin(value: int, low: int, high: int, suffix: str = "") -> QSpinBox:
     return box
 
 
-class ImagesTab(QWidget):
+class ImagesTab(QWidget, Refreshable):
     def __init__(self, settings: config.Settings, parent=None) -> None:
         super().__init__(parent)
         self.settings = settings

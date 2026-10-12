@@ -16,10 +16,11 @@ from PySide6.QtWidgets import (
 from lab_hub import APP_NAME, config, launcher, login_item, version
 
 from . import theme
+from .tiles import Refreshable
 from .widgets import FolderField, scroll_column
 
 
-class SettingsTab(QWidget):
+class SettingsTab(QWidget, Refreshable):
     settings_saved = Signal()
 
     def __init__(self, settings: config.Settings, parent=None) -> None:
@@ -123,6 +124,11 @@ class SettingsTab(QWidget):
         self._refresh_login()
 
     # ------------------------------------------------------------------
+    def refresh(self) -> None:
+        """Which checkouts the lab folder holds, and the login agent's state."""
+        self._refresh_resolved()
+        self._refresh_login()
+
     def _refresh_login(self) -> None:
         """Read the state off disk rather than trusting a remembered flag.
 

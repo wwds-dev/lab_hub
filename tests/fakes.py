@@ -6,19 +6,23 @@ from __future__ import annotations
 class FakeTray:
     """A menu bar item that records instead of drawing.
 
-    `MainWindow` only ever asks a tray to notify or hide, and only ever tests
-    it for None, so this is the whole contract.
+    `MainWindow` only ever asks a tray to notify, hide or refresh, and
+    otherwise tests it for None, so this is the whole contract.
     """
 
     def __init__(self) -> None:
         self.notices: list[tuple[str, str]] = []
         self.hidden = False
+        self.refreshed = 0
 
     def notify(self, title: str, message: str) -> None:
         self.notices.append((title, message))
 
     def hide(self) -> None:
         self.hidden = True
+
+    def refresh(self) -> None:
+        self.refreshed += 1
 
 
 class RecordingReporter:
