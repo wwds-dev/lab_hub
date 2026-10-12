@@ -7,11 +7,13 @@ import time
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QHBoxLayout,
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QStackedWidget,
     QStatusBar,
-    QTabWidget,
+    QWidget,
 )
 
 from lab_hub import APP_NAME, asset_path, config, launcher, login_item, version
@@ -24,6 +26,7 @@ from .video_tab import VideoTab
 from .links_tab import DashboardsTab, SitesTab
 from .narrator_tab import NarratorTab
 from .settings_tab import SettingsTab
+from .sidebar import Sidebar
 from .tools_tab import BuiltInTool, ToolsOverview, convert_state, running_or_idle
 
 # Long enough for macOS's fullscreen-exit animation to finish before the
@@ -54,9 +57,10 @@ class MainWindow(QMainWindow):
         self.resize(1020, 820)
         self.setMinimumSize(760, 580)
 
-        self.tabs = QTabWidget()
-        self.tabs.tabBar().setExpanding(False)
-        self.tabs.tabBar().setDrawBase(False)
+        # Page stacks, driven by the sidebar. Still called `tabs` and
+        # `tools_tabs`: they are the same two levels the tab rows were, and the
+        # refresh and swipe wiring below reads them exactly as it did.
+        self.tabs = QStackedWidget()
 
         self.apps_tab = AppsTab(
             self.settings,
@@ -99,8 +103,7 @@ class MainWindow(QMainWindow):
         )
         self.settings_tab = SettingsTab(self.settings)
 
-        self.tools_tabs = QTabWidget()
-        self.tools_tabs.tabBar().setExpanding(False)
+        self.tools_tabs = QStackedWidget()
         # Every tool as a tile, first, so Tools opens on the same kind of page
         # as Apps, Websites and Dashboards. The pages below stay as they were.
         self.tools_overview = ToolsOverview(
@@ -142,21 +145,36 @@ class MainWindow(QMainWindow):
             apps=launcher.UTILITIES + launcher.TOOLS_ONLY_APPS,
             open_page=self.tools_tabs.setCurrentWidget,
         )
-        self.tools_tabs.addTab(self.tools_overview, "All tools")
-        self.tools_tabs.addTab(self.convert_tab, "Convert Textfiles")
-        self.tools_tabs.addTab(self.narrator_tab, "Narrator")
-        self.tools_tabs.addTab(self.images_tab, "Prepare Images")
-        self.tools_tabs.addTab(self.video_tab, "Convert Video")
-        self.tools_tabs.addTab(self.unblock_tracker_tab, "Unblock Tracker")
-        self.tools_tabs.addTab(self.backstage_tab, "Backstage")
+        self.sidebar = Sidebar(APP_NAME, version.version_string())
+        for page, title, glyph in (
+            (self.apps_tab, "Apps", "apps"),
+            (self.sites_tab, "Websites", "web"),
+            (self.dashboards_tab, "Dashboards", "dashboards"),
+            (self.backup_sync_tab, "Backup and Sync", "sync"),
+            (self.tools_tabs, "Tools", "tools"),
+            (self.settings_tab, "Settings", "settings"),
+        ):
+            self.tabs.addWidget(page)
+            self.sidebar.add_page(title, self.tabs, page, glyph)
+        for page, title in (
+            (self.tools_overview, "All tools"),
+            (self.convert_tab, "Convert Textfiles"),
+            (self.narrator_tab, "Narrator"),
+            (self.images_tab, "Prepare Images"),
+            (self.video_tab, "Convert Video"),
+            (self.unblock_tracker_tab, "Unblock Tracker"),
+            (self.backstage_tab, "Backstage"),
+        ):
+            self.tools_tabs.addWidget(page)
+            self.sidebar.add_page(title, self.tools_tabs, page, under=self.tools_tabs)
 
-        self.tabs.addTab(self.apps_tab, "Apps")
-        self.tabs.addTab(self.sites_tab, "Websites")
-        self.tabs.addTab(self.dashboards_tab, "Dashboards")
-        self.tabs.addTab(self.backup_sync_tab, "Backup and Sync")
-        self.tabs.addTab(self.tools_tabs, "Tools")
-        self.tabs.addTab(self.settings_tab, "Settings")
-        self.setCentralWidget(self.tabs)
+        central = QWidget()
+        body = QHBoxLayout(central)
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+        body.addWidget(self.sidebar)
+        body.addWidget(self.tabs, 1)
+        self.setCentralWidget(central)
 
         # Everything the hub reads from disk or the process table, re-read on
         # demand — the alternative was quitting and reopening.
@@ -167,12 +185,14 @@ class MainWindow(QMainWindow):
         )
         self.refresh_button.setAutoDefault(False)
         self.refresh_button.clicked.connect(self.refresh_all)
-        self.tabs.setCornerWidget(self.refresh_button, Qt.TopRightCorner)
+        self.refresh_button.setObjectName("navItem")
+        self.sidebar.add_footer(self.refresh_button, "refresh")
         QShortcut(QKeySequence.Refresh, self, activated=self.refresh_all)
 
-        # Trackpad swipes change tab — the top row only, Apps to Settings (the
-        # user's call, 2026-10-07). A swipe anywhere, a tool's page included,
-        # moves that row; the Tools sub-tabs are reached by clicking.
+        # Trackpad swipes change page — the sidebar's top level only, Apps to
+        # Settings (the user's call, 2026-10-07). A swipe anywhere, a tool's
+        # page included, moves that level; the Tools pages are reached by
+        # clicking them in the sidebar.
         self.swipe = swipe.SwipeTabs(self.tabs, parent=self)
         self.swipe.install()
 
@@ -473,7 +493,9 @@ def run() -> int:
         print(f"{APP_NAME} is already running — bringing it to the front.")
         return 0
 
-    theme.apply(app)
+    # The appearance setting (System / Light / Dark) is read before any window
+    # exists, so nothing is drawn once in the wrong theme.
+    theme.apply(app, mode=config.load().theme)
 
     # Closing the window leaves the app in the menu bar, so the last window
     # closing must not end the process.

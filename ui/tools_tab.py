@@ -5,7 +5,7 @@ poll that runs only while the page is on screen — over two kinds of tool:
 
 * the built-in ones (Convert Textfiles, Narrator, Prepare Images) run inside Lab
   Hub, so their tile says whether one is working right now and **Open** goes to
-  its page in the tab strip above;
+  its page under Tools in the sidebar;
 * the standalone ones (Unblock Tracker, Backstage) get the Apps tab's own tile,
   so Launch, *Running*, *Bring to front* and the version behave exactly as they
   do there. Their own pages stay as they were — Backstage's still carries its
@@ -66,7 +66,7 @@ def running_or_idle(is_running: Callable[[], bool], busy: str) -> Callable[[], t
 
 
 class ToolsOverview(QWidget):
-    """Tiles for every tool; Open moves the tab strip, Launch starts an app."""
+    """Tiles for every tool; Open shows the tool's page, Launch starts an app."""
 
     launched = Signal(str)
     start_failed = Signal(str)
@@ -92,8 +92,8 @@ class ToolsOverview(QWidget):
         column.addWidget(
             theme.hint(
                 "The built-in tools run inside Lab Hub — Open goes to their page "
-                "above. Unblock Tracker and Backstage are apps of their own and "
-                "launch in their own window."
+                "in the sidebar. Unblock Tracker and Backstage are apps of their "
+                "own and launch in their own window."
             )
         )
 
