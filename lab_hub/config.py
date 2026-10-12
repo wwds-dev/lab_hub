@@ -31,6 +31,9 @@ DEFAULT_LAB_ROOT = Path.home() / "Documents" / "lab" / "active"
 class Settings:
     lab_root: str = ""
 
+    # Appearance: "system" (follow macOS), "light" (Paper) or "dark" (Graphite).
+    theme: str = "system"
+
     # Convert (any document format to any other)
     convert_output_ext: str = "epub"
     convert_output_mode: str = "beside"  # "beside" (next to the source) or "folder"

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QApplication,
+    QButtonGroup,
     QCheckBox,
     QHBoxLayout,
     QLabel,
@@ -30,6 +32,40 @@ class SettingsTab(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(area)
+
+        # --- appearance -------------------------------------------------
+        look_card, look_layout = theme.card()
+        look_layout.addWidget(theme.section_title("Appearance"))
+        look_layout.addWidget(
+            theme.hint(
+                "Graphite when dark, Paper when light. System follows macOS. "
+                "Changes apply at once."
+            )
+        )
+        self.appearance = QButtonGroup(self)
+        self.appearance.setExclusive(True)
+        self.appearance_buttons: dict[str, QPushButton] = {}
+        segments = QHBoxLayout()
+        segments.setSpacing(0)
+        current = theme.normalise_mode(settings.theme)
+        for index, (value, text) in enumerate(
+            (("system", "System"), ("light", "Light"), ("dark", "Dark"))
+        ):
+            button = QPushButton(text)
+            button.setObjectName("segment")
+            button.setCheckable(True)
+            button.setAutoDefault(False)
+            button.setChecked(value == current)
+            if index == 0:
+                button.setProperty("edge", "first")
+            elif index == len(theme.MODES) - 1:
+                button.setProperty("edge", "last")
+            button.clicked.connect(lambda _checked=False, v=value: self.set_appearance(v))
+            self.appearance.addButton(button)
+            self.appearance_buttons[value] = button
+            segments.addWidget(button)
+        segments.addStretch(1)
+        look_layout.addLayout(segments)
 
         card, card_layout = theme.card()
         card_layout.addWidget(theme.section_title("Lab folder"))
@@ -114,6 +150,7 @@ class SettingsTab(QWidget):
         paths_row.addStretch(1)
         paths_layout.addLayout(paths_row)
 
+        column.addWidget(look_card)
         column.addWidget(card)
         column.addWidget(login_card)
         column.addWidget(paths_card)
@@ -170,6 +207,16 @@ class SettingsTab(QWidget):
         if not config.CONFIG_PATH.exists():
             config.save(self.settings)
         launcher.reveal(config.CONFIG_PATH)
+
+    def set_appearance(self, value: str) -> None:
+        """Switch the theme now and remember it — no Save needed."""
+        value = theme.normalise_mode(value)
+        self.appearance_buttons[value].setChecked(True)
+        self.settings.theme = value
+        config.save(self.settings)
+        app = QApplication.instance()
+        if app is not None:
+            theme.apply(app, mode=value)
 
     def save(self) -> None:
         self.settings.lab_root = self.lab_root.text()
