@@ -5,8 +5,14 @@ from __future__ import annotations
 import time
 
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer
-from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QMainWindow, QMessageBox, QStatusBar, QTabWidget
+from PySide6.QtGui import QIcon, QKeySequence, QShortcut
+from PySide6.QtWidgets import (
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QStatusBar,
+    QTabWidget,
+)
 
 from lab_hub import APP_NAME, asset_path, config, launcher, login_item, version
 
@@ -152,6 +158,18 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.settings_tab, "Settings")
         self.setCentralWidget(self.tabs)
 
+        # Everything the hub reads from disk or the process table, re-read on
+        # demand — the alternative was quitting and reopening.
+        self.refresh_button = QPushButton("Refresh")
+        self.refresh_button.setToolTip(
+            "Re-read installed apps, checkouts, the dashboard catalog and "
+            "running state (Cmd+R)"
+        )
+        self.refresh_button.setAutoDefault(False)
+        self.refresh_button.clicked.connect(self.refresh_all)
+        self.tabs.setCornerWidget(self.refresh_button, Qt.TopRightCorner)
+        QShortcut(QKeySequence.Refresh, self, activated=self.refresh_all)
+
         # Trackpad swipes change tab — the top row only, Apps to Settings (the
         # user's call, 2026-10-07). A swipe anywhere, a tool's page included,
         # moves that row; the Tools sub-tabs are reached by clicking.
@@ -244,6 +262,23 @@ class MainWindow(QMainWindow):
         self.dashboards_tab.apply_settings(self.settings)
         self.tools_overview.apply_settings(self.settings)
         self.statusBar().showMessage("Settings saved.", 4000)
+
+    def refresh_all(self) -> None:
+        """Re-check every tab, not only the visible one, and the menu bar."""
+        for tab in (
+            self.apps_tab,
+            self.backup_sync_tab,
+            self.unblock_tracker_tab,
+            self.backstage_tab,
+            self.sites_tab,
+            self.dashboards_tab,
+            self.tools_overview,
+        ):
+            tab.recheck()
+        self.convert_tab.refresh_calibre()
+        if self.tray is not None:
+            self.tray._fill_dashboards()
+        self.statusBar().showMessage("Refreshed.", 4000)
 
     def _on_tab_changed(self, index: int) -> None:
         # Calibre may have been installed since startup, and an app may have
