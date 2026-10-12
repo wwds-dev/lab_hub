@@ -1,229 +1,28 @@
-"""Finding and starting the standalone apps.
+"""Where each registered app is, whether it is up, and which build it is.
 
-Each of these is a separate project with its own repo, venv and packaged
-bundle. Two ways to start one, tried in order:
-
-1. the installed /Applications bundle — what the user normally has, and the
-   only option that works when Lab Hub is itself running as a frozen .app;
-2. the source checkout, run with that project's own venv — so the launcher
-   still works on a machine where nothing has been packaged yet.
-
-Never `sys.executable`: frozen, that is Lab Hub's own binary, and handing it a
-script path runs it inside this app's bundled interpreter with this app's
-dependencies.
-
-And never the inherited environment either — see `child_env`.
+Everything here only *looks*: the bundle in /Applications (or a checkout's
+`bundle_dir`), the checkout and its venv, the process table, the version a
+tile would open, the build report and the readiness check that decides whether
+Launch is offered at all. Starting, stopping and raising an app is
+`control`'s job; which apps exist is `registry`'s.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import plistlib
 import shlex
 import shutil
-import signal
 import socket
 import subprocess
-import tempfile
-import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from . import registry
+from .registry import ExternalApp
+
 APPLICATIONS = Path("/Applications")
-
-# How long to watch a source-launched process before assuming it is healthy.
-# A Qt app that is going to abort does so inside QApplication(), well under a
-# second; one that survives this long is up.
-STARTUP_GRACE_SECONDS = 1.5
-
-# Variables a frozen Lab Hub exports so its own bundled Qt and Python can find
-# themselves. A child inherits them and then loads *our* Qt plugins against
-# *its* Qt — two incompatible Qt builds in one process, which calls qFatal
-# inside QApplication() and aborts before a window ever appears. PyInstaller
-# stashes the pre-launch value of these as <VAR>_ORIG; restore that where it
-# exists, drop ours otherwise.
-INHERITED_VARS = (
-    "QT_PLUGIN_PATH",
-    "QT_QPA_PLATFORM_PLUGIN_PATH",
-    "QT_QPA_PLATFORM",
-    "QML2_IMPORT_PATH",
-    "QML_IMPORT_PATH",
-    "DYLD_LIBRARY_PATH",
-    "DYLD_FRAMEWORK_PATH",
-    "DYLD_FALLBACK_LIBRARY_PATH",
-    "DYLD_FALLBACK_FRAMEWORK_PATH",
-    "DYLD_INSERT_LIBRARIES",
-    "LD_LIBRARY_PATH",
-    "PYTHONHOME",
-    "PYTHONPATH",
-    "SSL_CERT_FILE",
-)
-
-
-def child_env() -> dict[str, str]:
-    """The environment a launched app should see: ours, minus our own runtime."""
-    env = dict(os.environ)
-    for name in INHERITED_VARS:
-        original = env.pop(f"{name}_ORIG", None)
-        env.pop(name, None)
-        if original:
-            env[name] = original
-    env.pop("_MEIPASS2", None)
-    return env
-
-
-class LaunchError(RuntimeError):
-    """Raised when an app cannot be found or started."""
-
-
-@dataclass(frozen=True)
-class ExternalApp:
-    key: str
-    name: str  # display name and installed bundle name
-    project: str  # folder path under the lab root
-    entry: str  # entry script, relative to the project folder
-    summary: str
-    # What this app's windowless background copy is called, for apps that have
-    # one. SONAR's launchd agent keeps settling hours with no window open, and
-    # that is the point of it — worth reporting, but never as "the app is
-    # open", which is the question the Launch button answers.
-    service: str | None = None
-    # A web app: its checkout runs a local server and the browser is its
-    # window. Provisio is one. "Running" then means the address answers, and
-    # the button opens it rather than raising anything.
-    url: str | None = None
-    # What runs `entry` for a source launch, and with which arguments. A web
-    # app's server is a node script, not a python one.
-    runtime: str = "python"
-    args: tuple[str, ...] = ()
-    # Where inside the checkout a built bundle is looked for when none is
-    # installed in /Applications — for an app whose builder stops at its own
-    # `dist/` and has no installer, like SYNDUSTRYX's.
-    bundle_dir: str | None = None
-    # Whether the checkout itself is the app. SYNDUSTRYX's `server.py` is its
-    # engine without the window, on the port the Lab Project Monitor already
-    # holds, so only its built bundle is ever launched.
-    runs_from_source: bool = True
-
-    @property
-    def served(self) -> bool:
-        return self.url is not None
-
-
-# One tile per umbrella app, and nothing else. The agents and sub-modules that
-# live inside these projects — Tunnel and Bug Spray inside Sentinel, the
-# video pipeline inside Imprint, macro and Playmaker inside SONAR — are reached
-# from their own app, never from here. Two doors to the same feature is how you
-# end up with a standalone VPN Agent window that knows nothing about the
-# Sentinel session that should own it.
-SUITES: tuple[ExternalApp, ...] = (
-    ExternalApp(
-        key="sentinel",
-        name="Sentinel",
-        project="sentinel",
-        entry="main.py",
-        summary="Security and investigation command centre. Its agents — Chat, "
-        "Trace, Bloodhound, Beacon, Forge, Tunnel and Bug Spray — live inside it.",
-    ),
-    ExternalApp(
-        key="imprint",
-        name="Imprint",
-        project="imprint",
-        entry="main.py",
-        summary="The create-and-publish studio: writing, audio, video, social, "
-        "web and gigs, each behind its own mode tab.",
-    ),
-    ExternalApp(
-        key="sonar",
-        name="SONAR",
-        project="sonar",
-        entry="main.py",
-        summary="Market scanner and paper-trading terminal: live prices, "
-        "prediction-market odds and a probability model, traded with paper money.",
-        service="Background engine",
-    ),
-    # Headroom is Provisio's `engine/`, not an app of its own — it gets no tile
-    # for the same reason Tunnel does not. Provisio was a web app here (its
-    # node server, opened in the browser) until 2026-10-07; it is now a native
-    # window, /Applications/Provisio.app from its scripts/install_app.sh, that
-    # starts and stops its own server and switches between a demo and a real
-    # workspace. The browser-mode server and the app cannot run at once (vinext
-    # allows one dev server per checkout), so this tile must not start one.
-    ExternalApp(
-        key="provisio",
-        name="Provisio",
-        project="provisio",
-        entry="main.py",
-        summary="Income-protection product design and review, with a Demo/Real "
-        "workspace switch. Headroom, its solvency-filings engine, lives inside it.",
-    ),
-    # SYNDUSTRYX: renamed source, bundle and Lab registration together.
-    # Source remains in the Codex workspace, linked as active/syndustryx.
-    ExternalApp(
-        key="syndustryx",
-        name="SYNDUSTRYX",
-        project="syndustryx",
-        entry="server.py",
-        summary="The Antfarm workstation: an animated factory over a local "
-        "fulfilment engine, storefront and departments.",
-        bundle_dir="dist",
-        runs_from_source=False,
-    ),
-)
-
-BACKUP_SYNC_APPS: tuple[ExternalApp, ...] = (
-    ExternalApp(
-        key="backup_manager",
-        name="Backup Control Center",
-        project="backup_manager",
-        entry="main.py",
-        summary="Run and monitor the Google Drive rsync backup, and keep an eye "
-        "on the other sync engines.",
-    ),
-    ExternalApp(
-        key="git_autosync",
-        name="git_autosync",
-        project="git_autosync",
-        entry="packaging/entry_point.py",
-        summary="Commit and push the lab's repos on a schedule, with per-repo "
-        "status and manual sync.",
-    ),
-)
-
-UTILITIES: tuple[ExternalApp, ...] = (
-    ExternalApp(
-        key="unblock_tracker",
-        name="Unblock Tracker",
-        project="toolbox/unblock_tracker",
-        entry="main.py",
-        summary="Watch whether an Instagram profile has unblocked you, and get "
-        "notified the moment it changes.",
-    ),
-)
-
-# Launched from their own card at the end of the Tools tab and nowhere else:
-# no Apps tile and no menu bar entry. That is the user's call (2026-09-27) —
-# a standalone app kept off the front page, not a sub-module of anything.
-TOOLS_ONLY_APPS: tuple[ExternalApp, ...] = (
-    ExternalApp(
-        key="backstage",
-        name="Backstage",
-        project="backstage",
-        entry="main.py",
-        summary="Venture analytics: market signals, bounded pricing tests and "
-        "the records behind them.",
-    ),
-)
-
-# Every launchable app. There is no nesting any more, so this is simply the
-# groups in order. The menu bar reads MENU_BAR_APPS; the self-test, the build
-# report and Settings read APPS, which also covers the Tools-only apps.
-PRIMARY_APPS: tuple[ExternalApp, ...] = SUITES
-MENU_BAR_APPS: tuple[ExternalApp, ...] = SUITES + BACKUP_SYNC_APPS + UTILITIES
-LAUNCHPAD: tuple[ExternalApp, ...] = MENU_BAR_APPS
-APPS: tuple[ExternalApp, ...] = LAUNCHPAD + TOOLS_ONLY_APPS
 
 
 def bundle_path(app: ExternalApp, lab_root: Path | None = None) -> Path | None:
@@ -506,14 +305,6 @@ def serving(app: ExternalApp) -> bool:
         return False
 
 
-def open_url(url: str) -> None:
-    """Open an address in the default browser."""
-    result = subprocess.run(
-        ["open", url], capture_output=True, text=True, env=child_env()
-    )
-    if result.returncode != 0:
-        raise LaunchError(result.stderr.strip() or f"'open' failed for {url}")
-
 
 def can_bring_to_front(app: ExternalApp, lab_root: Path | None = None) -> bool:
     """Only an installed bundle can be raised.
@@ -525,126 +316,6 @@ def can_bring_to_front(app: ExternalApp, lab_root: Path | None = None) -> bool:
     A web app's "front" is its address, which can always be opened.
     """
     return app.served or bundle_path(app, lab_root) is not None
-
-
-def server_pids(app: ExternalApp, lab_root: Path) -> list[int]:
-    """The processes running this web app's server from its checkout.
-
-    Found by the absolute entry path Lab Hub starts it with. A server started
-    by hand runs by a relative path and is deliberately not found: stopping
-    whatever happens to be listening on the port could be anything.
-    """
-    marker = checkout_marker(app, lab_root) if app.served else None
-    if marker is None:
-        return []
-    try:
-        table = subprocess.run(
-            ["ps", "-Axo", "pid=,command="], capture_output=True, text=True, timeout=5
-        ).stdout
-    except (OSError, subprocess.SubprocessError):
-        return []
-    pids = []
-    for line in table.splitlines():
-        pid, _, command = line.strip().partition(" ")
-        if marker in command and pid.isdigit():
-            pids.append(int(pid))
-    return pids
-
-
-def stop(app: ExternalApp, lab_root: Path) -> str:
-    """Stop a web app's server: the window it does not have cannot be closed.
-
-    SIGTERM to the process group, which `launch` made the server the leader
-    of, so the helpers a dev server starts (Wrangler's workerd) go with it.
-    """
-    pids = server_pids(app, lab_root)
-    if not pids:
-        raise LaunchError(
-            f"Lab Hub can only stop a {app.name} server it can recognise. One "
-            "started by hand is stopped where it was started — Control-C in "
-            "its Terminal window."
-        )
-    for pid in pids:
-        try:
-            os.killpg(pid, signal.SIGTERM)
-        except OSError:
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except OSError:
-                pass
-    return f"Stopped {app.name}"
-
-
-def is_launcher_bundle(bundle: Path) -> bool:
-    """True when the .app only starts the real GUI in a separate process.
-
-    An AppleScript applet that runs a project's main.py stays alive inside
-    `do shell script` while the real GUI runs beside it, and it owns no window:
-    `open -a` reaches the applet, which is deaf to the reopen event, so raising
-    the app that way silently does nothing. Self-contained PyInstaller bundles
-    name their executable after the app, so an executable called "applet" is
-    the reliable tell for that shape.
-
-    Sentinel used to be one. As of its V2 installer it is a compiled C stub
-    (`SentinelLauncher`) that execs the project's python and **exits**, leaving
-    no bundle process at all — so `open -a` runs the stub again, the second
-    copy hands off to the running one and quits, and raising works without this
-    path. Verified against the installed app: the pid does not change. Kept for
-    the applets that remain, notably Bug Spray's.
-    """
-    plist = bundle / "Contents" / "Info.plist"
-    try:
-        result = subprocess.run(
-            ["/usr/libexec/PlistBuddy", "-c", "Print :CFBundleExecutable", str(plist)],
-            capture_output=True, text=True, timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return result.returncode == 0 and result.stdout.strip() == "applet"
-
-
-def bring_to_front(app: ExternalApp, lab_root: Path) -> str:
-    if app.url is not None:
-        open_url(app.url)
-        return f"Opened {app.name} in your browser"
-
-    bundle = bundle_path(app, lab_root)
-    project = source_dir(app, lab_root)
-
-    # A launcher bundle cannot raise its own GUI, so go at the entry script
-    # instead. These apps dedupe themselves: the second copy hands off to the
-    # running one, which comes forward, and then exits 0.
-    if bundle is not None and project is not None and is_launcher_bundle(bundle):
-        python = venv_python(project)
-        if python is not None:
-            try:
-                handoff = subprocess.run(
-                    [str(python), str(project / app.entry)],
-                    cwd=project, capture_output=True, text=True,
-                    env=child_env(), timeout=30,
-                )
-            except subprocess.SubprocessError as error:
-                raise LaunchError(f"Could not raise {app.name}: {error}") from error
-            if handoff.returncode != 0:
-                raise LaunchError(
-                    f"Could not raise {app.name} — its launcher exited with "
-                    f"status {handoff.returncode}.\n\n"
-                    f"{(handoff.stderr or handoff.stdout).strip()[-400:]}"
-                )
-            return f"Brought {app.name} to the front"
-
-    if bundle is None:
-        raise LaunchError(
-            f"{app.name} is already running, but Lab Hub can only raise apps "
-            "installed in /Applications. Switch to it from the Dock or with "
-            "⌘-Tab."
-        )
-    result = subprocess.run(
-        ["open", "-a", str(bundle)], capture_output=True, text=True, env=child_env()
-    )
-    if result.returncode != 0:
-        raise LaunchError(result.stderr.strip() or f"'open' failed for {bundle}")
-    return f"Brought {app.name} to the front"
 
 
 # The lab-wide scheme: v<MAJOR>.<BUILD>, the arc hand-set in a VERSION file and
@@ -756,20 +427,51 @@ _COUNT_CACHE: dict[tuple[str, int], int | None] = {}
 
 def _head_stamp(project: Path) -> int | None:
     """When this repository last moved. None when it is not a repository."""
-    head = project / ".git" / "HEAD"
+    git_dir = _git_dir(project)
+    if git_dir is None:
+        return None
+    head = git_dir / "HEAD"
     try:
         newest = head.stat().st_mtime_ns
     except OSError:
         return None
     # A commit on a branch rewrites the ref, not HEAD itself, so check both.
+    # A worktree keeps its HEAD in its own git dir and its refs in the
+    # repository's common one.
     try:
         ref = head.read_text().strip()
         if ref.startswith("ref: "):
-            target = project / ".git" / ref[5:]
-            newest = max(newest, target.stat().st_mtime_ns)
+            for base in (git_dir, _common_dir(git_dir)):
+                target = base / ref[5:]
+                if target.exists():
+                    newest = max(newest, target.stat().st_mtime_ns)
+                    break
     except OSError:
         pass
     return newest
+
+
+def _git_dir(project: Path) -> Path | None:
+    """The repository's git dir: `.git` itself, or where a worktree's points."""
+    dot = project / ".git"
+    if dot.is_dir():
+        return dot
+    try:
+        text = dot.read_text().strip()
+    except OSError:
+        return None
+    if not text.startswith("gitdir: "):
+        return None
+    pointed = Path(text[len("gitdir: "):])
+    return pointed if pointed.is_absolute() else project / pointed
+
+
+def _common_dir(git_dir: Path) -> Path:
+    try:
+        common = Path((git_dir / "commondir").read_text().strip())
+    except OSError:
+        return git_dir
+    return common if common.is_absolute() else git_dir / common
 
 
 def _commit_count(project: Path) -> int | None:
@@ -1010,7 +712,7 @@ def build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
 def build_report(
     lab_root: Path, apps: tuple[ExternalApp, ...] | None = None
 ) -> tuple[BuildStatus, ...]:
-    return tuple(build_status(app, lab_root) for app in (apps or APPS))
+    return tuple(build_status(app, lab_root) for app in (apps or registry.current().apps))
 
 
 def status(app: ExternalApp, lab_root: Path) -> tuple[str, str]:
@@ -1106,163 +808,3 @@ def readiness(app: ExternalApp, lab_root: Path) -> Readiness:
     return Readiness(
         state, detail, "not installed, and there is no source checkout to fall back on."
     )
-
-
-def launch(app: ExternalApp, lab_root: Path, *, background: bool = False) -> str:
-    """Start the app. Returns a line describing what was started."""
-    extra_args = ["--background"] if background else []
-    bundle = bundle_path(app, lab_root)
-    if bundle is not None:
-        if bundle_executable(app, lab_root) is None:
-            # `open` on a gutted bundle fails with a LaunchServices number
-            # rather than a sentence, so say it plainly here instead.
-            raise LaunchError(
-                f"{bundle} has no executable inside it. Rebuild {app.name} and "
-                "reinstall it, or delete the bundle to fall back to its source "
-                "checkout."
-            )
-        # -n so a second click brings up a new instance rather than silently
-        # doing nothing when the app is already open but on another Space.
-        command = ["open", "-a", str(bundle)]
-        if extra_args:
-            command.extend(["--args", *extra_args])
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            env=child_env(),
-        )
-        if result.returncode != 0:
-            raise LaunchError(result.stderr.strip() or f"'open' failed for {bundle}")
-        return f"Launched {app.name} from {bundle}"
-
-    project = source_dir(app, lab_root)
-    if project is None:
-        raise LaunchError(
-            f"{app.name} is not installed in /Applications, and no source "
-            f"checkout was found at {lab_root / app.project}.\n\n"
-            "Set the lab folder on the Settings tab if your projects live "
-            "somewhere else."
-        )
-    if not app.runs_from_source:
-        raise LaunchError(
-            f"There is no built {app.name}.app to launch, and its checkout at "
-            f"{project} is not run directly. Build it first."
-        )
-
-    if app.runtime == "node":
-        # Through a login shell: node lives wherever the user's profile puts
-        # it, and a frozen app's PATH is bare. `exec` keeps one process, so the
-        # command line shows node and the absolute entry rather than a shell.
-        shell = os.environ.get("SHELL", "/bin/zsh")
-        script = " ".join(
-            shlex.quote(part)
-            for part in ("node", str(project / app.entry), *app.args)
-        )
-        command = [shell, "-lc", f"exec {script}"]
-        interpreter = "node"
-    else:
-        python = venv_python(project) or (
-            Path(shutil.which("python3")) if shutil.which("python3") else None
-        )
-        if python is None:
-            raise LaunchError(
-                f"No interpreter to run {app.name} with: {project} has no .venv and "
-                "python3 is not on PATH."
-            )
-        # Absolute, not `app.entry`: the command line is how a running copy is
-        # recognised later, and every project's relative entry is the same
-        # `main.py`.
-        command = [str(python), str(project / app.entry), *app.args, *extra_args]
-        interpreter = str(python)
-
-    # Output goes to a file rather than DEVNULL. A child that dies during
-    # startup is the case worth diagnosing, and discarding its stderr is what
-    # turns "it crashed and here is why" into "nothing happened".
-    log = launch_log(app)
-    try:
-        handle = log.open("w")
-    except OSError:
-        handle = subprocess.DEVNULL
-
-    try:
-        # Detached, so quitting Lab Hub does not take the app down with it.
-        process = subprocess.Popen(
-            command,
-            cwd=project,
-            start_new_session=True,
-            stdout=handle,
-            stderr=subprocess.STDOUT,
-            env=child_env(),
-        )
-    except OSError as error:
-        raise LaunchError(f"Could not start {app.name}: {error}") from error
-    finally:
-        if handle is not subprocess.DEVNULL:
-            handle.close()
-
-    # Watch it briefly. A Qt app that is going to fail fails immediately, and
-    # reporting that here beats leaving the user to wonder why no window came up.
-    deadline = time.monotonic() + STARTUP_GRACE_SECONDS
-    while time.monotonic() < deadline:
-        code = process.poll()
-        if code is None:
-            time.sleep(0.05)
-            continue
-        if code != 0:
-            raise LaunchError(
-                f"{app.name} started and then exited with status {code}.\n\n"
-                f"{_log_tail(log)}"
-            )
-        break  # exited cleanly and immediately — odd, but not an error
-
-    return f"Launched {app.name} from source ({project}) using {interpreter}"
-
-
-def _log_tail(log: Path, lines: int = 12) -> str:
-    try:
-        captured = log.read_text(errors="replace").strip().splitlines()
-    except OSError:
-        return f"No output was captured (see {log})."
-    if not captured:
-        return f"It produced no output (see {log})."
-    return "\n".join(captured[-lines:])
-
-
-def launch_log(app: ExternalApp) -> Path:
-    """Where a source-launched app's own output is written."""
-    return Path(tempfile.gettempdir()) / f"lab-hub-launch-{app.key}.log"
-
-
-def startup_log_hint(app: ExternalApp, lab_root: Path | None = None) -> str:
-    """Where to look when an app was started but never came up.
-
-    A bundle launched through `open` is not our child, so its output goes to
-    the unified log rather than to us — naming the command is the difference
-    between a dead end and a diagnosis.
-    """
-    executable = bundle_executable(app, lab_root)
-    if executable is not None:
-        return (
-            "Console.app, or: log show --predicate "
-            f"'process == \"{executable.name}\"' --last 5m"
-        )
-    return str(launch_log(app))
-
-
-def open_terminal(path: Path) -> None:
-    """Open a Terminal window at `path`.
-
-    Paired with the clipboard rather than typing the command in: driving
-    Terminal would need an Apple Events grant, and a window that runs something
-    the moment it opens is the wrong shape for a command that replaces an
-    installed app. Paste and read it first.
-    """
-    subprocess.run(
-        ["open", "-a", "Terminal", str(path)], check=False, env=child_env()
-    )
-
-
-def reveal(path: Path) -> None:
-    """Show a file or folder in Finder."""
-    subprocess.run(["open", "-R", str(path)], check=False)

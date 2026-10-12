@@ -1,0 +1,102 @@
+# Every app Lab Hub launches, read at startup and again on Refresh (Cmd+R).
+#
+# Add an app here and press Refresh: no rebuild needed. A frozen Lab Hub reads
+# this file from its own checkout (<lab folder>/lab_hub/lab_hub/apps.toml) when
+# that exists, and the copy bundled at build time otherwise. A file that does
+# not parse is reported and the last good list is kept.
+#
+# Four groups, each an array of tables, listed in tile order:
+#   suites       the Apps tab and the menu bar
+#   backup_sync  the Backup and Sync tab and the menu bar
+#   utilities    a Tools page and the menu bar
+#   tools_only   a Tools page only — no Apps tile, no menu bar entry
+#
+# Fields (see `ExternalApp` in lab_hub/launcher/registry.py for what each does):
+#   key, name, project, entry, summary   required
+#   service, url, runtime, args, bundle_dir, runs_from_source   optional
+#
+# One tile per umbrella app, and nothing else. The agents and sub-modules that
+# live inside these projects — Tunnel and Bug Spray inside Sentinel, the video
+# pipeline inside Imprint, macro and Playmaker inside SONAR — are reached from
+# their own app, never from here. Two doors to the same feature is how you end
+# up with a standalone VPN Agent window that knows nothing about the Sentinel
+# session that should own it.
+
+[[suites]]
+key = "sentinel"
+name = "Sentinel"
+project = "sentinel"
+entry = "main.py"
+summary = "Security and investigation command centre. Its agents — Chat, Trace, Bloodhound, Beacon, Forge, Tunnel and Bug Spray — live inside it."
+
+[[suites]]
+key = "imprint"
+name = "Imprint"
+project = "imprint"
+entry = "main.py"
+summary = "The create-and-publish studio: writing, audio, video, social, web and gigs, each behind its own mode tab."
+
+[[suites]]
+key = "sonar"
+name = "SONAR"
+project = "sonar"
+entry = "main.py"
+summary = "Market scanner and paper-trading terminal: live prices, prediction-market odds and a probability model, traded with paper money."
+service = "Background engine"
+
+# Headroom is Provisio's `engine/`, not an app of its own — it gets no tile for
+# the same reason Tunnel does not. Provisio was a web app here (its node
+# server, opened in the browser) until 2026-10-07; it is now a native window,
+# /Applications/Provisio.app from its scripts/install_app.sh, that starts and
+# stops its own server and switches between a demo and a real workspace. The
+# browser-mode server and the app cannot run at once (vinext allows one dev
+# server per checkout), so this tile must not start one.
+[[suites]]
+key = "provisio"
+name = "Provisio"
+project = "provisio"
+entry = "main.py"
+summary = "Income-protection product design and review, with a Demo/Real workspace switch. Headroom, its solvency-filings engine, lives inside it."
+
+# SYNDUSTRYX: renamed source, bundle and Lab registration together. Source
+# remains in the Codex workspace, linked as active/syndustryx. Only its built
+# bundle in dist/ is launched: server.py is its engine without the window.
+[[suites]]
+key = "syndustryx"
+name = "SYNDUSTRYX"
+project = "syndustryx"
+entry = "server.py"
+summary = "The Antfarm workstation: an animated factory over a local fulfilment engine, storefront and departments."
+bundle_dir = "dist"
+runs_from_source = false
+
+[[backup_sync]]
+key = "backup_manager"
+name = "Backup Control Center"
+project = "backup_manager"
+entry = "main.py"
+summary = "Run and monitor the Google Drive rsync backup, and keep an eye on the other sync engines."
+
+[[backup_sync]]
+key = "git_autosync"
+name = "git_autosync"
+project = "git_autosync"
+entry = "packaging/entry_point.py"
+summary = "Commit and push the lab's repos on a schedule, with per-repo status and manual sync."
+
+[[utilities]]
+key = "unblock_tracker"
+name = "Unblock Tracker"
+project = "toolbox/unblock_tracker"
+entry = "main.py"
+summary = "Watch whether an Instagram profile has unblocked you, and get notified the moment it changes."
+
+# Launched from its own card at the end of the Tools tab and nowhere else: no
+# Apps tile and no menu bar entry. That is the user's call (2026-09-27) — a
+# standalone app kept off the front page, not a sub-module of anything.
+[[tools_only]]
+key = "backstage"
+name = "Backstage"
+project = "backstage"
+entry = "main.py"
+summary = "Venture analytics: market signals, bounded pricing tests and the records behind them."

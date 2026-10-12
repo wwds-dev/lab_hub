@@ -33,6 +33,7 @@ pyinstaller --noconfirm --clean --windowed \
   --add-data "assets/icon.icns:assets" \
   --add-data "VERSION:." \
   --add-data "_build_info.json:." \
+  --add-data "lab_hub/apps.toml:lab_hub" \
   --add-data "assets/tray.png:assets" \
   --add-data "assets/tray@2x.png:assets" \
   --hidden-import lab_hub.tools.narrator.converter \

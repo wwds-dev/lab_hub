@@ -290,6 +290,30 @@ def selftest() -> int:
     if not any(ok for _name, ok, _detail in probed):
         print("    (nothing probed — no project venv with PySide6 available)")
 
+    # The app list is data now, read at runtime. The bundled copy is the
+    # fallback for a Mac with no Lab Hub checkout, so it has to be in the
+    # bundle and it has to parse; a broken checkout copy is reported, since
+    # Refresh would quietly keep the last good list.
+    from lab_hub.launcher import registry
+
+    bundled_ok = True
+    try:
+        bundled = registry.load(registry.PACKAGE_REGISTRY)
+        bundled_note = f"{len(bundled.apps)} apps"
+    except registry.RegistryError as error:
+        bundled_ok, bundled_note = False, str(error)
+    print(f"  app list:        {registry.PACKAGE_REGISTRY} ({bundled_note})")
+    if not bundled_ok:
+        problems.append(f"the bundled app list is unusable: {bundled_note}")
+    try:
+        in_force = registry.current()
+        print(f"  app list used:   {in_force.source} ({len(in_force.apps)} apps)")
+    except registry.RegistryError as error:
+        problems.append(f"no usable app list: {error}")
+    if registry.last_error:
+        print(f"  app list note:   {registry.last_error}")
+        problems.append(f"an app list was skipped: {registry.last_error}")
+
     # Reported but never fatal: whether the other apps are installed says
     # nothing about whether this build is sound. A bundle that has lost its
     # executable is worth naming, though — it still looks installed.
@@ -319,7 +343,7 @@ def selftest() -> int:
         print(f"    {app.name:<24} STALE — this build says {configured}")
         problems.append(
             f"{app.name}: `project` is '{app.project}', but its checkout is at "
-            f"{found} — rename it here, or every tile that depends on the "
+            f"{found} — rename it in lab_hub/apps.toml, or every tile that depends on the "
             "checkout path is guessing"
         )
 
