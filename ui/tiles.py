@@ -16,7 +16,7 @@ while the page is on screen. This is that sameness written once:
 
 from __future__ import annotations
 
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QEvent, QTimer, Qt
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from . import theme
@@ -122,10 +122,11 @@ class Tile(QWidget):
         self.body.addWidget(self.summary)
         self.body.addWidget(self.detail)
         self.body.addLayout(self.extra)
-        self.body.addLayout(self.buttons)
-        # Spare room at the bottom keeps every tile's buttons on the same line,
-        # whatever the summary length.
+        # Spare room above the buttons pins them to the card's bottom edge, so
+        # every tile in a row has its buttons on the same line whatever its
+        # summary or detail length.
         self.body.addStretch(1)
+        self.body.addLayout(self.buttons)
 
     def set_state(self, label: str, style: str, tooltip: str = "") -> None:
         self.state.setText(label)
@@ -203,6 +204,33 @@ class TilePage(QWidget, Refreshable):
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt override
         super().resizeEvent(event)
         self._arrange(columns_for(self.width(), len(self.tiles())))
+        self.equalise()
+
+    def event(self, event) -> bool:
+        # A tile's text changes on every refresh; re-level once its layout has.
+        if event.type() == QEvent.Type.LayoutRequest:
+            QTimer.singleShot(0, self.equalise)
+        return super().event(event)
+
+    def equalise(self) -> None:
+        """Give every tile on the page the height of the tallest.
+
+        A grid only levels tiles within a row; a page whose rows differ in
+        height reads as tiles of different sizes, so the page levels them all.
+        """
+        tiles = [tile for tile in self.tiles() if tile.isVisible()] or self.tiles()
+        if not tiles:
+            return
+        tallest = 0
+        for tile in tiles:
+            width = tile.width() or TILE_MIN_WIDTH
+            needed = tile.heightForWidth(width) if tile.hasHeightForWidth() else -1
+            # A tile already taller than its floor got there on its content.
+            grown = tile.height() if tile.height() > tile.minimumHeight() else 0
+            tallest = max(tallest, needed, grown, tile.sizeHint().height())
+        for tile in self.tiles():
+            if tile.minimumHeight() != tallest:
+                tile.setMinimumHeight(tallest)
 
     def showEvent(self, event) -> None:  # noqa: N802 - Qt override
         super().showEvent(event)

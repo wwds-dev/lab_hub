@@ -22,30 +22,24 @@ def test_clicking_a_top_level_entry_shows_its_page(window):
     assert window.sidebar.current_title() == "Dashboards"
 
 
-def test_every_tool_page_is_reachable_from_the_sidebar(window):
+def test_tools_are_not_listed_in_the_sidebar(window):
     for index in range(window.tools_tabs.count()):
-        page = window.tools_tabs.widget(index)
-        window.tabs.setCurrentWidget(window.apps_tab)
-        window.sidebar.button_for(page).click()
-        assert window.tabs.currentWidget() is window.tools_tabs
-        assert window.tools_tabs.currentWidget() is page
-        assert window.sidebar.current_title() == window.sidebar.title_of(page)
+        assert window.sidebar.button_for(window.tools_tabs.widget(index)) is None
 
 
-def test_the_tools_list_folds_away_outside_tools(window):
-    window.show()
-    child = window.sidebar.button_for(window.narrator_tab)
-    window.tabs.setCurrentWidget(window.apps_tab)
-    assert not child.isVisible()
+def test_clicking_tools_returns_to_the_overview(window):
+    window.tabs.setCurrentWidget(window.tools_tabs)
+    window.tools_tabs.setCurrentWidget(window.narrator_tab)
     window.sidebar.button_for(window.tools_tabs).click()
-    assert child.isVisible()
+    assert window.tools_tabs.currentWidget() is window.tools_overview
 
 
 def test_the_selection_follows_a_page_change_made_elsewhere(window):
     """A swipe or a tile's Open button changes the page without the sidebar."""
     window.tabs.setCurrentWidget(window.tools_tabs)
     window.tools_overview.tool_tiles[1].open_button.click()
-    assert window.sidebar.current_title() == "Narrator"
+    assert window.tools_tabs.currentWidget() is window.narrator_tab
+    assert window.sidebar.current_title() == "Tools"
     window.tabs.setCurrentWidget(window.settings_tab)
     assert window.sidebar.current_title() == "Settings"
 
@@ -57,7 +51,8 @@ def test_opening_a_page_still_refreshes_it(window, monkeypatch):
     window.tabs.setCurrentWidget(window.apps_tab)
 
     window.sidebar.button_for(window.dashboards_tab).click()
-    window.sidebar.button_for(window.convert_tab).click()
+    window.tabs.setCurrentWidget(window.tools_tabs)
+    window.tools_tabs.setCurrentWidget(window.convert_tab)
 
     assert "dash" in calls and "convert" in calls
 
@@ -79,3 +74,25 @@ def test_titles_follow_the_stack_order(qapp):
     assert bar.titles(stack) == ["One", "Two"]
     stack.setCurrentIndex(1)
     assert bar.current_title() == "Two"
+
+
+def test_icons_are_repainted_in_the_new_theme(window, qapp):
+    """The selected entry's icon is painted in the theme being switched to."""
+    from PySide6.QtCore import QSize
+    from PySide6.QtGui import QColor, QIcon
+
+    from ui import theme
+
+    for palette in (theme.DARK, theme.LIGHT, theme.DARK):
+        theme.apply(qapp, palette)
+        qapp.processEvents()
+        icon = window.sidebar.button_for(window.apps_tab).icon()
+        image = icon.pixmap(QSize(18, 18), 2.0, QIcon.Mode.Normal, QIcon.State.On).toImage()
+        inked = [
+            image.pixelColor(x, y)
+            for x in range(image.width())
+            for y in range(image.height())
+            if image.pixelColor(x, y).alpha() == 255
+        ]
+        assert inked
+        assert max(c.lightness() for c in inked) == QColor(palette.text).lightness()

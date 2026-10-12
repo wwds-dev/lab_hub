@@ -52,6 +52,18 @@ IDLE_RESET_S = 0.4
 
 # macOS reports a swipe's direction as an angle: 0° right, 90° up, 180° left.
 SWIPE_ANGLE_LEFT = 180.0
+SWIPE_ANGLE_UP = 90.0
+SWIPE_ANGLE_DOWN = 270.0
+
+
+def _can_scroll_vertically(widget: QWidget) -> bool:
+    """Whether this widget is a scroll area with somewhere up or down to go."""
+    if not isinstance(widget, QAbstractScrollArea):
+        return False
+    if widget.verticalScrollBarPolicy() == Qt.ScrollBarAlwaysOff:
+        return False
+    bar = widget.verticalScrollBar()
+    return bar is not None and bar.maximum() > bar.minimum()
 
 
 def _can_scroll_horizontally(widget: QWidget) -> bool:
@@ -117,7 +129,15 @@ class SwipeTabs(QObject):
             return False
         # The angle is the whole gesture, already recognised by macOS, so there
         # is no threshold to reach and nothing to accumulate.
-        forward = abs(event.value() - SWIPE_ANGLE_LEFT) < 90.0
+        angle = event.value() % 360.0
+        if abs(angle - SWIPE_ANGLE_UP) < 45.0 or abs(angle - SWIPE_ANGLE_DOWN) < 45.0:
+            # Vertical: the pages are listed down the sidebar, so a swipe up
+            # (the content moving up) goes to the next one, as scrolling does.
+            return self._change_tab(
+                self._candidates(obj, vertical=True),
+                forward=abs(angle - SWIPE_ANGLE_UP) < 45.0,
+            )
+        forward = abs(angle - SWIPE_ANGLE_LEFT) < 90.0
         return self._change_tab(self._candidates(obj), forward=forward)
 
     def _on_wheel(self, obj, event) -> bool:
@@ -144,16 +164,18 @@ class SwipeTabs(QObject):
         delta = event.pixelDelta()
         if delta.isNull():
             delta = event.angleDelta()
-        if abs(delta.x()) <= abs(delta.y()) * HORIZONTAL_DOMINANCE:
+        vertical = abs(delta.y()) > abs(delta.x()) * HORIZONTAL_DOMINANCE
+        if not vertical and abs(delta.x()) <= abs(delta.y()) * HORIZONTAL_DOMINANCE:
             return False
         # Decided before anything is accumulated: a swipe that belongs to a
-        # sideways-scrolling table must leave no trace here, or the next swipe
-        # over the tabs would start part-way to its threshold.
-        candidates = self._candidates(obj)
+        # sideways-scrolling table (or, vertically, to a page that scrolls)
+        # must leave no trace here, or the next swipe over the tabs would start
+        # part-way to its threshold.
+        candidates = self._candidates(obj, vertical=vertical)
         if not candidates:
             return False
 
-        self._accumulated += delta.x()
+        self._accumulated += delta.y() if vertical else delta.x()
         if abs(self._accumulated) < SWIPE_THRESHOLD:
             return False
 
@@ -183,16 +205,19 @@ class SwipeTabs(QObject):
         # through rather than silently eating it.
         return False
 
-    def _candidates(self, under_pointer: QWidget):
+    def _candidates(self, under_pointer: QWidget, *, vertical: bool = False):
         """Registered tab widgets above the pointer, innermost first.
 
-        Empty if a scroll area between the pointer and the tabs can scroll
-        sideways: that widget has the better claim on the gesture.
+        Empty if a scroll area between the pointer and the tabs can scroll the
+        way the gesture goes: that widget has the better claim on it. So a
+        vertical two-finger swipe changes page only over a page that fits its
+        window; on one that scrolls, it scrolls.
         """
+        can_scroll = _can_scroll_vertically if vertical else _can_scroll_horizontally
         found = []
         widget = under_pointer
         while widget is not None:
-            if _can_scroll_horizontally(widget):
+            if can_scroll(widget):
                 return []
             if widget in self._tabs:
                 found.append(widget)

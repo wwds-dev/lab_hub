@@ -404,7 +404,11 @@ def nav_icon(name: str, p: Palette | None = None) -> QIcon:
     for colour, state in ((p.muted, QIcon.State.Off), (p.text, QIcon.State.On)):
         image = _paint(36, _nav_drawing(name, colour))
         image.setDevicePixelRatio(2.0)
-        icon.addPixmap(QPixmap.fromImage(image), QIcon.Mode.Normal, state)
+        # Every mode, not only Normal: a checked button can be drawn in Active
+        # or Selected mode, and Qt's generated pixmap for a missing mode is
+        # tinted with the palette's highlight — invisible on the dark sidebar.
+        for mode in (QIcon.Mode.Normal, QIcon.Mode.Active, QIcon.Mode.Selected):
+            icon.addPixmap(QPixmap.fromImage(image), mode, state)
     return icon
 
 
@@ -814,10 +818,14 @@ def apply(app: QApplication, palette: Palette | None = None, mode: str | None = 
         if _mode != "system" and hasattr(hints, "setColorScheme"):
             hints.setColorScheme(Qt.ColorScheme.Dark if chosen.dark else Qt.ColorScheme.Light)
 
+        # Set first: the palette change below repaints the sidebar icons, and
+        # they ask active() for their colours. Set after, they were painted in
+        # the outgoing theme — dark ink on the dark sidebar, so the selected
+        # entry's icon vanished.
+        _chosen = chosen
         app.setStyle("Fusion")
         app.setPalette(qpalette(chosen))
         app.setStyleSheet(stylesheet(chosen))
-        _chosen = chosen
     finally:
         _applying = False
     _follow_system(app)

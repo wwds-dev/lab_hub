@@ -12,7 +12,6 @@ def test_narrator_is_a_lab_hub_tab(window):
     assert window.tabs.indexOf(window.tools_tabs) >= 0
     index = window.tools_tabs.indexOf(window.narrator_tab)
     assert index >= 0
-    assert window.sidebar.title_of(window.tools_tabs.widget(index)) == "Narrator"
 
 
 def test_form_rejects_a_missing_book(qapp, tmp_path, monkeypatch):

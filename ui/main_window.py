@@ -157,17 +157,21 @@ class MainWindow(QMainWindow):
         ):
             self.tabs.addWidget(page)
             self.sidebar.add_page(title, self.tabs, page, glyph)
-        for page, title in (
-            (self.tools_overview, "All tools"),
-            (self.convert_tab, "Convert Textfiles"),
-            (self.narrator_tab, "Narrator"),
-            (self.images_tab, "Prepare Images"),
-            (self.video_tab, "Convert Video"),
-            (self.unblock_tracker_tab, "Unblock Tracker"),
-            (self.backstage_tab, "Backstage"),
+        # The tools are not listed in the sidebar: Tools opens the overview,
+        # and its tiles open each tool.
+        for page in (
+            self.tools_overview,
+            self.convert_tab,
+            self.narrator_tab,
+            self.images_tab,
+            self.video_tab,
+            self.unblock_tracker_tab,
+            self.backstage_tab,
         ):
             self.tools_tabs.addWidget(page)
-            self.sidebar.add_page(title, self.tools_tabs, page, under=self.tools_tabs)
+        self.sidebar.button_for(self.tools_tabs).clicked.connect(
+            lambda: self.tools_tabs.setCurrentWidget(self.tools_overview)
+        )
 
         central = QWidget()
         body = QHBoxLayout(central)

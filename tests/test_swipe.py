@@ -125,12 +125,49 @@ def test_a_short_nudge_does_not_change_tab(tabs):
     assert w.currentIndex() == 0
 
 
-def test_a_vertical_scroll_never_changes_tab(tabs):
-    """A sideways component big enough on its own still loses to a bigger
-    vertical one — otherwise any wobble in a scroll changes tab."""
+def test_a_mostly_sideways_swipe_with_wobble_still_counts(tabs):
     w, swipe, page = tabs
     send(swipe, page, wheel(page, 0, 0, Qt.ScrollBegin))
-    assert send(swipe, page, wheel(page, -STEP, -STEP * 3)) is False
+    assert send(swipe, page, wheel(page, -STEP * 3, -STEP)) is True
+    assert w.currentIndex() == 1
+
+
+def test_a_vertical_swipe_over_a_page_that_fits_changes_tab(tabs):
+    """The pages are listed down the sidebar, so fingers up goes to the next."""
+    w, swipe, page = tabs
+    assert swipe_across(swipe, page, 0) is False  # no movement, no change
+    send(swipe, page, wheel(page, 0, 0, Qt.ScrollBegin))
+    assert send(swipe, page, wheel(page, 0, -STEP)) is True
+    assert w.currentIndex() == 1
+    send(swipe, page, wheel(page, 0, 0, Qt.ScrollEnd))
+    assert send(swipe, page, wheel(page, 0, STEP)) is True
+    assert w.currentIndex() == 0
+
+
+def test_a_vertical_scroll_over_a_scrolling_page_keeps_the_gesture(tabs):
+    """A page taller than its window scrolls; the tabs do not take that."""
+    w, swipe, _ = tabs
+    area = QScrollArea()
+    inner = QLabel("x")
+    inner.setFixedHeight(4000)
+    area.setWidget(inner)
+    area.resize(200, 100)
+    w.addTab(area, "Tall")
+    w.setCurrentWidget(area)
+    area.show()
+    QApplication.processEvents()
+    assert area.verticalScrollBar().maximum() > 0, "fixture is not scrollable"
+    before = w.currentIndex()
+    send(swipe, area.viewport(), wheel(area.viewport(), 0, 0, Qt.ScrollBegin))
+    assert send(swipe, area.viewport(), wheel(area.viewport(), 0, -STEP)) is False
+    assert w.currentIndex() == before
+
+
+def test_a_three_finger_vertical_swipe_changes_tab(tabs):
+    w, swipe, page = tabs
+    assert send(swipe, page, native_swipe(page, 90.0)) is True  # up: next
+    assert w.currentIndex() == 1
+    assert send(swipe, page, native_swipe(page, 270.0)) is True  # down: previous
     assert w.currentIndex() == 0
 
 
