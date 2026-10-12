@@ -3,7 +3,16 @@
 One front door for the lab's desktop tools: a launcher for the standalone apps,
 and a home for the small utilities that never had a UI.
 
-Tabs: **Apps** · **Websites** · **Dashboards** · **Backup and Sync** · **Tools** · **Settings**
+Pages, in a left sidebar: **Apps** · **Websites** · **Dashboards** · **Backup and Sync** ·
+**Tools** (its tool pages listed under it while it is open) · **Settings**. **Refresh**
+(Cmd+R) sits at the foot of the sidebar.
+
+**Two looks** (`ui/theme.py`): **Graphite** in dark mode — near-black, borderless cards,
+one mint accent, status as a tinted pill — and **Paper** in light mode — warm
+off-white, hairline cards, no accent colour, black pill buttons, status as a small
+dot. Settings ▸ Appearance switches **System / Light / Dark** live and saves it in
+the config (`theme`, System by default). Colours, radii and the spacing and type
+scale (4/8/12/16/24; two text sizes plus a title) are defined only in `ui/theme.py`.
 
 ## Why two kinds of thing
 
@@ -51,9 +60,9 @@ Three rules it keeps:
 
 * **It never wraps.** The macOS page swipe does not, and a navigation gesture
   that loops makes the ends indistinguishable from the middle.
-* **Only the top row moves.** Apps through Settings, and nothing else: a swipe
-  inside Tools — on *All tools* or any tool's page — moves the window's tabs,
-  never the Tools sub-tabs, which are reached by clicking (the user's call,
+* **Only the top level moves.** Apps through Settings, and nothing else: a swipe
+  inside Tools — on *All tools* or any tool's page — moves the window's pages,
+  never the Tools pages, which are reached by clicking them in the sidebar (the user's call,
   2026-10-07). Until then the window registered both rows, innermost first, so
   a swipe inside Tools walked the tools before falling out to the top row.
   `SwipeTabs` still supports that — pass several tab widgets, innermost first,
@@ -339,7 +348,7 @@ on-screen-only poll. A built-in tool's tile says only what can be known without
 asking it to do anything — *Running* while a job is going, *Needs Calibre* when
 Convert Textfiles has no `ebook-convert`, and otherwise *Built in*; Narrator checks
 its keys and ffmpeg when it starts, so *Ready* before that would be a guess.
-**Open** moves the tab strip to that tool's page. Unblock Tracker and Backstage
+**Open** goes to that tool's page (listed under Tools in the sidebar). Unblock Tracker and Backstage
 get the Apps tab's own tile (`AppCard`), so Launch, *Running*, *Bring to front*
 and the version behave as they do there. Their own pages are unchanged —
 Backstage's still carries Check build — and neither gains a menu bar entry.

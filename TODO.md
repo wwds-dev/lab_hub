@@ -287,14 +287,21 @@ copies be one.
 
 ## Theme overhaul — open (2026-10-12)
 
-- [ ] `P1` `design` `@ai` **Graphite (dark) and Paper (light) themes, with a switch.**
+- [x] `P1` `design` `@ai` **Graphite (dark) and Paper (light) themes, with a switch.**
   Dark mode is Graphite (borderless cards, sidebar, one mint accent); light mode is
   Paper (warm off-white, hairlines, no accent colour, black pill buttons). Mockups
   agreed 2026-10-12. Add a Settings switch — System / Light / Dark — that applies live
-  and persists in the config; System stays the default.
-- [ ] `P1` `design` `@ai` **Sidebar navigation** replacing the top tab row and the
+  and persists in the config; System stays the default. Done 2026-10-12: palettes,
+  stylesheet and painted glyphs in `ui/theme.py`; `theme.apply` re-themes at runtime and
+  follows macOS while on System; `Settings.theme`; `tests/test_theme.py`.
+- [x] `P1` `design` `@ai` **Sidebar navigation** replacing the top tab row and the
   Tools sub-tab row; one primary action per view; quieter tiles (one status pill,
   secondary actions in a menu); a spacing and type scale kept only in `ui/theme.py`.
+  Done 2026-10-12: `ui/sidebar.py` drives two `QStackedWidget`s (Tools pages fold out
+  under Tools), Refresh in its footer; swipe and refresh-on-show unchanged. Tiles are
+  quieted by stylesheet only — one status pill/dot, a tile's Launch/Open as a quiet
+  button, its other actions as text — so the filled primary is the one per view.
+  Not done: secondary actions moved into a menu (left for the shared tile base).
 - [ ] `P1` `infra` `@ai` **Structure.** Split `lab_hub/launcher.py` (registry / status /
   launch); app list in a data file or auto-scanned, so Refresh finds new apps without a
   rebuild; one shared tile base for `AppCard` and `LinkCard`; a single `Refreshable`
