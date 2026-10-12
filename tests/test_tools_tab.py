@@ -18,7 +18,7 @@ def test_tools_open_on_the_tiles(window):
 
 
 def test_every_tool_has_a_tile_in_tab_order(window):
-    assert _names(window) == ["Convert Files", "Narrator", "Prepare Images", "Convert Video"]
+    assert _names(window) == ["Convert Textfiles", "Narrator", "Prepare Images", "Convert Video"]
     assert [card.app.key for card in window.tools_overview.app_cards] == [
         "unblock_tracker", "backstage",
     ]

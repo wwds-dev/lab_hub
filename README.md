@@ -330,21 +330,21 @@ the tab carries its own **Check builds** and Update now
 ### Tools
 
 The built-in utilities and occasional standalone tools are grouped under one
-tab: **Convert Files**, **Narrator**, **Prepare Images**, **Convert Video**, **Unblock Tracker** and
+tab: **Convert Textfiles**, **Narrator**, **Prepare Images**, **Convert Video**, **Unblock Tracker** and
 **Backstage**.
 
 It opens on **All tools** (`ui/tools_tab.py`, added 2026-10-07): every tool as a
 tile, on the same grid as Apps, Websites and Dashboards, with Re-check and an
 on-screen-only poll. A built-in tool's tile says only what can be known without
 asking it to do anything — *Running* while a job is going, *Needs Calibre* when
-Convert Files has no `ebook-convert`, and otherwise *Built in*; Narrator checks
+Convert Textfiles has no `ebook-convert`, and otherwise *Built in*; Narrator checks
 its keys and ffmpeg when it starts, so *Ready* before that would be a guess.
 **Open** moves the tab strip to that tool's page. Unblock Tracker and Backstage
 get the Apps tab's own tile (`AppCard`), so Launch, *Running*, *Bring to front*
 and the version behave as they do there. Their own pages are unchanged —
 Backstage's still carries Check build — and neither gains a menu bar entry.
 
-#### Convert Files
+#### Convert Textfiles
 Any document format Calibre reads into any format it writes — **47 in, 19 out**.
 EPUB, AZW3, MOBI, DOCX, PDF, TXT, RTF, FB2, KEPUB and the long tail, in both
 directions.

@@ -285,6 +285,21 @@ copies be one.
   minimal. Fixed with the frozen-app port; `flake8 --max-line-length=120` is clean on both
   copies.
 
+## Theme overhaul — open (2026-10-12)
+
+- [ ] `P1` `design` `@ai` **Graphite (dark) and Paper (light) themes, with a switch.**
+  Dark mode is Graphite (borderless cards, sidebar, one mint accent); light mode is
+  Paper (warm off-white, hairlines, no accent colour, black pill buttons). Mockups
+  agreed 2026-10-12. Add a Settings switch — System / Light / Dark — that applies live
+  and persists in the config; System stays the default.
+- [ ] `P1` `design` `@ai` **Sidebar navigation** replacing the top tab row and the
+  Tools sub-tab row; one primary action per view; quieter tiles (one status pill,
+  secondary actions in a menu); a spacing and type scale kept only in `ui/theme.py`.
+- [ ] `P1` `infra` `@ai` **Structure.** Split `lab_hub/launcher.py` (registry / status /
+  launch); app list in a data file or auto-scanned, so Refresh finds new apps without a
+  rebuild; one shared tile base for `AppCard` and `LinkCard`; a single `Refreshable`
+  interface so `MainWindow.refresh_all` stops enumerating tabs.
+
 ## v3 — later
 
 - [x] `P1` `feature` `@ai` **Provisio and SYNDUSTRYX on the Apps tab; new Websites and
@@ -350,7 +365,7 @@ copies be one.
 
 - [ ] `P2` `feature` `@ai` Read each project's `TODO.md` and show an open-item count next to its launch button
 - [ ] `P2` `feature` `@me` Decide whether Ebook Converter deserves a tile — its job is
-  already the embedded Convert Files tab, so a launch button would be a second door to
+  already the embedded Convert Textfiles tab, so a launch button would be a second door to
   the same thing. Left off for now.
 - [x] `P3` `infra` `@me` **Stale bundles pruned** (2026-09-12, by hand): `Sentinel AI.app`
   (project archived), `Create & Publish.app` (renamed to Imprint), `vidforge.app`

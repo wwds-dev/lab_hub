@@ -3,7 +3,7 @@
 The same tile page as Apps, Websites and Dashboards — one grid, Re-check, and a
 poll that runs only while the page is on screen — over two kinds of tool:
 
-* the built-in ones (Convert Files, Narrator, Prepare Images) run inside Lab
+* the built-in ones (Convert Textfiles, Narrator, Prepare Images) run inside Lab
   Hub, so their tile says whether one is working right now and **Open** goes to
   its page in the tab strip above;
 * the standalone ones (Unblock Tracker, Backstage) get the Apps tab's own tile,
@@ -12,7 +12,7 @@ poll that runs only while the page is on screen — over two kinds of tool:
   Check build — so this is a second way in, inside the same tab.
 
 A built-in tool's state is only what can be known without asking it to do
-anything: *Running* while a job is going, *Needs Calibre* when Convert Files
+anything: *Running* while a job is going, *Needs Calibre* when Convert Textfiles
 has no `ebook-convert` to call, and otherwise just *Built in*. Narrator's keys
 and ffmpeg are checked when it starts, and claiming *Ready* before that would
 be a guess.

@@ -33,7 +33,7 @@ def test_tools_include_built_in_tools_and_unblock_tracker(window):
     assert [
         window.tools_tabs.tabText(i) for i in range(window.tools_tabs.count())
     ] == [
-        "All tools", "Convert Files", "Narrator", "Prepare Images", "Convert Video",
+        "All tools", "Convert Textfiles", "Narrator", "Prepare Images", "Convert Video",
         "Unblock Tracker", "Backstage",
     ]
     assert _keys(window.unblock_tracker_tab) == ["unblock_tracker"]

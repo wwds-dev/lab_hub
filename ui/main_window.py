@@ -107,7 +107,7 @@ class MainWindow(QMainWindow):
             self.settings,
             tools=[
                 BuiltInTool(
-                    "Convert Files",
+                    "Convert Textfiles",
                     "Any document format Calibre reads into any it writes — "
                     "EPUB, AZW3, MOBI, DOCX, PDF and the long tail.",
                     self.convert_tab,
@@ -143,7 +143,7 @@ class MainWindow(QMainWindow):
             open_page=self.tools_tabs.setCurrentWidget,
         )
         self.tools_tabs.addTab(self.tools_overview, "All tools")
-        self.tools_tabs.addTab(self.convert_tab, "Convert Files")
+        self.tools_tabs.addTab(self.convert_tab, "Convert Textfiles")
         self.tools_tabs.addTab(self.narrator_tab, "Narrator")
         self.tools_tabs.addTab(self.images_tab, "Prepare Images")
         self.tools_tabs.addTab(self.video_tab, "Convert Video")
