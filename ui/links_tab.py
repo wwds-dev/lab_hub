@@ -87,7 +87,7 @@ class LinkCard(QWidget):
         header.setSpacing(12)
         self.name = QLabel(name)
         self.name.setObjectName("appName")
-        self.state = QLabel()
+        self.state = theme.mark_status(QLabel())
         self.state.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         header.addWidget(self.name)
         header.addStretch(1)
@@ -167,7 +167,7 @@ class LinksTab(QWidget):
         self.intro = theme.hint(intro)
         column.addWidget(self.intro)
         # Says why there are no tiles, when there are none.
-        self.notice = theme.hint("")
+        self.notice = theme.empty_state("")
         self.notice.hide()
         column.addWidget(self.notice)
 

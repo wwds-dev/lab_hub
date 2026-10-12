@@ -151,7 +151,7 @@ class AppCard(QWidget):
         self.version = QLabel()
         self.version.setObjectName("hint")
 
-        self.state = QLabel()
+        self.state = theme.mark_status(QLabel())
         self.state.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         self.launch_button = QPushButton("Launch")
