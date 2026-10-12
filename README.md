@@ -168,8 +168,8 @@ compiled C stub inside a month, while the checkout path stayed put.
 
 **The checkout half comes from the bundle when the name here is stale.** The
 same bug came back on 2026-10-07 by a different road. `ExternalApp.project` is a
-directory name written by hand in `launcher.py`, so it is only as current as the
-last Lab Hub build: the Sentinel folder was renamed from `sentinel_fork` to
+directory name written by hand (then in `launcher.py`, now in `apps.toml`), so it was
+only as current as the last Lab Hub build: the Sentinel folder was renamed from `sentinel_fork` to
 `sentinel`, the installed v2.049 went on looking for the old one, `source_dir()`
 found nothing, the checkout marker disappeared and the tile was left matching
 the bundle alone — the exact failure above, reached without touching
@@ -272,7 +272,7 @@ inside `QApplication()` was indistinguishable from one that started fine: the
 button greyed for a moment and nothing else ever happened.
 
 *Did not start* is a notice about one launch rather than a property of the app,
-so it expires after a minute, and **Re-check** clears it outright. It used to
+so it expires after a minute, and **Refresh** (Cmd+R) clears it outright. It used to
 persist: a tile could still be reading *Did not start* long after the app had
 been opened and closed again by hand.
 
@@ -280,7 +280,7 @@ been opened and closed again by hand.
 
 **altmerch.store** (Shopify) and **bookadatewithme.com** (Netlify), registered in
 `lab_hub/sites.py`. Built like the Apps tab on purpose — same tile, same grid,
-Re-check, a state on every tile that is re-read rather than remembered, and a
+a state on every tile that is re-read rather than remembered, and a
 poll that runs only while the tab is on screen — but a site's state is **whether
 it answers right now**: *Online*, *Error 404* (or whichever code), *Unreachable*,
 with the detail in the tooltip. **Open site** opens it; **Show files** shows its
@@ -290,7 +290,7 @@ The check is a `HEAD` through Qt's `QNetworkAccessManager`, on the event loop
 rather than a thread — so there is nothing to stop when the app quits — and a
 page is never downloaded to learn its status. It runs when the tab is shown (if
 the last check is over a minute old), every five minutes while it stays shown,
-and on Re-check; never in the constructor, since the window builds every tab at
+and on Refresh; never in the constructor, since the window builds every tab at
 startup. A 4xx counts as **down**: a host answering 404 at the front door is
 serving nobody. That is exactly what bookadatewithme.com did the day this tab
 was written — Netlify answering for the domain with no site deployed behind it.
@@ -334,7 +334,7 @@ tab: **Convert Textfiles**, **Narrator**, **Prepare Images**, **Convert Video**,
 **Backstage**.
 
 It opens on **All tools** (`ui/tools_tab.py`, added 2026-10-07): every tool as a
-tile, on the same grid as Apps, Websites and Dashboards, with Re-check and an
+tile, on the same grid as Apps, Websites and Dashboards, with an
 on-screen-only poll. A built-in tool's tile says only what can be known without
 asking it to do anything — *Running* while a job is going, *Needs Calibre* when
 Convert Textfiles has no `ebook-convert`, and otherwise *Built in*; Narrator checks
@@ -448,6 +448,22 @@ installed app does not need it, but running one from source does, and the
 Dashboards tab finds its catalog one folder up from it. Blank means auto-detect
 (`$LAB_ROOT`, then the checkout this was run from, then `~/Documents/lab/active`).
 
+## Adding an app
+
+The registered apps live in `lab_hub/apps.toml`, not in code: four groups
+(`suites`, `backup_sync`, `utilities`, `tools_only`) of `ExternalApp` fields.
+Add an entry and press **Refresh** (Cmd+R) — the tiles and the menu bar are
+rebuilt, no rebuild of Lab Hub needed. The installed app reads the file from
+its own checkout (`<lab folder>/lab_hub/lab_hub/apps.toml`) when it is there and
+the copy bundled at build time otherwise; a file that does not parse is named in
+the status bar and the last good list is kept. `--selftest` checks the bundled
+copy.
+
+**Refresh is the one re-check.** Every tab implements `Refreshable`
+(`ui/tiles.py`): `refresh()` looks again, `recheck()` also forgets stale notices
+and cached versions. The window's Refresh re-reads the app list and then calls
+`recheck()` on every tab, so the tabs carry no Re-check buttons of their own.
+
 ## One instance, and the menu bar
 
 Only one copy runs. The guard is a local socket rather than a lock file,
@@ -557,7 +573,11 @@ suppressed.
     main.py              entry point; --selftest checks a build
     lab_hub/             no Qt imports below this line
       config.py          settings, stored in Application Support
-      launcher.py        finding and starting the standalone apps
+      apps.toml          the registered apps — edit, then Refresh
+      launcher/          finding, checking and starting them:
+        registry.py      ExternalApp and the groups, read from apps.toml
+        state.py         presence, running, version, build report, readiness
+        control.py       launch, stop, bring to front, open helpers
       sites.py           the websites, and what an answer from one means
       dashboards.py      reading the lab's dashboard catalog
       tools/convert/     any format to any format (vendored engine)
@@ -565,6 +585,7 @@ suppressed.
       tools/video.py     video format and size conversion (ffmpeg)
     ui/                  the only package that imports PySide6
       widgets.py         folder field, run/log panel
+      tiles.py           Tile, TilePage and the Refreshable interface
       worker.py          runs any tool off the GUI thread
       single_instance.py the one-copy guard
       tray.py            the menu bar item

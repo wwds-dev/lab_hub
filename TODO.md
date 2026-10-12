@@ -295,10 +295,12 @@ copies be one.
 - [ ] `P1` `design` `@ai` **Sidebar navigation** replacing the top tab row and the
   Tools sub-tab row; one primary action per view; quieter tiles (one status pill,
   secondary actions in a menu); a spacing and type scale kept only in `ui/theme.py`.
-- [ ] `P1` `infra` `@ai` **Structure.** Split `lab_hub/launcher.py` (registry / status /
+- [x] `P1` `infra` `@ai` **Structure.** Split `lab_hub/launcher.py` (registry / status /
   launch); app list in a data file or auto-scanned, so Refresh finds new apps without a
   rebuild; one shared tile base for `AppCard` and `LinkCard`; a single `Refreshable`
-  interface so `MainWindow.refresh_all` stops enumerating tabs.
+  interface so `MainWindow.refresh_all` stops enumerating tabs. Done 2026-10-12:
+  `lab_hub/launcher/` (`registry` / `state` / `control`), `lab_hub/apps.toml` re-read on
+  Refresh, `ui/tiles.py` (`Tile`, `TilePage`, `Refreshable`); per-tab Re-check removed.
 
 ## v3 — later
 
