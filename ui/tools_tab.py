@@ -88,8 +88,8 @@ class ToolsOverview(TilePage):
         self.column.addWidget(theme.section_title("Tools"))
         self.column.addWidget(
             theme.hint(
-                "The built-in tools run inside Lab Hub — Open goes to their page "
-                "in the sidebar. Unblock Tracker and Backstage are apps of their "
+                "The built-in tools run inside Lab Hub — Open shows the tool, and "
+                "Tools in the sidebar brings you back here. Unblock Tracker and Backstage are apps of their "
                 "own and launch in their own window."
             )
         )
