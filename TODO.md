@@ -372,6 +372,24 @@ copies be one.
   itself. One gesture is one tab, momentum included. `tests/test_swipe.py`, mutation-tested.
 
 
+- [x] `P2` `design` `@ai` **Tools dropped from the sidebar; the overview is the way in.**
+  The sidebar no longer lists each tool under Tools: clicking Tools opens *All tools* and its
+  tiles open each tool, and clicking Tools again returns to the overview. Supersedes the
+  "fold out under Tools" wiring in the theme-overhaul and Tools-as-tiles items above.
+  `ui/main_window.py`, `ui/tools_tab.py`, `tests/test_sidebar.py`, `tests/test_tools_tab.py`,
+  `tests/test_tab_groups.py`.
+- [x] `P2` `feature` `@ai` **A vertical two-finger swipe changes page too.** The pages run
+  down the sidebar, so a swipe up moves to the next page as scrolling would; a page that can
+  scroll vertically keeps the gesture and scrolls, mirroring the sideways-table rule.
+  `ui/swipe.py`, `tests/test_swipe.py`.
+- [x] `P2` `design` `@ai` **Tiles on a page are levelled to the tallest, buttons pinned to the
+  card's bottom edge.** A grid only levels within a row, so `TilePage.equalise()` re-levels
+  across rows on resize and after each refresh's layout change. `ui/tiles.py`.
+- [x] `P2` `bug` `@ai` **The selected sidebar icon no longer vanishes.** Nav icons are
+  registered for Active and Selected modes as well as Normal (Qt's generated pixmap for a
+  missing mode is tinted with the highlight, invisible on the dark sidebar), and `theme.apply`
+  sets the chosen palette before the repaint that asks for the icon colours. `ui/theme.py`.
+
 - [ ] `P2` `feature` `@ai` Read each project's `TODO.md` and show an open-item count next to its launch button
 - [ ] `P2` `feature` `@me` Decide whether Ebook Converter deserves a tile — its job is
   already the embedded Convert Textfiles tab, so a launch button would be a second door to

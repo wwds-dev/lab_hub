@@ -4,7 +4,8 @@ One front door for the lab's desktop tools: a launcher for the standalone apps,
 and a home for the small utilities that never had a UI.
 
 Pages, in a left sidebar: **Apps** · **Websites** · **Dashboards** · **Backup and Sync** ·
-**Tools** (its tool pages listed under it while it is open) · **Settings**. **Refresh**
+**Tools** (which opens *All tools*; its tiles reach each tool, and clicking Tools again
+returns there) · **Settings**. **Refresh**
 (Cmd+R) sits at the foot of the sidebar.
 
 **Two looks** (`ui/theme.py`): **Graphite** in dark mode — near-black, borderless cards,
@@ -50,6 +51,10 @@ a three-finger one as `QEvent.NativeGesture` with `Qt.SwipeNativeGesture`.
 Which one reaches the app is a System Settings choice, not ours —
 **Trackpad ▸ More Gestures ▸ Swipe between pages**.
 
+A **vertical** two-finger swipe changes page as well: the pages run down the
+sidebar, so a swipe up (the content moving up) goes to the next one, as
+scrolling does.
+
 Worth knowing before filing it as broken: by default macOS gives the
 three-finger horizontal swipe to *Swipe between full-screen apps*
 (`TrackpadThreeFingerHorizSwipeGesture = 2`), and while that is selected the
@@ -62,14 +67,17 @@ Three rules it keeps:
   that loops makes the ends indistinguishable from the middle.
 * **Only the top level moves.** Apps through Settings, and nothing else: a swipe
   inside Tools — on *All tools* or any tool's page — moves the window's pages,
-  never the Tools pages, which are reached by clicking them in the sidebar (the user's call,
-  2026-10-07). Until then the window registered both rows, innermost first, so
+  never the Tools pages, which are reached from the *All tools* tiles (the tools
+  are no longer listed in the sidebar; the user's call, 2026-10-07). Until then the
+  window registered both rows, innermost first, so
   a swipe inside Tools walked the tools before falling out to the top row.
   `SwipeTabs` still supports that — pass several tab widgets, innermost first,
   and `tests/test_swipe.py` keeps it working — but the window passes one.
 * **A widget that can genuinely use the gesture keeps it.** A table wide enough
-  to scroll sideways (the Narrator library's eight columns) takes the swipe;
-  one whose content fits does not, because it is not using it for anything.
+  to scroll sideways (the Narrator library's eight columns) takes a horizontal
+  swipe, and a page with somewhere to scroll vertically takes a vertical one;
+  a widget whose content fits does not, because it is not using the gesture for
+  anything.
 
 One gesture is one tab: the change latches on the first delta past the
 threshold and the rest of the swipe — including the momentum after the fingers
@@ -344,11 +352,14 @@ tab: **Convert Textfiles**, **Narrator**, **Prepare Images**, **Convert Video**,
 
 It opens on **All tools** (`ui/tools_tab.py`, added 2026-10-07): every tool as a
 tile, on the same grid as Apps, Websites and Dashboards, with an
-on-screen-only poll. A built-in tool's tile says only what can be known without
+on-screen-only poll. Every tile on a page is levelled to the height of the
+tallest so rows do not read as different sizes, and each tile's buttons sit on
+its bottom edge (`ui/tiles.py`). A built-in tool's tile says only what can be known without
 asking it to do anything — *Running* while a job is going, *Needs Calibre* when
 Convert Textfiles has no `ebook-convert`, and otherwise *Built in*; Narrator checks
 its keys and ffmpeg when it starts, so *Ready* before that would be a guess.
-**Open** goes to that tool's page (listed under Tools in the sidebar). Unblock Tracker and Backstage
+**Open** shows that tool's page, and clicking **Tools** in the sidebar brings you back to
+*All tools* (the tools are not listed individually in the sidebar). Unblock Tracker and Backstage
 get the Apps tab's own tile (`AppCard`), so Launch, *Running*, *Bring to front*
 and the version behave as they do there. Their own pages are unchanged —
 Backstage's still carries Check build — and neither gains a menu bar entry.

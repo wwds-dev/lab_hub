@@ -19,7 +19,7 @@ Status: `IDEA` · `CONSIDERING` · `PLANNED` · `DONE` · `REJECTED`
 
 | Suggestion | When |
 |---|---|
-| Trackpad swipe between tabs — two-finger scroll and three-finger native gesture, innermost tabs first, no wrap, yields to a sideways-scrolling table | Oct 2026 |
+| Trackpad swipe between tabs — two-finger scroll and three-finger native gesture, innermost tabs first, no wrap, yields to a sideways-scrolling table; a vertical swipe changes page unless the page itself scrolls | Oct 2026 |
 | Pre-flight health check per app — `launcher.readiness()`; a checkout with no interpreter, or a bundle that lost its executable, disables Launch and says why on the tile | Sep 2026 |
 | Exit code and captured output shown when a launched child dies immediately — a source run has both, a bundle has neither so the tile waits at *Starting…* then turns to *Did not start* via the `log show` predicate | Sep 2026 |
 | Apps tab with launch buttons | Aug 2026 |
