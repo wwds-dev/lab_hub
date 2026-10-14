@@ -37,14 +37,14 @@ test that proves it is `tests/test_appkit_guard.py`.
 
 This file is the original. `sonar/ui/appkit_guard.py` (2026-09-22),
 `imprint/ui/appkit_guard.py` and `sentinel/ui/appkit_guard.py` (2026-10-06) and
-`provisio/desktop/appkit_guard.py` (2026-10-07) and
-`git_autosync/app/appkit_guard.py` (2026-10-14) are deliberate copies of it,
+`provisio/desktop/appkit_guard.py` (2026-10-07),
+`git_autosync/app/appkit_guard.py` (2026-10-14) and
+`backup_manager/appkit_guard.py` (2026-10-14) are deliberate copies of it,
 because there is no shared package in this workspace to put it in. **The code in
-all six is byte-identical — change one, change the rest**, and delete all six
+all seven is byte-identical — change one, change the rest**, and delete all seven
 together when the fixed plugin lands. Only the docstrings differ, each saying
 what the menu means in that app. `AGENTS.md` keeps the roster of which apps
-here have a tray menu and therefore need this; `backup_manager` is on it and
-still unguarded.
+here have a tray menu and therefore need this; every app on it is now guarded.
 """
 
 from __future__ import annotations
