@@ -43,6 +43,15 @@ SITES: tuple[Website, ...] = (
         source="~/Documents/Websites/bookadatewithme",
         host="Netlify",
     ),
+    Website(
+        key="wwds",
+        name="WebWealth Digital Services",
+        url="file:///Users/as/Documents/Websites/webwealth/index.html",
+        summary="WWDS company site: the apps, how each is proven, documentation "
+        "and brands. Local only until it is deployed.",
+        source="~/Documents/Websites/webwealth",
+        host="Local files",
+    ),
 )
 
 
