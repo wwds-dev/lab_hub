@@ -21,9 +21,9 @@ The projects behind this app do not want the same treatment, so they do not get
 it.
 
 **Launched, not embedded.** Sentinel, Imprint, SONAR, Backup Control Center,
-git_autosync, Unblock Tracker and Backstage are complete PySide6 applications — own
+git_autosync, Unblock Tracker, Backstage and Provisio are complete PySide6 applications — own
 window, own settings, own background work, own lifecycle. Embedding them would mean
-nesting seven apps' worth of UI and state inside an eighth, and every one of them is
+nesting eight apps' worth of UI and state inside a ninth, and every one of them is
 something you leave running. Lab Hub starts them as separate processes: quit it
 and they keep going. Their internal agents are *their* business, not Lab Hub's.
 
@@ -85,7 +85,10 @@ lift — is swallowed. Without that, inertia alone walks several tabs.
 
 ### Apps
 One tile per umbrella app: **Sentinel**, **Imprint**, **SONAR**, **Provisio**,
-**SYNDUSTRYX** (the last two added 2026-10-07).
+**SYNDUSTRYX** (both added 2026-10-07) and **Backstage** (moved here from Tools on
+2026-10-14, so it now has a menu bar entry too). The line under each name is that
+entry's `summary` in `lab_hub/apps.toml`; all of them were rewritten on 2026-10-14
+(Sentinel's names its eight agents, SYNDUSTRYX's describes the agent company it now is).
 
 **Provisio is a native app** as of 2026-10-07: `/Applications/Provisio.app`
 (its own `scripts/install_app.sh`), a window that starts and stops its own local
@@ -295,13 +298,21 @@ been opened and closed again by hand.
 
 ### Websites
 
-**altmerch.store** (Shopify) and **bookadatewithme.com** (Netlify), registered in
+**altmerch.store** (Shopify), **bookadatewithme.com** (Netlify) and **WebWealth
+Digital Services** (the WWDS company site, added 2026-10-14), registered in
 `lab_hub/sites.py`. Built like the Apps tab on purpose — same tile, same grid,
 a state on every tile that is re-read rather than remembered, and a
 poll that runs only while the tab is on screen — but a site's state is **whether
 it answers right now**: *Online*, *Error 404* (or whichever code), *Unreachable*,
 with the detail in the tooltip. **Open site** opens it; **Show files** shows its
-local folder (`active/altmerch_store`, `~/Documents/Websites/bookadatewithme`).
+local folder (`active/altmerch_store`, `~/Documents/Websites/bookadatewithme`,
+`~/Documents/Websites/webwealth`).
+
+The WWDS site is not deployed yet, so its address is a local file
+(`file:///Users/as/Documents/Websites/webwealth/index.html`, host *Local files*). A
+`file://` reply carries no HTTP status, and `classify()` reads a missing status as
+*Unreachable*, so that tile is expected to say *Unreachable* even when the file is
+there (not verified on screen; see TODO). Open site still opens the page.
 
 The check is a `HEAD` through Qt's `QNetworkAccessManager`, on the event loop
 rather than a thread — so there is nothing to stop when the app quits — and a
@@ -347,8 +358,8 @@ the tab carries its own **Check builds** and Update now
 ### Tools
 
 The built-in utilities and occasional standalone tools are grouped under one
-tab: **Convert Textfiles**, **Narrator**, **Prepare Images**, **Convert Video**, **Unblock Tracker** and
-**Backstage**.
+tab: **Convert Textfiles**, **Narrator**, **Prepare Images**, **Convert Video** and
+**Unblock Tracker**. Backstage was here until 2026-10-14 and is now an Apps tile.
 
 It opens on **All tools** (`ui/tools_tab.py`, added 2026-10-07): every tool as a
 tile, on the same grid as Apps, Websites and Dashboards, with an
@@ -359,10 +370,11 @@ asking it to do anything — *Running* while a job is going, *Needs Calibre* whe
 Convert Textfiles has no `ebook-convert`, and otherwise *Built in*; Narrator checks
 its keys and ffmpeg when it starts, so *Ready* before that would be a guess.
 **Open** shows that tool's page, and clicking **Tools** in the sidebar brings you back to
-*All tools* (the tools are not listed individually in the sidebar). Unblock Tracker and Backstage
-get the Apps tab's own tile (`AppCard`), so Launch, *Running*, *Bring to front*
-and the version behave as they do there. Their own pages are unchanged —
-Backstage's still carries Check build — and neither gains a menu bar entry.
+*All tools* (the tools are not listed individually in the sidebar). Unblock Tracker
+gets the Apps tab's own tile (`AppCard`), so Launch, *Running*, *Bring to front*
+and the version behave as they do there; it is in the `utilities` group, so it also
+has a menu bar entry. The overview's tiles are `UTILITIES + TOOLS_ONLY_APPS`, and the
+second is now empty. The page's hint text still names Backstage (`ui/tools_tab.py`).
 
 #### Convert Textfiles
 Any document format Calibre reads into any format it writes — **47 in, 19 out**.
@@ -450,17 +462,21 @@ standalone browser app — the engine is `lab_hub/tools/video.py`.
 An occasional standalone tool, kept with the other tools rather than competing
 with the main launchpad apps.
 
-#### Backstage
+#### Backstage (moved to Apps)
 
-A standalone app with its own repository, launched from its card at the end of
-Tools and **nowhere else**: no Apps tile and no menu bar entry, by the user's
-choice (2026-09-27). It lives in `launcher.TOOLS_ONLY_APPS`, which the menu bar
-does not read and `launcher.APPS` — the self-test, the build report, Settings —
-does; `tests/test_tab_groups.py` pins both halves. Its card carries a **Check build**
-button — the launchpad's Check builds and Update now, scoped to Backstage alone
-(`AppsTab(check_own_builds=True)`), since a Tools-only app has no launchpad tile to be
-rebuilt from. A scoped check says which apps it looked at and never reports
-"every app", which only the launchpad's all-apps report can claim.
+From 2026-09-27 to 2026-10-14 Backstage was launched from its own card at the end of
+Tools and nowhere else, by the user's choice. Commit 31dbb9d moved its entry in
+`lab_hub/apps.toml` from `tools_only` to `suites`, so it is now an Apps tile, is in the
+launchpad's Check builds, and is listed in the menu bar (`MENU_BAR_APPS` is
+`suites + backup_sync + utilities`).
+
+What is left of the old placement: the `tools_only` group still exists and is empty;
+the Backstage page (`MainWindow.backstage_tab`, `AppsTab(check_own_builds=True)` over
+`TOOLS_ONLY_APPS`) is still added to the Tools stack, now with no card and no tile
+pointing at it; and `tests/test_registry.py`, `test_tab_groups.py`, `test_tray.py`
+and `test_tools_tab.py` still assert Backstage is Tools-only, so they are expected to
+fail until they are updated (see TODO). A scoped Check build says which apps it looked
+at and never reports "every app", which only the launchpad's all-apps report can claim.
 
 ### Settings
 Only the lab folder, and only because it cannot always be inferred: launching an
@@ -471,7 +487,8 @@ Dashboards tab finds its catalog one folder up from it. Blank means auto-detect
 ## Adding an app
 
 The registered apps live in `lab_hub/apps.toml`, not in code: four groups
-(`suites`, `backup_sync`, `utilities`, `tools_only`) of `ExternalApp` fields.
+(`suites`, `backup_sync`, `utilities`, `tools_only`) of `ExternalApp` fields. Today
+`suites` holds six apps, `backup_sync` two, `utilities` one and `tools_only` none.
 Add an entry and press **Refresh** (Cmd+R) — the tiles and the menu bar are
 rebuilt, no rebuild of Lab Hub needed. The installed app reads the file from
 its own checkout (`<lab folder>/lab_hub/lab_hub/apps.toml`) when it is there and
@@ -525,6 +542,26 @@ which macOS reads as "yes, terminate". `MainWindow.quit()` never goes through
 this event at all: it calls `QApplication.quit()`, which ends the event loop
 directly. A test runs a real event loop, with a failsafe timer, to prove that
 still works — the failure mode being guarded against is an app nobody can quit.
+
+**Closing reaches AppKit even when Qt thinks the window is already gone.** After a
+long run across sleep and display changes, Qt can report `isVisible()` False while
+macOS still draws the window: blank, never repainted, and the red button does nothing,
+because hiding a window Qt believes hidden is a no-op. The hide path in
+`ui/main_window.py` therefore also calls `dock.order_out(winId)`, which sends
+`orderOut:` to the `NSWindow` holding Qt's native view. It does nothing unless the
+platform is `cocoa` (under offscreen a `winId` is a plain integer, and messaging it
+would segfault). `tests/test_window_lifecycle.py` covers the ghost case and the
+refusal. This is uncommitted work on the `fix/close-ghost-window` branch as of
+2026-10-19.
+
+**A guard against an AppKit crash in the menu bar.** On macOS 27, opening a menu bar
+item's menu can abort a Qt app inside `-[NSEvent clickCount]`. `ui/appkit_guard.py`
+swaps that one method for one that answers 0 for non-mouse events and calls the
+original otherwise; `tests/test_appkit_guard.py` proves it. This file is the original,
+and six other apps carry byte-identical copies: SONAR, Imprint, Sentinel, Provisio,
+git_autosync (the sixth, 2026-10-14) and Backup Control Center (the seventh,
+2026-10-14). Change one and change all seven; delete them together when Qt ships a
+fixed cocoa plugin.
 
 When **Open Lab Hub at login** is enabled, Lab Hub starts hidden in the menu bar
 and quietly starts Backup Control Center and git_autosync the same way. After
@@ -604,6 +641,14 @@ suppressed.
       tools/images.py    resizing, renaming, moving small files aside
       tools/video.py     video format and size conversion (ffmpeg)
     ui/                  the only package that imports PySide6
+      main_window.py     the window, sidebar pages, quit guard, hide path
+      sidebar.py         the left-hand navigation
+      theme.py           Graphite and Paper, the only place colours live
+      apps_tab.py        app tiles, Check builds
+      tools_tab.py       the All tools overview
+      swipe.py           trackpad swipes between pages
+      dock.py            Dock icon policy and orderOut:, via ctypes
+      appkit_guard.py    the macOS 27 clickCount guard (seven copies)
       widgets.py         folder field, run/log panel
       tiles.py           Tile, TilePage and the Refreshable interface
       worker.py          runs any tool off the GUI thread
@@ -613,7 +658,10 @@ suppressed.
       web_open.py        opens a web app once its server answers
     tests/               pytest, offscreen — see Tests below
     assets/make_icon.py  regenerates icon.icns and the menu bar PNGs
-    docs/                reserved for future documentation; currently empty
+    AGENTS.md            the engineering process agents follow here
+    docs/company/        app-context.md (skeleton) and tooling/ templates
+    docs/playbooks/      one practice file per agent role
+    docs/specs/, adr/, audit/   empty so far
 
 The tools take a `Reporter` rather than printing, which is what lets the same
 function back both the GUI and a shell call. `ui/worker.py` supplies a Reporter
@@ -675,6 +723,26 @@ It also fails a build with **no TLS backend**: the Websites tab's checks need
 Qt's `tls` plugin, which a bundle has only if PyInstaller collected it, and
 without one every site would read *Unreachable* — which looks like the sites'
 fault. The dashboard catalog and the registered sites are listed, never fatal.
+
+## Engineering process
+
+Since 2026-10-13 (01268a4, "Adopt Foundry v5") this repo carries the software
+company's process. `AGENTS.md` sets the pipeline (define, design, architect, plan,
+build, review, verify, secure, document, release, with owner gates), the definition
+of done and the rules for agents; `.claude/agents/` and `.claude/commands/` hold the
+role agents and `/ship-feature`, `/audit`, `/harden` and `/radar-check`. Each role
+reads `docs/playbooks/<role>.md`, which are refreshed from the company, not edited
+here.
+
+`docs/company/app-context.md` is the one app-specific file the agents read. It is
+still the unfilled skeleton, so nothing in it is true of Lab Hub yet.
+`docs/company/tooling/` holds the machine-checked gates as templates:
+`log_activity.py` (appends a phase event to `docs/company/activity.jsonl` for the
+Foundry dashboard), `ratchet.py` (fails when a lint or type count rises above
+`baseline.json`), `common/` (gitleaks, dependabot, a pre-commit hook),
+`python/quality.yml` and `ruff.toml`, and `node/quality.yml` (not used by this
+Python app). None is wired in yet: there is no `.github/`, no `baseline.json` and no
+active hook until `/harden` is run and the owner turns them on.
 
 ## What this does not do
 

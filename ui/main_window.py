@@ -437,6 +437,10 @@ class MainWindow(QMainWindow):
         """Hide and timestamp it so macOS's activation echo cannot reopen us."""
         self._hidden_at = time.monotonic()
         self.hide()
+        # Belt and braces: if Qt already thought the window was hidden, hide()
+        # did nothing and macOS may still be drawing it. Tell AppKit directly.
+        if self.testAttribute(Qt.WidgetAttribute.WA_WState_Created):
+            dock.order_out(int(self.winId()))
         # Nothing left on screen, so nothing for the Dock to point at. The menu
         # bar item is unaffected: a status item does not depend on the
         # activation policy, which is what makes this switch safe.

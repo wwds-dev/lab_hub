@@ -1244,7 +1244,7 @@ def test_an_app_outside_the_version_scheme_is_not_told_to_rebuild(tmp_path, monk
 def test_the_new_apps_are_registered_as_umbrella_apps():
     keys = [app.key for app in launcher.SUITES]
 
-    assert keys[-2:] == ["provisio", "syndustryx"]
+    assert {"provisio", "syndustryx"} <= set(keys)
     provisio = next(app for app in launcher.SUITES if app.key == "provisio")
     syndustryx = next(app for app in launcher.SUITES if app.key == "syndustryx")
     # A native app since 2026-10-07: its own window and server, not a browser tab.

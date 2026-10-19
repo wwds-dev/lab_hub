@@ -31,11 +31,11 @@ def test_the_shipped_list_keeps_every_registered_app_as_it_was():
     found = registry.load(registry.PACKAGE_REGISTRY)
 
     assert [a.key for a in found.suites] == [
-        "sentinel", "imprint", "sonar", "provisio", "syndustryx",
+        "sentinel", "imprint", "sonar", "provisio", "syndustryx", "backstage",
     ]
     assert [a.key for a in found.backup_sync] == ["backup_manager", "git_autosync"]
     assert [a.key for a in found.utilities] == ["unblock_tracker"]
-    assert [a.key for a in found.tools_only] == ["backstage"]
+    assert [a.key for a in found.tools_only] == []
     sonar = next(a for a in found.suites if a.key == "sonar")
     assert sonar.service == "Background engine"
     syndustryx = next(a for a in found.suites if a.key == "syndustryx")

@@ -38,16 +38,13 @@ def test_tools_include_built_in_tools_and_unblock_tracker(window):
     assert _keys(window.unblock_tracker_tab) == ["unblock_tracker"]
 
 
-def test_backstage_lives_only_at_the_end_of_tools(window):
-    """Backstage is a standalone app kept off the front page (the user's call,
-    2026-09-27): its own card at the end of Tools, no Apps tile, no menu bar
-    entry."""
-    assert _keys(window.backstage_tab) == ["backstage"]
-    # Rebuild from here, like the launchpad apps.
-    assert window.backstage_tab.check_button.text() == "Check build"
-    assert "backstage" not in _keys(window.apps_tab)
-    assert "backstage" not in {app.key for app in launcher.MENU_BAR_APPS}
-    assert "backstage" in {app.key for app in launcher.APPS}
+def test_backstage_is_a_suite_now(window):
+    """Backstage moved from the end of Tools to the Apps tab (31dbb9d, the
+    user's call), reversing the 2026-09-27 decision to keep it off the front
+    page. As a suite it is on the menu bar too, and no longer a Tools card."""
+    assert "backstage" in _keys(window.apps_tab)
+    assert "backstage" in {app.key for app in launcher.MENU_BAR_APPS}
+    assert _keys(window.backstage_tab) == []
 
 
 def test_the_apps_tab_lists_the_suites(window):
@@ -58,7 +55,7 @@ def test_the_apps_tab_lists_the_suites(window):
     Antfarm workstation) joined on 2026-10-07.
     """
     assert _keys(window.apps_tab) == [
-        "sentinel", "imprint", "sonar", "provisio", "syndustryx",
+        "sentinel", "imprint", "sonar", "provisio", "syndustryx", "backstage",
     ]
 
 
@@ -77,7 +74,7 @@ def test_websites_and_dashboards_have_their_own_tabs(window):
         site.name for site in sites.SITES
     ]
     assert {site.name for site in sites.SITES} == {
-        "altmerch.store", "bookadatewithme.com",
+        "altmerch.store", "bookadatewithme.com", "WebWealth Digital Services",
     }
     # The same features as the app pages: a state on every tile, re-checked
     # by the window's Refresh rather than a button of their own.

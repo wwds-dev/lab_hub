@@ -153,3 +153,35 @@ def show_in_dock() -> bool:
 
 def hide_from_dock() -> bool:
     return set_policy(ACCESSORY)
+
+
+def order_out(view_id: int) -> bool:
+    """Take the NSWindow holding a Qt native view off screen, whatever Qt thinks.
+
+    Qt can lose track of its own window: after a long run across sleep and
+    display changes, `isVisible()` was False while macOS still drew the window
+    — blank, never repainted, and the red button did nothing, because hiding a
+    window Qt already believes hidden is a no-op. `orderOut:` asks AppKit
+    directly, and is harmless on a window that really is gone.
+    """
+    if sys.platform != "darwin" or not view_id:
+        return False
+    # Only under the cocoa platform is a winId an NSView. Offscreen (the tests)
+    # hands out plain integers, and messaging one of those segfaults.
+    from PySide6.QtGui import QGuiApplication
+
+    if QGuiApplication.platformName() != "cocoa":
+        return False
+    objc = _runtime()
+    if objc is None:
+        return False
+
+    send = ctypes.cast(objc.objc_msgSend, ctypes.CFUNCTYPE(_VOID, _VOID, _VOID))
+    window = send(_VOID(view_id), objc.sel_registerName(b"window"))
+    if not window:
+        return False
+    order = ctypes.cast(
+        objc.objc_msgSend, ctypes.CFUNCTYPE(None, _VOID, _VOID, _VOID)
+    )
+    order(window, objc.sel_registerName(b"orderOut:"), None)
+    return True

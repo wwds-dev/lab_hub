@@ -50,8 +50,8 @@ def test_the_menu_lists_only_umbrella_apps(menu_bar_item):
     labels = {a.text() for a in menu_bar_item._menu.actions() if a.text()}
 
     assert not (labels & {"VPN Agent", "Bug Spray", "vidforge"})
-    # Backstage is reached from the Tools tab only, by choice.
-    assert "Backstage" not in labels
+    # Backstage became a suite (31dbb9d), so it has an entry like the others.
+    assert "Backstage" in labels
 
 
 def test_the_menu_has_the_websites(menu_bar_item):

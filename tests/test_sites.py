@@ -60,6 +60,10 @@ def test_a_home_relative_source_is_expanded(tmp_path, monkeypatch):
 
 def test_the_registered_sites():
     assert [site.name for site in sites.SITES] == [
-        "altmerch.store", "bookadatewithme.com",
+        "altmerch.store", "bookadatewithme.com", "WebWealth Digital Services",
     ]
-    assert all(site.url.startswith("https://") for site in sites.SITES)
+    # WWDS is local files until it is deployed; everything else is live.
+    assert all(
+        site.url.startswith("https://") or site.host == "Local files"
+        for site in sites.SITES
+    )

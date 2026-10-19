@@ -48,6 +48,8 @@
   inside `QApplication()` before any app reaches its own code. No checkout or no venv is
   reported as skipped, never as a pass.
 - [x] `P3` `design` `@ai` Apps tab: group by category rather than one flat list, now that there are twelve projects — addressed by splitting into three tabs (Apps / Backup & Sync / Tools) instead of grouping within one tab; the Apps tab itself is back down to 5 items (`PRIMARY_APPS`).
+- [x] `P1` `bug` `@ai` **Red button did nothing on a blank window** (2026-10-19). After a long run (since 05:13, through sleep and two displays) Qt believed the window hidden while macOS still drew it, blank; `hide()` on an already-hidden widget is a no-op, so closing never reached AppKit. `_hide_now` now also sends `orderOut:` to the NSWindow (`dock.order_out`, cocoa platform only — offscreen winIds are not NSViews and segfault). Root trigger not reproduced; the stuck state was, and is the regression in `tests/test_window_lifecycle.py`.
+- [ ] `P3` `debt` `@ai` `backstage_tab` in `ui/main_window.py` is now an empty, unreachable page since Backstage became a suite (31dbb9d). Remove it, or drop `[[tools_only]]` support if nothing else will use it.
 - [x] `P1` `bug` `@ai` Red button quit instead of hiding — and the fix for that re-showed the window in the same breath as closing it. Both shipped, with `tests/test_window_lifecycle.py` as the regression.
 - [x] `P2` `infra` `@ai` Config written to `~/Library/Application Support/Lab Hub/`, never inside the bundle
 - [x] `P2` `feature` `@ai` **Narrator Library** — a second sub-tab browsing the generated ebook catalogue (`ebook_catalog.csv` from Codex's `outputs/`), with per-row Read/Queue checkboxes persisted to `narrator_library_state.json`, a Narrated-books filter (matched against existing audio files, not tracked separately), and one click to load a book into Convert. `ui/narrator_library.py`, `tests/test_narrator_tab.py`.
@@ -403,14 +405,23 @@ copies be one.
   Sentinel AI is archived but fully pushed to GitHub.
 - [ ] `P3` `feature` `@ai` Global search across every project's docs from the hub
 - [ ] `P3` `feature` `@ai` Per-app last-launched timestamp and crash count
-- [ ] `P2` `design` `@ai` Load the app registry from a file rather than compiling it into
+- [x] `P2` `design` `@ai` Load the app registry from a file rather than compiling it into
   the bundle, so renaming a launched app does not need a Lab Hub rebuild to stop the tile
-  reading *Source only*. SUGGESTIONS #11.
+  reading *Source only*. SUGGESTIONS #11. Shipped 2026-10-12 as `lab_hub/apps.toml`, read
+  from the checkout and re-read on Refresh (fe23a21).
 - [x] `P2` `bug` `@ai` **The Check builds report dialog could not be dismissed.** A
   `QMessageBox` whose only buttons are `ActionRole` (Copy commands / Copy and open
   Terminal) has nothing to map the red close button or Escape onto, so both were dead
   ends. Added an explicit `Close` button (`RejectRole`, also the escape/default button).
   `tests/test_apps_tab.py::test_build_check_dialog_can_be_dismissed`.
+- [ ] `P1` `testing` `@ai` Update the tests that still pin Backstage as Tools-only: `test_registry.py` (suites list, `tools_only == ["backstage"]`), `test_tab_groups.py`, `test_tray.py`, `test_tools_tab.py`. 31dbb9d moved it to `suites`; by reading, these now fail (suite not run 2026-10-19).
+- [ ] `P2` `feature` `@me` Confirm Backstage on the Apps tab and in the menu bar is wanted: 31dbb9d reverses the 2026-09-27 choice to keep it Tools-only.
+- [ ] `P3` `design` `@ai` Remove the leftover Backstage page from the Tools stack (`MainWindow.backstage_tab`, now empty) and the stale Backstage mentions in `ui/tools_tab.py` hint/docstring and `ui/apps_tab.py:584`.
+- [ ] `P2` `bug` `@ai` WWDS Websites tile: a `file://` URL has no HTTP status, so `classify()` reports *Unreachable*; show *Local file* / *File missing* instead, and drop the hard-coded `/Users/as` path.
+- [ ] `P2` `infra` `@me` Review and commit the uncommitted `dock.order_out` ghost-window fix on branch `fix/close-ghost-window` (`ui/dock.py`, `ui/main_window.py`, `tests/test_window_lifecycle.py`).
+- [ ] `P3` `infra` `@ai` Rebuild and reinstall Lab Hub: the bundle is stamped from bbf1077 (v2.094), and `sites.py` (WWDS) is compiled in, unlike `apps.toml`.
+- [ ] `P2` `docs` `@ai` Fill `docs/company/app-context.md` (still the Foundry skeleton) from the README; the owner signs off the Invariants.
+- [ ] `P3` `infra` `@ai` Run `/harden lab_hub` to wire CI, ruff ratchet, gitleaks and dependabot from `docs/company/tooling/`; branch protection and the git hook stay with the owner.
 
 ## Out of scope, deliberately
 

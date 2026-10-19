@@ -186,6 +186,32 @@ def test_a_normal_window_still_hides_immediately(window, fake_tray):
     assert not window.isVisible()
 
 
+def test_close_orders_the_native_window_out_even_if_qt_thinks_it_hidden(
+    window, fake_tray, monkeypatch
+):
+    """Found by hand: Qt said hidden, macOS still drew a blank window, and the
+    red button did nothing. Closing must reach AppKit regardless of Qt's view."""
+    ordered = []
+    monkeypatch.setattr("ui.main_window.dock.order_out", ordered.append)
+    window.tray = fake_tray
+    window.show()
+    window.hide()  # Qt now believes it is gone; the ghost case
+
+    window.close()
+
+    assert ordered == [int(window.winId())]
+
+
+def test_order_out_refuses_ids_that_are_not_native_views(window, qapp):
+    """Under offscreen a winId is a plain integer; messaging it would segfault."""
+    from ui import dock
+
+    window.show()
+    assert not dock.order_out(0)
+    if qapp.platformName() != "cocoa":
+        assert not dock.order_out(int(window.winId()))
+
+
 # ----------------------------------------------------------------------
 # The Dock icon follows the window, not the process
 # ----------------------------------------------------------------------

@@ -10,8 +10,6 @@ Status: `IDEA` · `CONSIDERING` · `PLANNED` · `DONE` · `REJECTED`
 | 4 | Documentation search across every project from the hub | feature | L | CONSIDERING |
 | 7 | Per-app last-launched timestamp and crash count | feature | M | IDEA |
 | 8 | Drag-to-reorder the app list | design | S | IDEA |
-| 10 | Warn when a tile's bundle is newer or older than its checkout | feature | M | IDEA — would have caught `Create & Publish.app` still launching after the rename |
-| 11 | Read the app registry from a file instead of compiling it into the bundle | design | M | IDEA — renaming a launched app currently degrades its tile to *Source only* until Lab Hub itself is rebuilt, and the fault looks like it belongs to the renamed app. Twice now: `Create & Publish` → `Imprint`, then `Sentinel Fork` → `Sentinel`, and the SYNDUSTRYX folder/registry rename |
 | 12 | Websites tab: certificate expiry and response-time trend per site | feature | S | IDEA — the check already holds the reply; a certificate within 14 days of expiry is the next thing that takes a site down unnoticed |
 | 13 | Read the Websites list from a catalog beside `dashboard_catalog.json`, the way the Dashboards tab already does | design | S | IDEA — a dashboard added to the catalog appears with no rebuild; a site still needs one, the same trap as #11 on a smaller scale |
 
@@ -19,6 +17,8 @@ Status: `IDEA` · `CONSIDERING` · `PLANNED` · `DONE` · `REJECTED`
 
 | Suggestion | When |
 |---|---|
+| Read the app registry from a file instead of compiling it into the bundle (#11) — `lab_hub/apps.toml`, read from the checkout and re-read on Refresh (Cmd+R) | Oct 2026 |
+| Warn when a tile's bundle is behind its checkout (#10) — the tile reads `v2.104 · 5 behind`, and Check builds reports behind / uncommitted / unknown per app | Oct 2026 |
 | Trackpad swipe between tabs — two-finger scroll and three-finger native gesture, innermost tabs first, no wrap, yields to a sideways-scrolling table; a vertical swipe changes page unless the page itself scrolls | Oct 2026 |
 | Pre-flight health check per app — `launcher.readiness()`; a checkout with no interpreter, or a bundle that lost its executable, disables Launch and says why on the tile | Sep 2026 |
 | Exit code and captured output shown when a launched child dies immediately — a source run has both, a bundle has neither so the tile waits at *Starting…* then turns to *Did not start* via the `log show` predicate | Sep 2026 |

@@ -19,7 +19,7 @@ def test_tools_open_on_the_tiles(window):
 def test_every_tool_has_a_tile_in_tab_order(window):
     assert _names(window) == ["Convert Textfiles", "Narrator", "Prepare Images", "Convert Video"]
     assert [card.app.key for card in window.tools_overview.app_cards] == [
-        "unblock_tracker", "backstage",
+        "unblock_tracker",
     ]
     # The standalone tools get the Apps tab's own tile, so Launch, Running
     # and the version behave exactly as they do there.
@@ -67,5 +67,6 @@ def test_the_tile_page_is_rechecked_by_refresh(window):
 
 
 def test_no_tool_app_gains_a_menu_bar_entry(window):
-    """Backstage stays off the menu bar; a tile here is not a new door there."""
-    assert "backstage" not in {app.key for app in launcher.MENU_BAR_APPS}
+    """A Tools-only app stays off the menu bar; a tile here is not a new door there."""
+    menu_bar = {app.key for app in launcher.MENU_BAR_APPS}
+    assert not menu_bar & {app.key for app in launcher.TOOLS_ONLY_APPS}

@@ -31,7 +31,7 @@ def test_a_check_marks_every_tile_then_reports_each(qapp, tmp_path, no_site_chec
 
     tab.check_all()
 
-    assert no_site_checks[-2:] == [site.key for site in sites.SITES]
+    assert no_site_checks[-len(sites.SITES):] == [site.key for site in sites.SITES]
     assert all(card.state.text() == "Checking…" for card in tab.cards)
 
     tab._on_checked("bookadatewithme", sites.classify(sites.SITES[1], 404, None, 0.2))
