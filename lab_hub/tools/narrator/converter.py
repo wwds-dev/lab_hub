@@ -9,6 +9,7 @@ import argparse
 import subprocess
 import hashlib
 import threading
+from datetime import date
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -29,9 +30,6 @@ BOOKS_DIR = BASE_DIR / "books"
 # The UI supplies an output folder. Keep the CLI fallback portable.
 OUTPUT_ROOT = Path.cwd() / "Narrator Output"
 
-TTS_PROVIDER = "openai"
-TTS_MODEL = "gpt-4o-mini-tts"
-TTS_VOICE = "alloy"
 TTS_INSTRUCTIONS = None
 
 # Narration routes. `max_chars` caps a chunk's characters on top of the token
@@ -42,8 +40,12 @@ TTS_INSTRUCTIONS = None
 # exists at all. Pricing lives in the host app, not here: this module is
 # shared and a price table in two repositories would drift.
 TTS_PROVIDERS = {
+    # `retires` is the ISO date the provider removes the route's model. From
+    # that day default_tts_provider() skips it; an explicit --provider still
+    # works, and fails at the provider if the model is really gone.
     "openai": {"model": "gpt-4o-mini-tts", "voice": "alloy",
-               "max_chars": None, "keys": ("OPENAI_API_KEY",)},
+               "max_chars": None, "keys": ("OPENAI_API_KEY",),
+               "retires": "2027-01-06"},
     # eleven_multilingual_v2 is the model ElevenLabs documents as most stable
     # on long-form; 10,000 characters per request, so 9,000 leaves headroom.
     # The default voice is the premade "Rachel".
@@ -58,6 +60,24 @@ TTS_PROVIDERS = {
     "gemini": {"model": "gemini-3.8-flash-tts", "voice": "Kore",
                "max_chars": 6000, "keys": ("GEMINI_API_KEY", "GOOGLE_API_KEY")},
 }
+# Which route runs when none is named, best first. A route past its `retires`
+# date is skipped, so the default moves off OpenAI by itself on 2027-01-06
+# instead of failing every unattended run that day.
+DEFAULT_ROUTE_ORDER = ("openai", "gemini", "elevenlabs")
+
+
+def default_tts_provider(today: str | None = None) -> str:
+    today = today or date.today().isoformat()
+    for name in DEFAULT_ROUTE_ORDER:
+        retires = TTS_PROVIDERS[name].get("retires")
+        if not retires or today < retires:
+            return name
+    raise RuntimeError("Every narration route has retired.")
+
+
+TTS_PROVIDER = default_tts_provider()
+TTS_MODEL = TTS_PROVIDERS[TTS_PROVIDER]["model"]
+TTS_VOICE = TTS_PROVIDERS[TTS_PROVIDER]["voice"]
 # What a manifest written before routes existed was narrated with.
 LEGACY_TTS_PROVIDER = "openai"
 ELEVENLABS_TTS_URL = ("https://api.elevenlabs.io/v1/text-to-speech/{voice}"

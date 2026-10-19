@@ -414,6 +414,9 @@ books into Convert.
 speech with OpenAI in one of ten voices, and joins the chunks into a single
 MP3. Chunk size (in tokens) is adjustable; interrupted books keep the chunks
 they already finished and resume on the next run rather than starting over.
+OpenAI removes the model it uses (`gpt-4o-mini-tts`) on 2027-01-06; the converter
+switches its default route to Gemini from that day, which needs `google-genai`
+(not installed here) — see TODO.
 Requires `OPENAI_API_KEY` (Lab Hub's `.env` file or the environment) and
 `ffmpeg` on PATH — the tab checks both before it will start and explains
 which is missing. Runs as a separate, stoppable worker process (`QProcess`):
