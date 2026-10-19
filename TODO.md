@@ -8,6 +8,7 @@
 
 ## v2 — complete (2026-09-14)
 
+- [x] `P1` `bug` `@ai` **Narrator converter knows OpenAI retires `gpt-4o-mini-tts` on 2027-01-06 (2026-10-19).** The vendored converter (copy of Imprint's) gained a `retires` date on the OpenAI route and `default_tts_provider()`: until that day the default stays OpenAI, which the Narrator tab uses; from it the default is Gemini, which this app's Python does not support (no google-genai), so the tab will say the route cannot run — decide before the date whether to add google-genai here or point the tab at an explicit route. Imprint's `test_converter_drift.py` passes against it. `tests/test_narrator_tab.py`.
 - [x] `P0` `bug` `@ai` **A running Sentinel reported as *Did not start*, twice.** The
   first time it was `running_markers()` matching the bundle alone, when Sentinel's stub
   execs the project's python and exits. The second (2026-10-07) reached the identical

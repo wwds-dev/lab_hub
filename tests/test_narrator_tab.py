@@ -53,3 +53,11 @@ def test_library_selection_moves_book_into_converter(qapp, tmp_path, monkeypatch
     tab._use_library_book(str(book))
     assert tab.input_edit.text() == str(book)
     assert tab.sections.currentIndex() == 0
+
+
+def test_converter_default_route_leaves_openai_when_its_model_retires():
+    """OpenAI removes gpt-4o-mini-tts on 2027-01-06; the default must not follow it (Phase 0)."""
+    from lab_hub.tools.narrator import converter
+    assert converter.TTS_PROVIDERS["openai"]["retires"] == "2027-01-06"
+    assert converter.default_tts_provider("2027-01-05") == "openai"
+    assert converter.default_tts_provider("2027-01-06") == "gemini"
