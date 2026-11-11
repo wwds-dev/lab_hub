@@ -1,5 +1,3 @@
-<!-- Owner: enable GitHub's private vulnerability reporting for wwds-dev/lab_hub (Settings > Code security > Private vulnerability reporting); the form linked below does not work until then. Delete this comment afterwards. -->
-
 # Security
 
 Lab Hub is free, open-source software maintained by one person. It starts other programs on your Mac, can install a login item and reads configuration files from the workspace,
