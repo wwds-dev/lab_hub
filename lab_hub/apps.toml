@@ -59,7 +59,7 @@ entry = "main.py"
 summary = "Income-protection product design and review, with a Demo/Real workspace switch. Headroom, its solvency-filings engine, lives inside it."
 
 # SYNDUSTRYX: renamed source, bundle and Lab registration together. Source
-# remains in the Codex workspace, linked as active/syndustryx. Only its built
+# lives in active/syndustryx (moved from the Codex workspace 2026-11-10). Only its built
 # bundle in dist/ is launched: server.py is its engine without the window.
 [[suites]]
 key = "syndustryx"
