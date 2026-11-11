@@ -59,15 +59,17 @@ entry = "main.py"
 summary = "Income-protection product design and review, with a Demo/Real workspace switch. Headroom, its solvency-filings engine, lives inside it."
 
 # SYNDUSTRYX: renamed source, bundle and Lab registration together. Source
-# lives in active/syndustryx (moved from the Codex workspace 2026-11-10). Only its built
-# bundle in dist/ is launched: server.py is its engine without the window.
+# lives in active/syndustryx (moved from the Codex workspace 2026-11-10).
+# server.py is its engine without the window, so the checkout is never run.
+# No bundle_dir (owner decision 2026-11-11): dist/ holds the unqualified build72,
+# which loses Keychain access, and Lab Hub must not launch it against real data.
+# The accepted build71 lives at ~/Downloads/SYNDUSTRYX.app; open it from there.
 [[suites]]
 key = "syndustryx"
 name = "SYNDUSTRYX"
 project = "syndustryx"
 entry = "server.py"
 summary = "An autonomous, money-generating agent company: AI agents run the fulfilment engine, storefront and departments, with the owner as the only approver."
-bundle_dir = "dist"
 runs_from_source = false
 
 [[suites]]

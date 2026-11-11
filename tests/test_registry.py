@@ -39,7 +39,7 @@ def test_the_shipped_list_keeps_every_registered_app_as_it_was():
     sonar = next(a for a in found.suites if a.key == "sonar")
     assert sonar.service == "Background engine"
     syndustryx = next(a for a in found.suites if a.key == "syndustryx")
-    assert syndustryx.bundle_dir == "dist" and syndustryx.runs_from_source is False
+    assert syndustryx.bundle_dir is None and syndustryx.runs_from_source is False
     autosync = found.backup_sync[1]
     assert autosync.entry == "packaging/entry_point.py"
     assert found.menu_bar_apps == found.suites + found.backup_sync + found.utilities

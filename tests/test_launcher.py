@@ -1250,4 +1250,4 @@ def test_the_new_apps_are_registered_as_umbrella_apps():
     # A native app since 2026-10-07: its own window and server, not a browser tab.
     assert not provisio.served and provisio.runtime == "python"
     assert provisio.entry == "main.py"
-    assert not syndustryx.runs_from_source and syndustryx.bundle_dir == "dist"
+    assert not syndustryx.runs_from_source and syndustryx.bundle_dir is None
