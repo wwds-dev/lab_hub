@@ -421,8 +421,8 @@ copies be one.
 - [ ] `P2` `bug` `@ai` WWDS Websites tile: a `file://` URL has no HTTP status, so `classify()` reports *Unreachable*; show *Local file* / *File missing* instead, and drop the hard-coded `/Users/as` path.
 - [ ] `P2` `infra` `@me` Review and commit the uncommitted `dock.order_out` ghost-window fix on branch `fix/close-ghost-window` (`ui/dock.py`, `ui/main_window.py`, `tests/test_window_lifecycle.py`).
 - [ ] `P3` `infra` `@ai` Rebuild and reinstall Lab Hub: the bundle is stamped from bbf1077 (v2.094), and `sites.py` (WWDS) is compiled in, unlike `apps.toml`.
-- [ ] `P2` `docs` `@ai` Fill `docs/company/app-context.md` (still the Foundry skeleton) from the README; the owner signs off the Invariants.
-- [ ] `P3` `infra` `@ai` Run `/harden lab_hub` to wire CI, ruff ratchet, gitleaks and dependabot from `docs/company/tooling/`; branch protection and the git hook stay with the owner.
+- [ ] `P2` `docs` `@ai` Fill `docs/foundry/app-context.md` (still the Foundry skeleton) from the README; the owner signs off the Invariants.
+- [ ] `P3` `infra` `@ai` Run `/harden lab_hub` to wire CI, ruff ratchet, gitleaks and dependabot from `docs/foundry/tooling/`; branch protection and the git hook stay with the owner.
 
 ## Out of scope, deliberately
 

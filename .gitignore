@@ -40,3 +40,6 @@ dist.noindex/
 # iconutil's input folder — a pure intermediate. icon.icns is the committed
 # asset; make_icon.py regenerates both.
 assets/icon.iconset/
+
+# The legal pack lives in the Foundry HQ (private repo); this path is a link to it.
+/docs/legal

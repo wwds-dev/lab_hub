@@ -662,7 +662,7 @@ suppressed.
     tests/               pytest, offscreen — see Tests below
     assets/make_icon.py  regenerates icon.icns and the menu bar PNGs
     AGENTS.md            the engineering process agents follow here
-    docs/company/        app-context.md (skeleton) and tooling/ templates
+    docs/foundry/        app-context.md (skeleton) and tooling/ templates
     docs/playbooks/      one practice file per agent role
     docs/specs/, adr/, audit/   empty so far
 
@@ -729,18 +729,18 @@ fault. The dashboard catalog and the registered sites are listed, never fatal.
 
 ## Engineering process
 
-Since 2026-10-13 (01268a4, "Adopt Foundry v5") this repo carries the software
-company's process. `AGENTS.md` sets the pipeline (define, design, architect, plan,
+Since 2026-10-13 (01268a4, "Adopt Foundry v5") this repo carries Foundry's
+process. `AGENTS.md` sets the pipeline (define, design, architect, plan,
 build, review, verify, secure, document, release, with owner gates), the definition
 of done and the rules for agents; `.claude/agents/` and `.claude/commands/` hold the
 role agents and `/ship-feature`, `/audit`, `/harden` and `/radar-check`. Each role
-reads `docs/playbooks/<role>.md`, which are refreshed from the company, not edited
+reads `docs/playbooks/<role>.md`, which are refreshed from Foundry, not edited
 here.
 
-`docs/company/app-context.md` is the one app-specific file the agents read. It is
+`docs/foundry/app-context.md` is the one app-specific file the agents read. It is
 still the unfilled skeleton, so nothing in it is true of Lab Hub yet.
-`docs/company/tooling/` holds the machine-checked gates as templates:
-`log_activity.py` (appends a phase event to `docs/company/activity.jsonl` for the
+`docs/foundry/tooling/` holds the machine-checked gates as templates:
+`log_activity.py` (appends a phase event to `docs/foundry/activity.jsonl` for the
 Foundry dashboard), `ratchet.py` (fails when a lint or type count rises above
 `baseline.json`), `common/` (gitleaks, dependabot, a pre-commit hook),
 `python/quality.yml` and `ruff.toml`, and `node/quality.yml` (not used by this
