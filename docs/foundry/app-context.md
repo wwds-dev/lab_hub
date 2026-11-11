@@ -44,6 +44,20 @@ note, name check and sign-off.
 ## Invariants
 <things agents must never do or imply, e.g. "no real money", "no network calls", copy rules>
 
+## Models used
+Inventory from the code on 2026-11-11 (Foundry v9). Only the embedded **Narrator** tool (`lab_hub/tools/narrator/converter.py`, kept in
+step with Imprint's copy) calls models: text-to-speech, using the user's own keys from the
+environment or `.env`. Nothing else in Lab Hub calls a model.
+
+| Provider | Model | What data it receives | Local? | Where in the code |
+|---|---|---|---|---|
+| OpenAI | `gpt-4o-mini-tts`, voice `alloy` (`converter.py:46`); the route Lab Hub's Narrator tab uses; OpenAI retires it on 2027-01-06 | the book's text, chunk by chunk (an ebook the user chose) | no | client `converter.py:182` |
+| Google Gemini | `gemini-3.8-flash-tts`, voice `Kore` (`converter.py:60`) | the book's text, chunk by chunk | no | `converter.py:865`; Lab Hub does not install `google-genai`, so this route refuses cleanly here |
+| ElevenLabs | `eleven_multilingual_v2` (`converter.py:52`) | the book's text, chunk by chunk, plus up to 300 characters of neighbouring text | no | HTTP call `converter.py:839` |
+
+`tiktoken` (`requirements.txt`) counts tokens locally; it is not a model call. The book text is
+the user's own content; if it names real people, that text goes to the chosen provider.
+
 ## Domain specialist
 None. For a regulated or expert domain (money, insurance, health, law, ...), name the key
 (`finance`, `insurance-compliance`, ...) and list: the domain, the rules and standards that apply
