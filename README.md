@@ -249,6 +249,18 @@ count cannot see — it only moves on commit, so a bundle built from the last
 commit looks level while the source has since been edited), `unknown` (installed
 but carrying no stamp), and names the build script for anything out of date.
 
+**Check repos** (also on the launchpad) answers the neighbouring question: has
+the work *landed*? Each app tile carries an amber "N to land" badge when its repo
+has uncommitted files, unpushed commits, is behind or diverged, has local
+branches not merged into the default branch, or has a worktree with uncommitted
+work; the tooltip lists them. The data is `git_autosync`'s `hygiene.json`
+(refreshed by every autosync run, with a fetch), read as a file, so the tiles
+cost no git call. The button re-runs `git_autosync/scripts/hygiene.py` as a
+child process (local git only, no fetch, a few seconds, the window stays
+usable) and lists every repo that has work left, not only the ones with an app.
+Report only: it never commits, pushes or merges. `lab_hub/hygiene.py`,
+`tests/test_hygiene.py`.
+
 A launcher bundle is never out of date, and being dirty does not change that:
 it runs the source, so uncommitted edits are exactly what opens.
 

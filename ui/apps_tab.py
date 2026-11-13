@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from lab_hub import config, launcher
+from lab_hub import config, hygiene, launcher
 
 from . import theme
 from .tiles import (  # noqa: F401 - the layout constants are re-exported
@@ -115,6 +115,12 @@ class AppCard(Tile):
         self.version = QLabel()
         self.version.setObjectName("hint")
         self.header.insertWidget(1, self.version)
+
+        # Work not yet committed, pushed or merged: read from git_autosync's
+        # report, so it costs a file read and never a git call on this thread.
+        self.hygiene = QLabel()
+        self.hygiene.setObjectName("hint")
+        self.header.insertWidget(2, self.hygiene)
 
         self.launch_button = QPushButton("Launch")
         self.launch_button.setObjectName("primary")
@@ -219,6 +225,20 @@ class AppCard(Tile):
             )
         )
         self.restyle(self.version, "stateWarn" if found.stale else "hint")
+
+    def refresh_hygiene(self, row: hygiene.RepoRow | None) -> None:
+        """Say how much of this app's work has not landed yet, or nothing."""
+        if row is None or not row.badge:
+            self.hygiene.setText("")
+            self.hygiene.setToolTip("")
+            self.restyle(self.hygiene, "hint")
+            return
+        self.hygiene.setText(row.badge)
+        self.hygiene.setToolTip(
+            f"{self.app.name} ({row.branch or 'unknown branch'}): {row.detail}. "
+            "Commit, push or merge it, or press Check repos for the full list."
+        )
+        self.restyle(self.hygiene, "stateWarn")
 
     def _update_service(self, running: bool) -> None:
         """Report the background copy, for the apps that have one."""
@@ -569,6 +589,10 @@ class AppsTab(TilePage):
         # launchpad's question), otherwise only this tab's own.
         self._own_builds = check_own_builds and not check_builds
         self.check_button: QPushButton | None = None
+        self.repos_button: QPushButton | None = None
+        self._hygiene_proc: QProcess | None = None
+        self._hygiene_stamp: tuple[int, int] | None = None
+        self._hygiene_report: hygiene.Report | None = None
         # One button reports every registered app, and it is the launchpad's:
         # the question it answers — "am I opening the newest of everything?" —
         # is not per-tab, and a copy of it on every tab would be noise.
@@ -580,6 +604,13 @@ class AppsTab(TilePage):
             check.clicked.connect(self.show_build_report)
             self.buttons.addWidget(check)
             self.check_button = check
+            repos = QPushButton("Check repos")
+            repos.setToolTip(
+                "List every repo with work not yet committed, pushed or merged"
+            )
+            repos.clicked.connect(self.check_repos)
+            self.buttons.addWidget(repos)
+            self.repos_button = repos
         elif check_own_builds:
             # Backstage and the two sync companions have no launchpad tile, so
             # their own tab carries the same check and Update now — scoped to
@@ -758,8 +789,106 @@ class AppsTab(TilePage):
             card.refresh_version(lab_root)
         self.refresh()
 
+    def hygiene_report(self) -> hygiene.Report | None:
+        """The last repo-hygiene report, re-read only when its file changed."""
+        path = hygiene.report_path(self.settings.resolved_lab_root())
+        try:
+            info = path.stat()
+            stamp = (info.st_mtime_ns, info.st_size)
+        except OSError:
+            self._hygiene_stamp, self._hygiene_report = None, None
+            return None
+        if stamp != self._hygiene_stamp:
+            self._hygiene_stamp = stamp
+            self._hygiene_report = hygiene.load(path.parent.parent)
+        return self._hygiene_report
+
+    def _apply_hygiene(self) -> None:
+        lab_root = self.settings.resolved_lab_root()
+        report = self.hygiene_report()
+        for card in self.cards:
+            row = report.for_project(lab_root, card.app.project) if report else None
+            card.refresh_hygiene(row)
+
+    def check_repos(self) -> None:
+        """Recompute the report (local git only, no fetch), then show it.
+
+        Runs as a child process and returns at once: ten-odd repos with their
+        worktrees take a few seconds, and the window must not wait for them.
+        """
+        if self._hygiene_proc is not None:
+            return
+        argv = hygiene.command(self.settings.resolved_lab_root())
+        if argv is None:
+            self.show_repo_report(note="git_autosync's hygiene script was not found.")
+            return
+        if self.repos_button is not None:
+            self.repos_button.setEnabled(False)
+            self.repos_button.setText("Checking…")
+        proc = QProcess(self)
+        env = QProcessEnvironment()
+        for name, value in launcher.child_env().items():
+            env.insert(name, value)
+        proc.setProcessEnvironment(env)
+        # The report goes to its file; an unread pipe would stall the child.
+        proc.setStandardOutputFile(QProcess.nullDevice())
+        self._hygiene_proc = proc
+        proc.finished.connect(self._repos_checked)
+        proc.errorOccurred.connect(lambda _e: self._repos_checked(-1, None))
+        proc.start(argv[0], argv[1:])
+
+    def _repos_checked(self, code: int, _status) -> None:
+        proc, self._hygiene_proc = self._hygiene_proc, None
+        if proc is None:
+            return  # errorOccurred and finished can both fire
+        if self.repos_button is not None:
+            self.repos_button.setEnabled(True)
+            self.repos_button.setText("Check repos")
+        proc.deleteLater()
+        self._apply_hygiene()
+        self.show_repo_report(
+            note="" if code == 0 else "The check did not finish; showing the last report."
+        )
+
+    def show_repo_report(self, note: str = "") -> None:
+        report = self.hygiene_report()
+        box = QMessageBox(self)
+        box.setWindowTitle("Repo check")
+        if report is None:
+            box.setText("No repo report yet.")
+            box.setInformativeText(
+                note or "git_autosync writes one on each run, or press Check repos again."
+            )
+            box.setIcon(QMessageBox.Icon.Information)
+        else:
+            todo = report.attention
+            if todo:
+                box.setText(
+                    f"{len(todo)} of {len(report.rows)} repos have work that has not landed."
+                )
+            else:
+                box.setText("Everything is committed, pushed and merged.")
+            lines = [f"[!!] {r.name} ({r.branch or '?'}) — {r.detail}" for r in todo]
+            lines += [f"[ok] {r.name}" for r in report.rows if not r.needs_attention]
+            tail = []
+            if note:
+                tail.append(note)
+            if not report.fetched:
+                tail.append("Counts of unpushed and behind are as of each repo's last fetch.")
+            if report.stale:
+                tail.append("This report is old; autosync refreshes it on each run.")
+            box.setInformativeText("\n".join(lines + ([""] + tail if tail else [])))
+            box.setIcon(
+                QMessageBox.Icon.Warning if todo else QMessageBox.Icon.Information
+            )
+        close = box.addButton("Close", QMessageBox.ButtonRole.RejectRole)
+        box.setEscapeButton(close)
+        box.setDefaultButton(close)
+        box.exec()
+
     def refresh(self) -> None:
         lab_root = self.settings.resolved_lab_root()
         table = launcher.process_table()  # one snapshot, shared by every card
         for card in self.cards:
             card.refresh(lab_root, table)
+        self._apply_hygiene()
