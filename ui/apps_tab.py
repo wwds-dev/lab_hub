@@ -200,6 +200,7 @@ class AppCard(Tile):
             self.version.setText("")
             self.version.setToolTip(
                 f"Lab Hub cannot tell which build of {self.app.name} is installed."
+                + (f" {found.detail}." if found.detail else "")
             )
             self.restyle(self.version, "hint")
             return

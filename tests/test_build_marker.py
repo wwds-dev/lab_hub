@@ -54,7 +54,8 @@ def make_repo(path, commits):
 @pytest.fixture(autouse=True)
 def _fresh_caches(monkeypatch):
     for cache in (launcher.state._COMMIT_CACHE, launcher.state._COUNT_CACHE,
-                  launcher.state._DIRTY_CACHE):
+                  launcher.state._DIRTY_CACHE, launcher.state._BEHIND_CACHE,
+                  launcher.state._SHALLOW_CACHE, launcher.state._ROOT_BEHIND_CACHE):
         cache.clear()
     yield
 
@@ -116,16 +117,87 @@ def test_launcher_bundle_running_the_working_checkout_is_not_behind(tmp_path, mo
     assert found.commit == git(work, "rev-parse", "--short=7", "HEAD")
 
 
-def test_launcher_bundle_with_a_missing_root_falls_back_to_the_checkout(tmp_path, monkeypatch):
-    work = make_repo(tmp_path / "lab" / "provisio", 3)
+def _install(tmp_path, monkeypatch, root, commits=3):
+    make_repo(tmp_path / "lab" / "provisio", commits)
+    apps = tmp_path / "Applications"
+    apps.mkdir(exist_ok=True)
+    monkeypatch.setattr(launcher, "APPLICATIONS", apps)
+    _launcher_bundle(apps, "Provisio", root)
+    return tmp_path / "lab"
+
+
+def _unknown_naming(found, root, why):
+    assert not found.known and found.marker == ""
+    assert found.root == str(root) and str(root) in found.detail and why in found.detail
+
+
+def test_a_missing_recorded_root_is_unknown_and_names_the_root(tmp_path, monkeypatch):
+    root = tmp_path / "gone"
+    lab = _install(tmp_path, monkeypatch, root)
+
+    _unknown_naming(launcher.version(_app(), lab), root, "missing")
+
+
+def test_a_recorded_root_that_is_not_git_is_unknown(tmp_path, monkeypatch):
+    root = tmp_path / "plain"
+    root.mkdir()
+    (root / "main.py").write_text("pass\n")
+    (root / "VERSION").write_text("2.0\n")
+    lab = _install(tmp_path, monkeypatch, root)
+
+    _unknown_naming(launcher.version(_app(), lab), root, "not a git checkout")
+
+
+def test_a_recorded_root_without_a_version_arc_is_unknown(tmp_path, monkeypatch):
+    root = make_repo(tmp_path / "rel", 2)
+    git(root, "rm", "-q", "VERSION")
+    git(root, "commit", "-qm", "drop VERSION")
+    lab = _install(tmp_path, monkeypatch, root)
+
+    found = launcher.version(_app(), lab)
+
+    _unknown_naming(found, root, "no VERSION arc")
+    assert "v2.0.003" not in found.detail
+
+
+def test_a_recorded_root_without_the_entry_script_is_unknown(tmp_path, monkeypatch):
+    root = tmp_path / "rel"
+    root.mkdir()
+    lab = _install(tmp_path, monkeypatch, root)
+
+    _unknown_naming(launcher.version(_app(), lab), root, "missing or has no main.py")
+
+
+def test_an_unreadable_root_is_unknown_even_with_no_working_checkout(tmp_path, monkeypatch):
     apps = tmp_path / "Applications"
     apps.mkdir()
     monkeypatch.setattr(launcher, "APPLICATIONS", apps)
     _launcher_bundle(apps, "Provisio", tmp_path / "gone")
 
-    found = launcher.version(_app(), tmp_path / "lab")
+    found = launcher.version(_app(), tmp_path / "empty-lab")
 
-    assert found.text == "v2.0.003" and not found.stale
+    assert not found.known and "gone" in found.detail
+
+
+def test_the_tile_names_an_unreadable_root_in_its_tooltip(qapp, tmp_path, monkeypatch):
+    root = tmp_path / "gone"
+    lab = _install(tmp_path, monkeypatch, root)
+    card = AppCard(_app())
+
+    card.refresh_version(lab)
+
+    assert card.version.text() == ""
+    assert str(root) in card.version.toolTip()
+
+
+def test_build_report_is_unknown_for_an_unreadable_root(tmp_path, monkeypatch):
+    root = tmp_path / "gone"
+    lab = _install(tmp_path, monkeypatch, root)
+
+    row = launcher.build_status(_app(), lab)
+
+    assert row.verdict == "unknown" and str(root) in row.note
+    assert "working checkout" in row.note
 
 
 def test_build_report_calls_a_lagging_launcher_bundle_behind(tmp_path, monkeypatch):
@@ -342,7 +414,7 @@ def test_a_diverged_build_counts_only_head_s_own_commits(tmp_path, monkeypatch):
 def test_launcher_root_with_a_commit_unknown_to_the_working_checkout_is_unknown(
         tmp_path, monkeypatch, qapp):
     """Counts from two unrelated histories must not be compared."""
-    work = make_repo(tmp_path / "lab" / "provisio", 5)
+    make_repo(tmp_path / "lab" / "provisio", 5)
     release = make_repo(tmp_path / "rel", 3)
     commit(release, "only-in-release")
     apps = tmp_path / "Applications"
@@ -357,7 +429,6 @@ def test_launcher_root_with_a_commit_unknown_to_the_working_checkout_is_unknown(
     card.refresh_version(tmp_path / "lab")
     assert "behind" not in card.version.text()
     assert "cannot be told" in card.version.toolTip()
-    assert work.exists()
 
 
 def test_a_dirty_release_root_shows_dirty(tmp_path, monkeypatch):
@@ -399,3 +470,153 @@ def test_a_malformed_stamped_commit_is_ignored(tmp_path, monkeypatch, bad):
     found = launcher.version(_app("SONAR", "sonar"), tmp_path)
 
     assert found.commit == "" and found.marker == "v2.003"
+
+
+# -- verify-round fixes ---------------------------------------------------------
+def _unrelated_root(tmp_path, monkeypatch):
+    make_repo(tmp_path / "lab" / "provisio", 5)
+    release = make_repo(tmp_path / "rel", 3)
+    commit(release, "only-in-release")
+    apps = tmp_path / "Applications"
+    apps.mkdir()
+    monkeypatch.setattr(launcher, "APPLICATIONS", apps)
+    _launcher_bundle(apps, "Provisio", release)
+    return tmp_path / "lab", release
+
+
+def test_build_report_is_unknown_when_behind_cannot_be_told(tmp_path, monkeypatch):
+    lab, release = _unrelated_root(tmp_path, monkeypatch)
+
+    row = launcher.build_status(_app(), lab)
+
+    assert row.verdict == "unknown"
+    assert str(release) in row.note and "the working checkout" in row.note
+    assert "runs the checkout directly" not in row.note
+
+
+def test_build_report_for_a_level_recorded_root_names_the_root(tmp_path, monkeypatch):
+    work = make_repo(tmp_path / "lab" / "provisio", 3)
+    release = tmp_path / "rel"
+    git(tmp_path, "clone", "-q", str(work), str(release))
+    apps = tmp_path / "Applications"
+    apps.mkdir()
+    monkeypatch.setattr(launcher, "APPLICATIONS", apps)
+    _launcher_bundle(apps, "Provisio", release)
+
+    row = launcher.build_status(_app(), tmp_path / "lab")
+
+    assert row.verdict == "current" and str(release) in row.note
+    assert "runs the checkout directly" not in row.note
+
+
+def test_a_recorded_root_ahead_of_the_working_checkout_is_not_behind(tmp_path, monkeypatch):
+    work = make_repo(tmp_path / "lab" / "provisio", 3)
+    release = tmp_path / "rel"
+    git(tmp_path, "clone", "-q", str(work), str(release))
+    commit(release, "ahead")
+    apps = tmp_path / "Applications"
+    apps.mkdir()
+    monkeypatch.setattr(launcher, "APPLICATIONS", apps)
+    _launcher_bundle(apps, "Provisio", release)
+
+    found = launcher.version(_app(), tmp_path / "lab")
+
+    assert found.text == "v2.0.004" and found.behind == 0 and not found.behind_unknown
+
+
+def test_a_symlinked_root_equal_to_the_working_checkout_is_not_a_second_root(
+        tmp_path, monkeypatch):
+    work = make_repo(tmp_path / "lab" / "provisio", 3)
+    link = tmp_path / "link"
+    link.symlink_to(work)
+    apps = tmp_path / "Applications"
+    apps.mkdir()
+    monkeypatch.setattr(launcher, "APPLICATIONS", apps)
+    _launcher_bundle(apps, "Provisio", link)
+
+    found = launcher.version(_app(), tmp_path / "lab")
+
+    assert found.root == "" and found.origin == "checkout"
+
+
+def test_a_stamp_commit_unknown_to_the_checkout_is_not_compared_by_count(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    make_repo(tmp_path / "sonar", 9)
+    _stamp(make_bundle(tmp_path, "SONAR"), major="2", build=3, commit="deadbee")
+
+    found = launcher.version(_app("SONAR", "sonar"), tmp_path)
+
+    assert found.behind_unknown and found.behind == 0 and found.marker == "v2.003+gdeadbee"
+
+
+def test_a_stamp_without_a_commit_still_compares_counts(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    make_repo(tmp_path / "sonar", 9)
+    _stamp(make_bundle(tmp_path, "SONAR"), major="2", build=3)
+
+    assert launcher.version(_app("SONAR", "sonar"), tmp_path).behind == 6
+
+
+def test_a_shallow_checkout_does_not_claim_a_build_number(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    source = make_repo(tmp_path / "src", 5)
+    shallow = tmp_path / "sonar"
+    git(tmp_path, "clone", "-q", "--depth", "1", f"file://{source}", str(shallow))
+
+    found = launcher.version(_app("SONAR", "sonar"), tmp_path)
+
+    assert found.text == "v2.0.unknown"
+    assert found.commit == git(shallow, "rev-parse", "--short=7", "HEAD")
+
+
+def test_behind_is_not_recomputed_while_head_is_unchanged(tmp_path, monkeypatch):
+    work = make_repo(tmp_path / "lab" / "provisio", 5)
+    release = tmp_path / "rel"
+    git(tmp_path, "clone", "-q", str(work), str(release))
+    git(release, "reset", "-q", "--hard", "HEAD~2")
+    apps = tmp_path / "Applications"
+    apps.mkdir()
+    monkeypatch.setattr(launcher, "APPLICATIONS", apps)
+    _launcher_bundle(apps, "Provisio", release)
+    launcher.version(_app(), tmp_path / "lab")  # warm every cache
+    seen = []
+    real = launcher.state.subprocess.run
+    monkeypatch.setattr(
+        launcher.state.subprocess, "run", lambda *a, **k: seen.append(a) or real(*a, **k)
+    )
+
+    for _ in range(3):
+        launcher.version(_app(), tmp_path / "lab")
+
+    assert seen == [], "git ran again for unchanged repositories"
+
+
+def test_unknown_behind_is_also_cached(tmp_path, monkeypatch):
+    lab, _release = _unrelated_root(tmp_path, monkeypatch)
+    launcher.version(_app(), lab)
+    seen = []
+    real = launcher.state.subprocess.run
+    monkeypatch.setattr(
+        launcher.state.subprocess, "run", lambda *a, **k: seen.append(a) or real(*a, **k)
+    )
+
+    launcher.version(_app(), lab)
+
+    assert seen == []
+
+
+def test_a_diverged_root_whose_histories_are_not_shared_is_unknown(tmp_path, monkeypatch):
+    work = make_repo(tmp_path / "lab" / "provisio", 3)
+    release = tmp_path / "rel"
+    git(tmp_path, "clone", "-q", str(work), str(release))
+    commit(release, "only-in-release")
+    commit(work, "w1")
+    commit(work, "w2")
+    apps = tmp_path / "Applications"
+    apps.mkdir()
+    monkeypatch.setattr(launcher, "APPLICATIONS", apps)
+    _launcher_bundle(apps, "Provisio", release)
+
+    found = launcher.version(_app(), tmp_path / "lab")
+
+    assert found.behind_unknown and found.behind == 0

@@ -254,6 +254,14 @@ on (`v2.0.153+gc534bbb · 21 behind`). When the recorded root *is* the working
 checkout it cannot be behind, as before. `-dirty` uses `git status`, cached for
 ten seconds per checkout because uncommitted edits move no ref.
 
+A root that cannot be read (missing, no entry script, not git, no `VERSION`
+arc) gives *no* number: the tile is blank and its tooltip, and the build report
+(`unknown`), name the root. It never shows the working checkout's build, since
+Launch does not open that. A root or stamp whose commit the working checkout does
+not have is counted from the root's own history when possible, else the tile
+says how far behind "cannot be told". A shallow clone shows `v2.0.unknown`
+because its commit count is only the fetched depth.
+
 The commit count is cached against the repository's `HEAD` (and the ref it
 points at), so the tile can re-read the version on every poll without a
 `git rev-list` per app every three seconds. A bundle's own number is a single
