@@ -1,0 +1,11 @@
+{"ts": "2026-11-13T19:10:23", "phase": "define", "state": "start", "spec": "lab-wide-build-marker"}
+{"ts": "2026-11-13T19:10:23", "phase": "define", "state": "done", "spec": "lab-wide-build-marker"}
+{"ts": "2026-11-13T19:59:14", "phase": "architect", "state": "start", "spec": "lab-wide-build-marker"}
+{"ts": "2026-11-13T19:59:50", "phase": "architect", "state": "done", "spec": "lab-wide-build-marker"}
+{"ts": "2026-11-13T19:59:51", "phase": "plan", "state": "done", "spec": "lab-wide-build-marker"}
+{"ts": "2026-11-13T19:59:51", "phase": "build", "state": "start", "spec": "lab-wide-build-marker"}
+{"ts": "2026-11-13T20:03:01", "phase": "build", "state": "done", "spec": "lab-wide-build-marker"}
+{"ts": "2026-11-13T20:05:12", "phase": "review", "state": "done", "spec": "lab-wide-build-marker"}
+{"ts": "2026-11-13T20:05:12", "phase": "verify", "state": "start", "spec": "lab-wide-build-marker"}
+{"ts": "2026-11-13T20:07:44", "phase": "verify", "state": "done", "spec": "lab-wide-build-marker"}
+{"ts": "2026-11-13T20:07:44", "phase": "document", "state": "done", "spec": "lab-wide-build-marker"}

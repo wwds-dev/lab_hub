@@ -8,6 +8,7 @@
 
 ## v2 — complete (2026-09-14)
 
+- [x] `P1` `feature` `@ai` **Every tile shows its real build and how far behind it is (2026-11-13).** Spec `docs/specs/lab-wide-build-marker.md`. Tile text is `v<major>.<build>+g<sha7>[-dirty]` for every origin; a launcher bundle is read at the root it records (Provisio: the release clone) and gets `· N behind` against the working checkout; `build_status` reports it `behind`. `stamp_version.py` requires a commit. Not done: the Lab Monitor (`regenerate_dashboard_v2.py derive_version`, outside this repo) still prints `v<major>.<build>` — proposal in the session notes; branch suffix on checkout tiles (spec decision 2) not built, owner has not answered. `tests/test_build_marker.py`.
 - [x] `P1` `bug` `@ai` **Narrator converter knows OpenAI retires `gpt-4o-mini-tts` on 2027-01-06 (2026-10-19).** The vendored converter (copy of Imprint's) gained a `retires` date on the OpenAI route and `default_tts_provider()`: until that day the default stays OpenAI, which the Narrator tab uses; from it the default is Gemini, which this app's Python does not support (no google-genai), so the tab will say the route cannot run — decide before the date whether to add google-genai here or point the tab at an explicit route. Imprint's `test_converter_drift.py` passes against it. `tests/test_narrator_tab.py`.
 - [x] `P0` `bug` `@ai` **A running Sentinel reported as *Did not start*, twice.** The
   first time it was `running_markers()` matching the bundle alone, when Sentinel's stub

@@ -208,11 +208,22 @@ class AppCard(Tile):
         # the number exists for. Saying only the number would be true and
         # useless: the button would still open the old one without a word.
         suffix = f" · {found.behind} behind" if found.stale else ""
-        self.version.setText(found.text + suffix)
+        self.version.setText(found.marker + suffix)
+        commit = (
+            f" Commit {found.commit}{' with uncommitted changes' if found.dirty else ''}."
+            if found.commit
+            else f" Commit unknown: {found.commit_note or 'no evidence'}."
+        )
         self.version.setToolTip(
-            f"{self.app.name} {found.text} — {found.detail}."
+            f"{self.app.name} {found.text} — {found.detail}.{commit}"
             + (
-                f" Its checkout is {found.behind} commits further on, so Launch "
+                " Whether the working checkout has moved past it cannot be told: its "
+                "commit is not in that checkout's history."
+                if found.behind_unknown
+                else ""
+            )
+            + (
+                f" The working checkout is {found.behind} commits further on, so Launch "
                 "opens the older build until it is rebuilt and reinstalled."
                 if found.stale
                 else ""
