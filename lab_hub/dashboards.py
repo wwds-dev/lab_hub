@@ -132,3 +132,21 @@ def target(dashboard: Dashboard, monitor_up: bool | None = None) -> str:
         return f"http://{MONITOR_HOST}:{MONITOR_PORT}/dashboards/{quote(dashboard.id)}"
     path = Path(dashboard.path or "")
     return path.as_uri() if path.is_absolute() else str(path)
+
+
+def embed_address(
+    dashboard: Dashboard, prefer_local: bool = False, monitor_up: bool | None = None
+) -> str | None:
+    """What the in-window viewer loads, or None when there is nothing to load.
+
+    The link wins for an entry that has one — it is the copy edits reach — unless
+    the viewer was asked for the local copy, which a Both entry keeps. A local
+    entry goes through `target()`, so a fragment is wrapped by the Monitor.
+    """
+    has_file = dashboard.has_file and Path(dashboard.path or "").is_file()
+    if dashboard.url and not (prefer_local and has_file):
+        return dashboard.url
+    if not has_file:
+        return None
+    local = Dashboard(**{**dashboard.__dict__, "url": None})
+    return target(local, monitor_up)

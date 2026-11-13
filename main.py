@@ -232,6 +232,18 @@ def selftest() -> int:
         problems.append(f"Pillow did not import: {error}")
 
     try:
+        from PySide6.QtWebEngineCore import QWebEngineProfile  # noqa: F401
+        from PySide6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
+
+        print("  QtWebEngine:     importable")
+    except ImportError as error:
+        print("  QtWebEngine:     MISSING")
+        problems.append(
+            f"QtWebEngine did not import ({error}): the Dashboards page cannot show "
+            "dashboards in the window, and build_app.sh must not exclude it"
+        )
+
+    try:
         from lab_hub.tools.narrator import converter as narrator_converter
 
         print(f"  narrator:        ok ({narrator_converter.TTS_MODEL})")

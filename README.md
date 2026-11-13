@@ -339,6 +339,15 @@ reveals the file to edit. Each tile also carries a **Remote / Local / Both** chi
 (2026-11-13), derived from what the entry holds: a link only is Remote, a file only is
 Local, both is Both. A Both entry opens its **link** — the artifact is the copy that edits
 from a phone or iPad reach — and keeps *Show in Finder* for the local copy (the backup).
+Since 2026-11-13 the page opens as a **viewer**: the catalog list on the left and the chosen
+dashboard showing on the right (**Show as tiles** returns to the tiles above). Each dashboard gets
+a web view of its own (QtWebEngine), created the first time it is chosen, only once the page is on
+screen, and kept. A link entry loads its link; a Both entry can switch to its local copy; a local
+one loads the file (through the Monitor's route when it is up). Links to claude.ai artifacts need a
+claude.ai sign-in, kept in a profile of its own under `Application Support/Lab Hub/web` — never the
+browser's. New-window links open in the system browser. `build_app.sh` no longer excludes
+QtWebEngine (about 150 MB larger) and `--selftest` fails the build if it will not import. Tests
+swap in a fake view: a real one segfaults under the offscreen platform (`no_real_web_views`).
 The catalog is generated from `dashboards/*/dashboard.toml` by `dashboards/build_catalog.py`
 (`docs/dashboard_standard_plan.md` in the lab root); its extra `where` and `refresh` fields
 are ignored here. On 2026-10-07 the Antfarm workstation concept (superseded
