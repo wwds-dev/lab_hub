@@ -195,6 +195,12 @@
   build its Launch button would open. Lab-wide scheme, same two inputs as the Lab Project
   Monitor.
 
+## Build marker — follow-ups (2026-11-13)
+
+- [ ] `P2` `infra` `@me` Push Hub `main` (merge `b6b7460`, 4 commits ahead of `origin/main`) and remove branch `claude/build-marker-tiles-1a353e` with its worktree `.claude/worktrees/priceless-chaum-7679b1`.
+- [ ] `P3` `docs` `@ai` Lab root `AGENTS.md`: list `build_marker.py` among the root scripts (Monitor side of the marker, commit `40aa92a`).
+- [ ] `P3` `feature` `@me` Spec decision 2: branch suffix ` (<branch>)` on checkout tiles. Unanswered; not built.
+
 ## Narrator converter — open (2026-09-30)
 
 What the review of df9c356 found. The fix (1dc265b, wwds-dev/lab_hub#1) and its port to
