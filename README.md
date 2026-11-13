@@ -339,6 +339,15 @@ reveals the file to edit. Each tile also carries a **Remote / Local / Both** chi
 (2026-11-13), derived from what the entry holds: a link only is Remote, a file only is
 Local, both is Both. A Both entry opens its **link** — the artifact is the copy that edits
 from a phone or iPad reach — and keeps *Show in Finder* for the local copy (the backup).
+**Not mergeable yet (branch `claude/dashboards-embed`, found 2026-11-13).** Opening this page in the
+running app segfaults. The macOS crash report puts it in a Python `eventFilter` on the application
+(`sbk_o_eventFilter` -> `getWrapperForQObject` -> `Shiboken::Graph::identifyType`): PySide builds a
+wrapper for *every* object that receives an event, including QtWebEngine's internal objects while
+they are still being constructed. Lab Hub has two such filters, `ui/swipe.py`'s swipe filter and
+`_QuitGuard` in `ui/main_window.py`. A web view alone, with a theme and a stack, does not crash
+(probes: standalone, themed, in a stack, remote and local pages); the app's filters do. Fixing it
+means replacing both: `_QuitGuard` as a `QApplication` subclass overriding `event()`, and the swipe
+filter installed per widget outside the web views. Until then do not merge or build this branch.
 Since 2026-11-13 the page opens as a **viewer**: the catalog list on the left and the chosen
 dashboard showing on the right (**Show as tiles** returns to the tiles above). Each dashboard gets
 a web view of its own (QtWebEngine), created the first time it is chosen, only once the page is on
