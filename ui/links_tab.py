@@ -333,7 +333,7 @@ class DashboardsTab(LinksTab):
         cards = []
         for entry in entries:
             card = LinkCard(entry.title, entry.description, "Open")
-            card.meta.setText(" · ".join(part for part in (entry.source, entry.kind) if part))
+            card.meta.setText(" · ".join(part for part in (entry.source, entry.kind, entry.where_label) if part))
             card.open_requested.connect(lambda e=entry: self._open(e))
             card.reveal_requested.connect(lambda e=entry: self._reveal(e))
             cards.append(card)
@@ -344,7 +344,11 @@ class DashboardsTab(LinksTab):
         for entry, card in zip(self.entries, self.cards):
             available = entry.available()
             if entry.url:
-                card.set_state("Link", "stateOk", entry.url)
+                card.set_state(
+                    "Link",
+                    "stateOk",
+                    entry.url + (" (a copy is also kept on this Mac)" if entry.has_file else ""),
+                )
                 card.detail.setText(entry.url)
             elif available:
                 card.set_state("Local file", "stateOk", entry.path or "")
@@ -359,9 +363,10 @@ class DashboardsTab(LinksTab):
                 )
             card.detail.setToolTip(entry.url or entry.path or "")
             card.open_button.setEnabled(available)
-            # A link has nothing on disk to show.
-            card.reveal_button.setVisible(entry.local)
-            card.reveal_button.setEnabled(available)
+            # A link alone has nothing on disk to show; a Both entry does.
+            file_there = bool(entry.path) and Path(entry.path).is_file()
+            card.reveal_button.setVisible(entry.has_file)
+            card.reveal_button.setEnabled(file_there)
 
     def _open(self, entry: dashboards.Dashboard) -> None:
         if not entry.available():

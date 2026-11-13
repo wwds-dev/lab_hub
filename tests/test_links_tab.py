@@ -123,7 +123,8 @@ def test_one_tile_per_catalog_entry(qapp, tmp_path):
 
     assert [card.name.text() for card in tab.cards] == ["Monitor", "Workstation", "Gone"]
     assert [card.state.text() for card in tab.cards] == ["Link", "Local file", "File missing"]
-    assert tab.cards[0].meta.text() == "Claude · Live"
+    assert tab.cards[0].meta.text() == "Claude · Live · Remote"
+    assert tab.cards[1].meta.text() == "ChatGPT · Concept · Local"
     assert not tab.cards[2].open_button.isEnabled()
     # A link has nothing on disk to show in Finder.
     assert tab.cards[0].reveal_button.isHidden()
@@ -170,3 +171,42 @@ def test_opening_a_dashboard_hands_the_browser_its_target(qapp, tmp_path, monkey
     tab.cards[0].open_button.click()
 
     assert opened == ["https://a.test/"]
+
+
+def test_an_entry_with_a_link_and_a_file_opens_the_link_and_still_shows_the_file(
+    qapp, tmp_path, monkeypatch
+):
+    from lab_hub import launcher
+
+    page = tmp_path / "m.html"
+    page.write_text("<div></div>")
+    active = _lab(tmp_path, [
+        {"id": "m", "title": "Monitor", "source": "Claude", "kind": "Live", "description": "d",
+         "url": "https://claude.ai/artifact/x", "path": str(page)},
+    ])
+    opened, revealed = [], []
+    monkeypatch.setattr(launcher, "open_url", opened.append)
+    monkeypatch.setattr(launcher, "reveal", revealed.append)
+    tab = DashboardsTab(_settings(active))
+    card = tab.cards[0]
+
+    assert card.meta.text() == "Claude · Live · Both"
+    assert card.state.text() == "Link"
+    assert not card.reveal_button.isHidden() and card.reveal_button.isEnabled()
+    card.open_button.click()
+    card.reveal_button.click()
+
+    assert opened == ["https://claude.ai/artifact/x"]
+    assert revealed == [page]
+
+
+def test_a_both_entry_whose_file_is_gone_still_opens_its_link(qapp, tmp_path):
+    active = _lab(tmp_path, [
+        {"id": "m", "title": "Monitor", "url": "https://claude.ai/artifact/x",
+         "path": str(tmp_path / "gone.html")},
+    ])
+
+    card = DashboardsTab(_settings(active)).cards[0]
+
+    assert card.open_button.isEnabled()
+    assert not card.reveal_button.isEnabled()

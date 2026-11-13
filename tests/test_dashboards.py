@@ -91,3 +91,19 @@ def test_the_real_catalog_parses():
         pytest.skip("no lab catalog on this machine")
 
     assert dashboards.load(root)
+
+
+def test_where_follows_what_the_entry_carries():
+    link = dashboards.Dashboard("a", "A", "", "", "", url="https://x.test/")
+    file = dashboards.Dashboard("b", "B", "", "", "", path="/tmp/b.html")
+    both = dashboards.Dashboard("c", "C", "", "", "", url="https://x.test/", path="/tmp/c.html")
+
+    assert [d.where_label for d in (link, file, both)] == ["Remote", "Local", "Both"]
+    assert [d.has_file for d in (link, file, both)] == [False, True, True]
+
+
+def test_a_both_entry_opens_its_link_not_its_file():
+    both = dashboards.Dashboard("c", "C", "", "", "", url="https://x.test/", path="/tmp/c.html")
+
+    assert dashboards.target(both, monitor_up=True) == "https://x.test/"
+    assert dashboards.target(both, monitor_up=False) == "https://x.test/"

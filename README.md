@@ -335,7 +335,13 @@ folder. Nothing is copied into Lab Hub: add a dashboard to the catalog and it is
 on this tab (and in the menu bar) without a rebuild; the tab rebuilds itself when
 the catalog's modification time changes. A tile shows its source and kind, and a
 state: *Link*, *Local file*, or *File missing* (Open disabled). **Show catalog**
-reveals the file to edit. On 2026-10-07 the Antfarm workstation concept (superseded
+reveals the file to edit. Each tile also carries a **Remote / Local / Both** chip
+(2026-11-13), derived from what the entry holds: a link only is Remote, a file only is
+Local, both is Both. A Both entry opens its **link** — the artifact is the copy that edits
+from a phone or iPad reach — and keeps *Show in Finder* for the local copy (the backup).
+The catalog is generated from `dashboards/*/dashboard.toml` by `dashboards/build_catalog.py`
+(`docs/dashboard_standard_plan.md` in the lab root); its extra `where` and `refresh` fields
+are ignored here. On 2026-10-07 the Antfarm workstation concept (superseded
 by the SYNDUSTRYX app) and Provisio · Protection Studio (the hosted copy of the
 Provisio app, which now has its own tile) were taken out of the catalog.
 

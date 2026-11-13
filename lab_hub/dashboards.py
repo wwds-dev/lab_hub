@@ -4,7 +4,9 @@
 Dashboards section and this tab both read it, so a dashboard added there shows
 up here with no Lab Hub rebuild. Nothing is copied into this app.
 
-A local entry opens through the Monitor's own server when that is up, because
+An entry with a link opens the link, even when it also records a local file:
+the artifact is the copy that edits from a phone or iPad reach, the file is the
+backup. A local entry opens through the Monitor's own server when that is up, because
 its `/dashboards/<id>` route wraps an HTML fragment (the Prompt injection
 taxonomy is one) in a proper page. When the server is down the file opens
 directly — the same fallback the Monitor's own page uses.
@@ -38,7 +40,25 @@ class Dashboard:
 
     @property
     def local(self) -> bool:
+        """Opens from a file: there is no link to prefer."""
         return self.url is None
+
+    @property
+    def has_file(self) -> bool:
+        """A file path is recorded, whether or not there is also a link."""
+        return bool(self.path)
+
+    @property
+    def where_label(self) -> str:
+        """Remote (a link only), Local (a file only) or Both.
+
+        Derived from what the entry actually carries, not from the catalog's
+        `where` field: an entry declared `both` whose link is not published yet
+        is, honestly, Local until it has one.
+        """
+        if self.url and self.path:
+            return "Both"
+        return "Remote" if self.url else "Local"
 
     def available(self) -> bool:
         """A link always is; a local file only while it is still on disk."""
