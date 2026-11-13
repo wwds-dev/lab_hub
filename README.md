@@ -232,10 +232,35 @@ the process up and the tile correctly says *Running*. That is not a stale tile;
 
 **An installed build older than its source says so.** A frozen bundle is only
 as new as its last build, and committing to a project does not rebuild it — so
-the tile reads `v2.104 · 5 behind`, and the tooltip says Launch will open the
+the tile reads `v2.104+g1a2b3c4 · 5 behind`, and the tooltip says Launch will open the
 older build until it is rebuilt and reinstalled. Reporting only the number
 would be true and useless: the button would still open the old one without a
-word. A launcher bundle can never be behind, because it runs the checkout.
+word.
+
+**The tile names the build, not just counts it.** Every tile reads
+`v<major>.<build>+g<sha7>`, Provisio's grammar, with `-dirty` when the checkout
+it read has uncommitted changes. A count names different code on different
+branches; the commit does not. The commit comes from the same place as the
+number — the bundle's `_build_info.json` for a frozen app, the checkout for a
+source run — and is never borrowed from another origin: a stamp with no commit,
+or an app outside the lab scheme (SYNDUSTRYX), shows no `+g…` and the tooltip
+says why. `scripts/stamp_version.py` now refuses to stamp without a commit.
+
+**A launcher bundle is read at the root it records, and can be behind.** A stub
+runs the project root in `Contents/Resources/project_root.txt`, which is not
+always the working checkout — Provisio's runs a release clone. The tile reads
+that root and counts, from its commit, how far the working checkout has moved
+on (`v2.0.153+gc534bbb · 21 behind`). When the recorded root *is* the working
+checkout it cannot be behind, as before. `-dirty` uses `git status`, cached for
+ten seconds per checkout because uncommitted edits move no ref.
+
+A root that cannot be read (missing, no entry script, not git, no `VERSION`
+arc) gives *no* number: the tile is blank and its tooltip, and the build report
+(`unknown`), name the root. It never shows the working checkout's build, since
+Launch does not open that. A root or stamp whose commit the working checkout does
+not have is counted from the root's own history when possible, else the tile
+says how far behind "cannot be told". A shallow clone shows `v2.0.unknown`
+because its commit count is only the fetched depth.
 
 The commit count is cached against the repository's `HEAD` (and the ref it
 points at), so the tile can re-read the version on every poll without a

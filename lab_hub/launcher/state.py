@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import json
 import plistlib
+import re
 import shlex
 import shutil
 import socket
 import subprocess
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -337,9 +339,23 @@ class Version:
     origin: str = ""  # bundle | checkout
     detail: str = ""  # where the number came from, for the tooltip
     # How many commits the installed build is behind its source, when both are
-    # known. Only ever non-zero for a frozen bundle: a launcher bundle runs the
-    # checkout, so it cannot be behind it.
+    # known. A frozen bundle is compared with its stamp; a launcher bundle with
+    # the root it records, when that is not the working checkout.
     behind: int = 0
+    # The commit this build came from, short form, and whether the checkout it
+    # came from had uncommitted changes. Empty / False when there is no evidence:
+    # never borrowed from another origin.
+    commit: str = ""
+    dirty: bool = False
+    # Why there is no commit, for the tooltip, when `commit` is empty.
+    commit_note: str = ""
+    # True when a comparison with the working checkout was wanted but this
+    # build's commit is not in that checkout's history (another branch, a
+    # shallow clone): the count would compare two histories, so none is given.
+    behind_unknown: bool = False
+    # The recorded project root a launcher bundle runs, when that is not the
+    # working checkout. Set even when the root cannot be read (text is empty).
+    root: str = ""
 
     @property
     def known(self) -> bool:
@@ -348,6 +364,17 @@ class Version:
     @property
     def stale(self) -> bool:
         return self.behind > 0
+
+    @property
+    def marker(self) -> str:
+        """The tile text: `v<major>.<build>+g<sha7>[-dirty]`, Provisio's grammar.
+
+        Without a commit it is `text` alone, so a missing commit is visible as
+        missing rather than filled in from somewhere else.
+        """
+        if not self.text or not self.commit:
+            return self.text
+        return f"{self.text}+g{self.commit}" + ("-dirty" if self.dirty else "")
 
 
 def bundle_runs_checkout(bundle: Path) -> bool:
@@ -396,7 +423,17 @@ def _plist_version(bundle: Path) -> Version:
         text=f"v{raw.strip().lstrip('vV')}",
         origin="bundle",
         detail=f"the release number in {bundle.name}'s Info.plist",
+        commit_note="this app is outside the lab version scheme, so it has no commit",
     )
+
+
+_COMMIT_RE = re.compile(r"[0-9a-f]{7,40}")
+
+
+def _stamped_commit(data: dict) -> str:
+    commit = data.get("commit")
+    commit = commit.strip() if isinstance(commit, str) else ""
+    return commit if _COMMIT_RE.fullmatch(commit) else ""
 
 
 def _stamped_version(bundle: Path) -> Version | None:
@@ -414,6 +451,10 @@ def _stamped_version(bundle: Path) -> Version | None:
             text=f"v{major}.{int(build):03d}",
             origin="bundle",
             detail=f"stamped into {bundle.name} when it was built",
+            commit=_stamped_commit(data),
+            commit_note="" if _stamped_commit(data) else (
+                f"{bundle.name}'s build stamp records no commit"
+            ),
         )
     return None
 
@@ -491,6 +532,115 @@ def _commit_count(project: Path) -> int | None:
         count = None
     _COUNT_CACHE[key] = count
     return count
+
+
+_COMMIT_CACHE: dict[tuple[str, int], str] = {}
+_SHALLOW_CACHE: dict[tuple[str, int], bool] = {}
+
+
+def _is_shallow(project: Path) -> bool:
+    """A shallow clone's commit count is only the fetched depth, not a build."""
+    stamp = _head_stamp(project)
+    if stamp is None:
+        return False
+    key = (str(project), stamp)
+    if key not in _SHALLOW_CACHE:
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--is-shallow-repository"],
+                cwd=project, capture_output=True, text=True, timeout=10,
+            )
+            _SHALLOW_CACHE[key] = result.stdout.strip() == "true"
+        except (OSError, subprocess.SubprocessError):
+            _SHALLOW_CACHE[key] = False
+    return _SHALLOW_CACHE[key]
+
+
+def _head_commit(project: Path) -> str:
+    """Short hash of HEAD, cached on the same key as the count. "" if unknown."""
+    stamp = _head_stamp(project)
+    if stamp is None:
+        return ""
+    key = (str(project), stamp)
+    if key in _COMMIT_CACHE:
+        return _COMMIT_CACHE[key]
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short=7", "HEAD"],
+            cwd=project, capture_output=True, text=True, timeout=10,
+        )
+        commit = result.stdout.strip() if result.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        commit = ""
+    _COMMIT_CACHE[key] = commit
+    return commit
+
+
+# Uncommitted edits move neither HEAD nor its ref, so the key above cannot see
+# them. A short time-to-live keeps `git status` to one run per checkout per
+# window instead of one per poll. Read and written from the GUI thread only.
+DIRTY_TTL_SECONDS = 10.0
+_DIRTY_CACHE: dict[tuple[str, int | None], tuple[float, bool]] = {}
+
+
+def _is_dirty(project: Path) -> bool:
+    now = time.monotonic()
+    key = (str(project), _head_stamp(project))
+    hit = _DIRTY_CACHE.get(key)
+    if hit is not None and now - hit[0] < DIRTY_TTL_SECONDS:
+        return hit[1]
+    dirty = dirty_checkout(project)
+    _DIRTY_CACHE[key] = (now, dirty)
+    return dirty
+
+
+_BEHIND_CACHE: dict[tuple, int | None] = {}
+
+
+def _commits_behind(source: Path, built_commit: str, built: int | None,
+                    current: int | None, *, counts_comparable: bool = True,
+                    ) -> int | None:
+    """Cached on `source`'s HEAD: a refresh must not re-run git per tile."""
+    key = (str(source), _head_stamp(source), built_commit, built, current,
+           counts_comparable)
+    if key not in _BEHIND_CACHE:
+        _BEHIND_CACHE[key] = _commits_behind_uncached(
+            source, built_commit, built, current, counts_comparable
+        )
+    return _BEHIND_CACHE[key]
+
+
+def _commits_behind_uncached(source: Path, built_commit: str, built: int | None,
+                             current: int | None, counts_comparable: bool,
+                             ) -> int | None:
+    """How many commits `source`'s HEAD is past the build; 0 when level or ahead.
+
+    None when the answer cannot be given: the build's commit is not in
+    `source`'s history and `counts_comparable` is False (the counts would come
+    from two different repositories). Prefers the commit: a count names
+    different code on different branches. `built..HEAD` is 0 for a build that
+    already contains HEAD, however many commits it holds that HEAD lacks.
+    """
+    if built_commit:
+        try:
+            known = subprocess.run(
+                ["git", "cat-file", "-e", f"{built_commit}^{{commit}}"],
+                cwd=source, capture_output=True, text=True, timeout=10,
+            ).returncode == 0
+            if known:
+                result = subprocess.run(
+                    ["git", "rev-list", "--count", f"{built_commit}..HEAD"],
+                    cwd=source, capture_output=True, text=True, timeout=10,
+                )
+                if result.returncode == 0:
+                    return max(int(result.stdout.strip()), 0)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            pass
+        if not counts_comparable:
+            return None
+    if current is not None and built is not None and current > built:
+        return current - built
+    return 0
 
 
 def _major(project: Path) -> str | None:
@@ -574,11 +724,22 @@ def checkout_version(project: Path) -> Version:
     build = _commit_count(project)
     if major is None or build is None:
         return Version()
+    commit = _head_commit(project)
     return Version(
-        text=f"v{major}.{build:03d}",
+        text=f"v{major}.unknown" if _is_shallow(project) else f"v{major}.{build:03d}",
         origin="checkout",
         detail=f"from the checkout at {project}",
+        commit=commit,
+        dirty=bool(commit) and _is_dirty(project),
+        commit_note="" if commit else f"git could not name HEAD in {project}",
     )
+
+
+def _same_dir(a: Path, b: Path) -> bool:
+    try:
+        return a.resolve() == b.resolve()
+    except OSError:
+        return a == b
 
 
 def version(app: ExternalApp, lab_root: Path) -> Version:
@@ -612,14 +773,107 @@ def version(app: ExternalApp, lab_root: Path) -> Version:
         # built?" — and the answer here is often no, because committing to a
         # project does not rebuild it.
         if project is not None:
-            source = _commit_count(project)
-            built = _stamped_build(bundle)
-            if source is not None and built is not None and source > built:
-                return replace(stamped, behind=source - built)
+            behind = _commits_behind(
+                project, stamped.commit, _stamped_build(bundle),
+                _commit_count(project), counts_comparable=not stamped.commit,
+            )
+            if behind is None:
+                return replace(stamped, behind_unknown=True)
+            if behind:
+                return replace(stamped, behind=behind)
         return stamped
+    if bundle is not None:
+        # A launcher bundle runs the root it records, which is not always the
+        # working checkout: Provisio's runs a release clone. Read that root,
+        # and say how far the working checkout has moved past it. A root that
+        # cannot be read is *unknown*, never the working checkout's build: that
+        # would name code the Launch button does not open.
+        root = recorded_project_root(bundle)
+        if root is not None and (
+            project is None or not _same_dir(root, project)
+        ):
+            return _recorded_root_version(bundle, root, app, project)
     if project is not None:
         return checkout_version(project)
     return Version()
+
+
+def _recorded_root_version(
+    bundle: Path, root: Path, app: ExternalApp, project: Path | None
+) -> Version:
+    unreadable = None
+    if not (root / app.entry).is_file():
+        unreadable = "is missing or has no " + app.entry
+    elif _head_stamp(root) is None:
+        unreadable = "is not a git checkout"
+    elif _major(root) is None:
+        unreadable = "has no VERSION arc"
+    if unreadable is not None:
+        return Version(
+            origin="bundle", root=str(root),
+            detail=f"{bundle.name} runs {root}, which {unreadable}",
+        )
+    installed = replace(
+        checkout_version(root),
+        detail=f"the root {bundle.name} runs, {root}",
+        root=str(root),
+    )
+    if not installed.known:
+        return Version(
+            origin="bundle", root=str(root),
+            detail=f"{bundle.name} runs {root}, whose build git could not read",
+        )
+    if project is None:
+        return installed
+    behind = _commits_behind(
+        project, installed.commit, _commit_count(root),
+        _commit_count(project), counts_comparable=False,
+    )
+    if behind is None:
+        # The root holds commits the working checkout lacks (it may be ahead).
+        # Ask the root's own history about the working checkout's HEAD instead.
+        behind = _behind_in_root(root, project)
+    if behind is None:
+        return replace(installed, behind_unknown=True)
+    return replace(installed, behind=behind) if behind else installed
+
+
+_ROOT_BEHIND_CACHE: dict[tuple, int | None] = {}
+
+
+def _behind_in_root(root: Path, project: Path) -> int | None:
+    key = (str(root), _head_stamp(root), str(project), _head_stamp(project))
+    if key not in _ROOT_BEHIND_CACHE:
+        _ROOT_BEHIND_CACHE[key] = _behind_in_root_uncached(root, project)
+    return _ROOT_BEHIND_CACHE[key]
+
+
+def _behind_in_root_uncached(root: Path, project: Path) -> int | None:
+    """Commits the working checkout is past `root`, counted inside `root`'s repo.
+
+    Works when the working checkout's HEAD is known to the root (the root is
+    level or ahead, or they diverged from a shared commit). None when it is not.
+    """
+    try:
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=project,
+            capture_output=True, text=True, timeout=10,
+        ).stdout.strip()
+        if not _COMMIT_RE.fullmatch(head):
+            return None
+        known = subprocess.run(
+            ["git", "cat-file", "-e", f"{head}^{{commit}}"], cwd=root,
+            capture_output=True, text=True, timeout=10,
+        ).returncode == 0
+        if not known:
+            return None
+        counted = subprocess.run(
+            ["git", "rev-list", "--count", f"HEAD..{head}"], cwd=root,
+            capture_output=True, text=True, timeout=10,
+        )
+        return int(counted.stdout.strip()) if counted.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
 
 
 # Where a project keeps the script that rebuilds and installs it. Checked in
@@ -726,6 +980,12 @@ def build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
             "lab's version scheme, so there is nothing to compare it against.",
             script, command,
         )
+    if found.root and not found.known:
+        return BuildStatus(
+            app, found, "unknown",
+            f"{found.detail}; Launch would not open the working checkout, so "
+            "its build cannot be compared with the source.", script, command,
+        )
     if not found.known:
         # Rebuilding only helps a project whose build stamps a version. One
         # outside the lab's scheme (SYNDUSTRYX: no VERSION file, no git) never
@@ -739,6 +999,24 @@ def build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
             "compare the build against."
         )
         return BuildStatus(app, found, "unknown", note, script, command)
+    if found.behind_unknown:
+        where = f"the root it runs, {found.root}" if found.root else "its stamp"
+        return BuildStatus(
+            app, found, "unknown",
+            f"{where} is at {found.commit}, a commit the working checkout does "
+            "not have, so how far behind it is cannot be told.", script, command,
+        )
+    if found.stale:
+        return BuildStatus(
+            app, found, "behind",
+            f"built at {found.text}, but the source is {found.behind} commits "
+            "further on.", script, command,
+        )
+    if found.root:
+        return BuildStatus(
+            app, found, "current",
+            f"runs {found.root} and is level with the source.", script, command,
+        )
     if found.origin == "checkout":
         # It runs the source, so it opens whatever the source says right now —
         # uncommitted edits included. It cannot be out of date.
@@ -746,12 +1024,6 @@ def build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
             app, found, "current",
             "runs the checkout directly, so it is always what the source says.",
             script, command,
-        )
-    if found.stale:
-        return BuildStatus(
-            app, found, "behind",
-            f"built at {found.text}, but the source is {found.behind} commits "
-            "further on.", script, command,
         )
     if dirty_checkout(project):
         return BuildStatus(

@@ -28,11 +28,15 @@ def main() -> int:
     if not count.isdigit():
         print("stamp_version: not a git checkout; nothing stamped", file=sys.stderr)
         return 1
+    commit = _git("rev-parse", "--short=7", "HEAD")
+    if not commit:
+        print("stamp_version: no commit hash; nothing stamped", file=sys.stderr)
+        return 1
     major = (PROJECT_ROOT / "VERSION").read_text(encoding="utf-8").strip() or "2"
     payload = {
         "major": major.lstrip("vV").split(".")[0],
         "build": int(count),
-        "commit": _git("rev-parse", "--short", "HEAD"),
+        "commit": commit,
         "date": _git("log", "-1", "--format=%cI"),
         "source": "baked",
     }
