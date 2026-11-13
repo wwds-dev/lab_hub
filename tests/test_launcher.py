@@ -1251,3 +1251,66 @@ def test_the_new_apps_are_registered_as_umbrella_apps():
     assert not provisio.served and provisio.runtime == "python"
     assert provisio.entry == "main.py"
     assert not syndustryx.runs_from_source and syndustryx.bundle_dir is None
+
+
+# ----------------------------------------------------------------------
+# An unstamped bundle whose source declares releases (SYNDUSTRYX)
+# ----------------------------------------------------------------------
+def _release_repo(tmp_path, monkeypatch, installed="0.6.52"):
+    """A checkout whose manifest went 0.6.52 -> 0.6.53, then two more commits,
+    and an installed bundle at `installed`."""
+    import json as _json
+    import plistlib as _plistlib
+    import subprocess as _sp
+
+    applications = tmp_path / "Applications"
+    applications.mkdir()
+    monkeypatch.setattr(launcher, "APPLICATIONS", applications)
+    bundle = make_bundle(applications, "SYNDUSTRYX")
+    with (bundle / "Contents" / "Info.plist").open("wb") as handle:
+        _plistlib.dump(
+            {"CFBundleExecutable": "SYNDUSTRYX",
+             "CFBundleShortVersionString": installed}, handle,
+        )
+    project = _project(tmp_path, "syndustryx", entry="server.py")
+
+    def git(*args):
+        _sp.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                cwd=project, check=True, capture_output=True)
+
+    def release(number):
+        (project / "release-manifest.json").write_text(
+            _json.dumps({"version": number}, indent=2))
+        git("add", "release-manifest.json")
+        git("commit", "-m", f"release {number}")
+
+    git("init")
+    release("0.6.52")
+    release("0.6.53")
+    for n in range(2):
+        (project / f"work{n}.txt").write_text("x")
+        git("add", f"work{n}.txt")
+        git("commit", "-m", f"work {n}")
+    app = launcher.ExternalApp(
+        "syndustryx", "SYNDUSTRYX", "syndustryx", "server.py", "",
+        runs_from_source=False,
+    )
+    return app
+
+
+def test_an_old_release_is_counted_in_commits_behind(tmp_path, monkeypatch):
+    app = _release_repo(tmp_path, monkeypatch, installed="0.6.52")
+
+    found = launcher.version(app, tmp_path)
+
+    assert found.text == "v0.6.52"
+    assert found.behind == 3  # the 0.6.53 commit and the two after it
+    assert launcher.build_status(app, tmp_path).verdict == "behind"
+
+
+def test_the_current_release_is_not_behind(tmp_path, monkeypatch):
+    app = _release_repo(tmp_path, monkeypatch, installed="0.6.53")
+
+    found = launcher.version(app, tmp_path)
+
+    assert not found.stale

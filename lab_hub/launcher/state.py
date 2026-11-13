@@ -527,6 +527,48 @@ def _major(project: Path) -> str | None:
     return None
 
 
+RELEASE_MANIFEST = "release-manifest.json"
+
+
+def _release_number(project: Path) -> str | None:
+    """The release a project declares for itself, for apps with no lab VERSION.
+
+    SYNDUSTRYX numbers its releases 0.6.x in `release-manifest.json`, the same
+    number its bundle's Info.plist carries.
+    """
+    try:
+        raw = json.loads((project / RELEASE_MANIFEST).read_text()).get("version")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return raw.strip().lstrip("vV") if isinstance(raw, str) and raw.strip() else None
+
+
+def _commits_since_release(project: Path, release: str) -> int | None:
+    """Commits made since `release` first appeared in the project's manifest.
+
+    A bundle with no build stamp cannot say which commit it was built from, and
+    a signed one cannot be given one. Its release number can still be placed in
+    history: the commit that first wrote it into the manifest is where that
+    release was cut. None when the history does not show it.
+    """
+    try:
+        found = subprocess.run(
+            ["git", "log", "--format=%H", "-S", f'"version": "{release}"',
+             "--", RELEASE_MANIFEST],
+            cwd=project, capture_output=True, text=True, timeout=15,
+        )
+        commits = found.stdout.split()
+        if found.returncode != 0 or not commits:
+            return None
+        counted = subprocess.run(
+            ["git", "rev-list", "--count", f"{commits[-1]}..HEAD"],
+            cwd=project, capture_output=True, text=True, timeout=15,
+        )
+        return int(counted.stdout.strip()) if counted.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
 def checkout_version(project: Path) -> Version:
     major = _major(project)
     build = _commit_count(project)
@@ -554,8 +596,15 @@ def version(app: ExternalApp, lab_root: Path) -> Version:
         stamped = _stamped_version(bundle)
         if stamped is None and (project is None or _major(project) is None):
             # Outside the lab's scheme (SYNDUSTRYX): the bundle's own release
-            # number is the only honest one, and it is not compared to a source.
-            return _plist_version(bundle)
+            # number is the version. Where the source declares releases too,
+            # place the bundle's in its history to say how far behind it is.
+            plist = _plist_version(bundle)
+            release = _release_number(project) if project is not None else None
+            if plist.known and release is not None and plist.text.lstrip("v") != release:
+                since = _commits_since_release(project, plist.text.lstrip("v"))
+                if since:
+                    return replace(plist, behind=since)
+            return plist
         if stamped is None:
             return Version()
         # A frozen bundle is only as new as its last build. Saying so is the
@@ -666,7 +715,11 @@ def build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
             app, found, "missing",
             "no checkout here, so there is nothing to compare it against.",
         )
-    if found.origin == "bundle" and _major(project) is None:
+    if (
+        found.origin == "bundle"
+        and _major(project) is None
+        and _release_number(project) is None
+    ):
         return BuildStatus(
             app, found, "unknown",
             "its release number comes from the bundle; it does not use the "
