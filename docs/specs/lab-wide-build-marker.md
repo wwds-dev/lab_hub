@@ -47,3 +47,11 @@ Measure (all demonstrable by test or screenshot). Owner, 2026-11-13: "just like 
 
 ## 7. Phases to run
 Define (this file, **GATE**), Architect (module boundary: tile vs `state.py`; no state or concurrency change expected), Plan, Build, Review, Verify, Document. Secure and Comply skipped unless Build adds file writes (none planned). Tier `public` applies to Comply if it is needed.
+
+## 8. Verify notes (2026-11-13)
+- Suite: `python -m pytest` and `main.py --selftest` (the commands in README "Tests").
+- Measures 0-4, 6: `tests/test_build_marker.py` (real git repositories for the Provisio case: `v2.0.003+g<sha7> · 2 behind`); tile width checked offscreen at the card's minimum width (Provisio live: `v2.0.153+gc534bbb · N behind`).
+- Review round 2 (`docs/audit/lab-wide-build-marker-review.md`): P1-2 `build_status` is now `unknown` for `behind_unknown` and names a recorded root; P1-3 an unreadable recorded root is unknown and named, never the working checkout; P1-1 behind is cached on HEAD; P2-1 shallow shows `unknown`; P2-2 a stamp's unknown commit is not compared by count.
+- Mutation check: 21 mutations of the new logic across both rounds, each killed by a named test (one redundant `merge-base` check was removed instead).
+- Not met: measure 5 (Lab Monitor, other repo, proposal only); branch suffix (decision 2) not built. Secure and Comply skipped (no network, secrets or file writes added).
+- Behaviour change: a launcher bundle whose recorded root is gone now shows no version (it used to show the working checkout's). Three old tests used a fake root (`/somewhere`, `/x`) and now record the checkout itself.
