@@ -1,4 +1,4 @@
-"""The two windows behind Check repos: Clean up… and Review branches….
+"""The two windows behind Check repos: Resolve… and Review branches….
 
 Spec `docs/specs/repo-tidy.md`, section 4. All git work runs on a worker
 thread (`_Background`); the windows only show results. Neither window merges
@@ -81,7 +81,7 @@ class CleanupDialog(QDialog):
 
     def __init__(self, repos: Repos, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Clean up repos")
+        self.setWindowTitle("Resolve repos")
         self.changed = False
         self._applying = False
         self._actions: list[repo_tidy.Action] = []
@@ -129,7 +129,7 @@ class CleanupDialog(QDialog):
                 "Each is checked again just before it runs. Untick any you want to keep."
             )
         else:
-            self._status.setText("Nothing is safe to clean up automatically. "
+            self._status.setText("Nothing is safe to resolve automatically. "
                                  "Review branches lists the work that has not landed.")
         self._update_apply()
 

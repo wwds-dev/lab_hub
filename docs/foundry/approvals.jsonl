@@ -1,3 +1,4 @@
 {"ts": "2026-11-13T19:57:30", "gate": "define", "by": "owner", "words": "yes (approve the spec, including the +g<sha7> part)", "recorded_by": "agent", "spec": "lab-wide-build-marker"}
 {"ts": "2026-11-15T19:56:15", "gate": "define", "by": "owner", "words": "Approve as recommended", "recorded_by": "agent", "spec": "repo-tidy", "note": "A1: code in Lab Hub; A2: yes, skip .claude/worktrees touched in 24h"}
 {"ts": "2026-11-15T19:56:15", "gate": "architect", "by": "owner", "words": "Approve as recommended", "recorded_by": "agent", "spec": "repo-tidy", "note": "A1: code in Lab Hub; A2: yes, skip .claude/worktrees touched in 24h"}
+{"ts": "2026-11-15T20:56:53", "gate": "define", "by": "owner", "words": "Yes, build it", "recorded_by": "agent", "spec": "repo-tidy", "note": "amendment: Resolve commits tracked changes only, untracked skipped"}

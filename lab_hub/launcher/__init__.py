@@ -91,6 +91,7 @@ from .state import (  # noqa: F401
     process_table,
     readiness,
     recorded_project_root,
+    registered_build_command,
     running_markers,
     serving,
     source_dir,

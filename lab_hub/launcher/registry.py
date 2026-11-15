@@ -64,6 +64,13 @@ class ExternalApp:
     # engine without the window, on the port the Lab Project Monitor already
     # holds, so only its built bundle is ever launched.
     runs_from_source: bool = True
+    # For a project with none of the build scripts Lab Hub knows: the command
+    # that builds it (run in the checkout), and the bundle it writes, relative
+    # to the checkout. Update now runs the build, moves the installed bundle
+    # to the Trash and copies the new one into /Applications. SYNDUSTRYX's
+    # `build_desktop.py` writes `dist/SYNDUSTRYX.app` and installs nothing.
+    build: str | None = None
+    build_output: str | None = None
 
     @property
     def served(self) -> bool:

@@ -1,4 +1,4 @@
-"""Clean up… and Review branches… windows, on real temporary git repos."""
+"""Resolve… and Review branches… windows, on real temporary git repos."""
 
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ def test_cleanup_with_nothing_safe_offers_no_apply(qapp, lab):
     from ui.repo_tidy_dialogs import CleanupDialog
 
     dialog = CleanupDialog([("repo", lab)])
-    assert _pump_until(lambda: "Nothing is safe" in dialog._status.text())
+    assert _pump_until(lambda: "Nothing is safe" in dialog._status.text())  # level, clean repo
     assert not dialog.apply_button.isEnabled()
     dialog.reject()
 
@@ -110,7 +110,7 @@ def test_the_repo_report_offers_both_buttons(qapp, tmp_path, monkeypatch):
     monkeypatch.setattr(QMessageBox, "exec", lambda self: seen.update(
         labels={b.text() for b in self.buttons()}))
     tab.show_repo_report()
-    assert {"Clean up…", "Review branches…", "Close"} <= seen["labels"]
+    assert {"Resolve…", "Review branches…", "Close"} <= seen["labels"]
     _drop(tab)
 
 

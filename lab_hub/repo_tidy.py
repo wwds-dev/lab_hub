@@ -1,4 +1,4 @@
-"""Clean up what has safely landed, and list the rest for review.
+"""Resolve what is safe (commit, clean up, sync), and list the rest for review.
 
 Spec: `docs/specs/repo-tidy.md`. Check repos (`hygiene.py`) only reports; this
 module is the one place Lab Hub changes a repo, and only on the owner's click:
@@ -207,6 +207,46 @@ def paused_operation(path: Path) -> str:
     return ""
 
 
+def changed_tracked(path: Path) -> int:
+    """Tracked files with staged or unstaged changes."""
+    rc, out, _ = git(path, "status", "--porcelain", "--untracked-files=no")
+    return len(out.splitlines()) if rc == 0 else 0
+
+
+def untracked_count(path: Path) -> int:
+    rc, out, _ = git(path, "ls-files", "--others", "--exclude-standard")
+    return len(out.splitlines()) if rc == 0 else 0
+
+
+def has_conflicts(path: Path) -> bool:
+    rc, out, _ = git(path, "diff", "--name-only", "--diff-filter=U")
+    return rc != 0 or bool(out)
+
+
+def commit_blocker(repo: Path, wt: Worktree, busy: tuple[Path, ...] | None,
+                   now: float | None = None) -> str:
+    """Why tracked changes in this worktree must not be committed, or ""."""
+    if not wt.path.exists():
+        return "its folder is missing"
+    if not current_branch(wt.path):
+        return "it is on a detached HEAD"
+    paused = paused_operation(wt.path)
+    if paused:
+        return f"{paused} is in progress"
+    if has_conflicts(wt.path):
+        return "it has unresolved conflicts"
+    if not wt.main:
+        # A linked worktree is usually an agent's: leave one that is in use
+        # or was used recently to the session that owns it.
+        if busy is None:
+            return "could not check whether a process is running in it"
+        if in_use(wt.path, busy):
+            return "a process is running in it"
+        if recent_agent_worktree(repo, wt.path, now):
+            return f"an agent worktree used in the last {RECENT_HOURS} hours"
+    return ""
+
+
 def tracked_clean(path: Path) -> bool:
     rc, out, _ = git(path, "status", "--porcelain", "--untracked-files=no")
     return rc == 0 and not out
@@ -332,20 +372,22 @@ def worktree_blocker(repo: Path, wt: Worktree, busy: tuple[Path, ...] | None,
 
 
 # ----------------------------------------------------------------------
-# Clean up: plan and apply
+# Resolve: plan and apply
 # ----------------------------------------------------------------------
 @dataclass(frozen=True)
 class Action:
     repo_name: str
     repo: Path
-    kind: str  # delete_branch | remove_worktree | pull | push
+    kind: str  # commit | delete_branch | remove_worktree | pull | push
     target: str  # branch name, or worktree path
     reason: str
     sha: str = ""  # a branch's tip when planned: deleted only if unchanged
+    branch: str = ""  # commit: the branch the worktree was on when planned
 
     @property
     def label(self) -> str:
         verb = {
+            "commit": f"Commit in {self.target} (on {self.branch})",
             "delete_branch": f"Delete branch {self.target}",
             "remove_worktree": f"Remove worktree {self.target}",
             "pull": f"Pull {self.target} (fast-forward)",
@@ -381,6 +423,29 @@ def plan_repo(name: str, repo: Path, busy: tuple[Path, ...] | None = (),
     trees = worktrees(repo)
     by_branch = {wt.branch: wt for wt in trees if wt.branch}
 
+    # Open work: commit tracked changes; never add untracked files.
+    main_committed = False
+    for wt in trees:
+        changed = changed_tracked(wt.path) if wt.path.exists() else 0
+        loose = untracked_count(wt.path) if wt.path.exists() else 0
+        if loose:
+            skips.append(Skip(name, str(wt.path),
+                              f"{loose} untracked file{'s' if loose != 1 else ''} — "
+                              "add them yourself if they belong in git"))
+        if not changed:
+            continue
+        blocker = commit_blocker(repo, wt, busy, now)
+        if blocker:
+            skips.append(Skip(name, str(wt.path),
+                              f"{changed} changed file{'s' if changed != 1 else ''} not "
+                              f"committed: {blocker}"))
+            continue
+        branch = current_branch(wt.path)
+        actions.append(Action(name, repo, "commit", str(wt.path),
+                              f"{changed} changed tracked file{'s' if changed != 1 else ''}",
+                              branch=branch))
+        main_committed = main_committed or (wt.main and branch == default)
+
     # Landed branches, and the worktrees that hold them.
     for branch in local_branches(repo):
         if branch == default or not is_landed(repo, default, branch):
@@ -410,9 +475,12 @@ def plan_repo(name: str, repo: Path, busy: tuple[Path, ...] | None = (),
                                   f"clean, detached at a commit already in {default}"))
 
     # Sync the default branch, only when nothing can be lost or merged.
-    reason = sync_blocker(repo, default)
+    reason = sync_blocker(repo, default, after_commit=main_committed)
     if reason:
         skips.append(Skip(name, default, reason))
+    elif main_committed:
+        actions.append(Action(name, repo, "push", default,
+                              "after the commit above, nothing else to pull"))
     else:
         ahead, behind = ahead_behind(repo) or (0, 0)
         if behind:
@@ -424,9 +492,13 @@ def plan_repo(name: str, repo: Path, busy: tuple[Path, ...] | None = (),
     return actions, skips
 
 
-def sync_blocker(repo: Path, default: str) -> str:
+def sync_blocker(repo: Path, default: str, after_commit: bool = False) -> str:
     """Why the default branch must not be pulled or pushed, or "" when one of
-    the two may run (it is only behind, or only ahead, with nothing local)."""
+    the two may run (it is only behind, or only ahead, with nothing local).
+
+    `after_commit`: a commit of the checkout's open work is planned first, so
+    uncommitted changes and being level do not stop the push that follows it.
+    """
     trees = worktrees(repo)
     if not trees:
         return "git cannot list its checkout"
@@ -441,10 +513,14 @@ def sync_blocker(repo: Path, default: str) -> str:
     ahead, behind = counts
     if ahead and behind:
         return f"diverged: {ahead} unpushed, {behind} behind"
+    if after_commit:
+        if behind:
+            return f"{behind} behind with local changes: committing would diverge it, so not pushed"
+        return f"{paused_operation(trees[0].path)} is in progress" if paused_operation(trees[0].path) else ""
+    if not tracked_clean(trees[0].path):
+        return "has uncommitted changes that are not committed first"
     if not ahead and not behind:
         return "level with origin"
-    if not tracked_clean(trees[0].path):
-        return ("behind, but" if behind else "ahead, but") + " has uncommitted changes"
     if paused_operation(trees[0].path):
         return f"{paused_operation(trees[0].path)} is in progress"
     return ""
@@ -520,6 +596,18 @@ def check(action: Action, busy: tuple[Path, ...] | None = (),
     default = default_branch(repo)
     if default is None:
         return "no default branch found"
+    if action.kind == "commit":
+        wt = _find_worktree(repo, action.target)
+        if wt is None:
+            return "the worktree is gone"
+        if current_branch(wt.path) != action.branch:
+            return f"it is no longer on {action.branch}"
+        blocker = commit_blocker(repo, wt, busy, now)
+        if blocker:
+            return blocker
+        if not changed_tracked(wt.path):
+            return "nothing to commit any more"
+        return ""
     if action.kind == "delete_branch":
         branch = action.target
         if branch == default:
@@ -574,7 +662,7 @@ def apply(action: Action, log: Path | None = None,
     (tests pass one): an earlier snapshot can be minutes old by now.
     """
     if busy == "fresh":
-        busy = busy_dirs() if action.kind == "remove_worktree" else ()
+        busy = busy_dirs() if action.kind in ("remove_worktree", "commit") else ()
     reason = check(action, busy, now)  # type: ignore[arg-type]
     if reason:
         _log(f"SKIP {action.repo} {action.kind} {action.target}: {reason}", log)
@@ -583,7 +671,15 @@ def apply(action: Action, log: Path | None = None,
     if action.kind == "delete_branch":
         ok, message = _delete_branch_at(repo, action.target, action.sha, log, "landed branch")
         return ok, "done" if ok else message
-    if action.kind == "remove_worktree":
+    if action.kind == "commit":
+        path = Path(action.target)
+        rc, _, err = git(path, "add", "--update")
+        if rc == 0:
+            message = f"Lab Hub: commit open work, {datetime.now():%Y-%m-%d %H:%M}"
+            rc, _, err = git(path, "commit", "--quiet", "-m", message)
+        if rc == 0:
+            _log(f"COMMITTED tracked changes in {path} on {action.branch}", log)
+    elif action.kind == "remove_worktree":
         rc, _, err = git(repo, "worktree", "remove", "--", action.target)
         if rc == 0:
             _log(f"REMOVED worktree {action.target} of {repo}", log)
@@ -684,7 +780,7 @@ def worktree_status(info: BranchInfo, busy: tuple[Path, ...] | None | str = "fre
     if busy == "fresh":
         busy = busy_dirs()
     blocker = worktree_blocker(info.repo, wt, busy, now)
-    # The recent-agent rule protects Clean up; a deliberate removal may
+    # The recent-agent rule protects Resolve; a deliberate removal may
     # override it after a warning, so it is not a blocker here.
     if blocker.startswith("an agent worktree"):
         return ""

@@ -1384,3 +1384,77 @@ def test_the_current_release_is_not_behind(tmp_path, monkeypatch):
     found = launcher.version(app, tmp_path)
 
     assert not found.stale
+
+
+# ----------------------------------------------------------------------
+# An app with its own build command (SYNDUSTRYX: build_desktop.py)
+# ----------------------------------------------------------------------
+def test_a_registered_build_command_builds_and_installs(tmp_path, monkeypatch):
+    """The build runs in the checkout; only after it produced a bundle is the
+    installed one moved to the Trash and the new one copied in."""
+    import subprocess
+
+    apps = tmp_path / "Applications"
+    (apps / "X.app").mkdir(parents=True)
+    (apps / "X.app" / "old").write_text("")
+    project = tmp_path / "x"
+    project.mkdir()
+    home = tmp_path / "home"
+    (home / ".Trash").mkdir(parents=True)
+    monkeypatch.setattr(launcher, "APPLICATIONS", apps)
+    app = launcher.ExternalApp("x", "X", "x", "server.py", "", build="mkdir -p out/X.app && touch out/X.app/new",
+                               build_output="out/X.app")
+
+    command = launcher.registered_build_command(app, project)
+    subprocess.run(["/bin/sh", "-c", command], check=True, env={**os.environ, "HOME": str(home)})
+
+    assert (apps / "X.app" / "new").exists() and not (apps / "X.app" / "old").exists()
+    (trashed,) = (home / ".Trash").iterdir()
+    assert trashed.name.startswith("X before update") and (trashed / "old").exists()
+
+
+def test_a_failed_registered_build_leaves_the_installed_app(tmp_path, monkeypatch):
+    import subprocess
+
+    apps = tmp_path / "Applications"
+    (apps / "X.app").mkdir(parents=True)
+    project = tmp_path / "x"
+    project.mkdir()
+    monkeypatch.setattr(launcher, "APPLICATIONS", apps)
+    app = launcher.ExternalApp("x", "X", "x", "server.py", "", build="false", build_output="out/X.app")
+
+    result = subprocess.run(["/bin/sh", "-c", launcher.registered_build_command(app, project)])
+
+    assert result.returncode != 0
+    assert (apps / "X.app").is_dir()
+
+
+def test_the_build_report_uses_the_registered_build(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    bundle = make_bundle(tmp_path, "SONAR")
+    _stamp(bundle, build=104)
+    _checkout(tmp_path, "sonar", monkeypatch=monkeypatch, build=109)
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "",
+                               build="python3 build_desktop.py", build_output="dist/SONAR.app")
+
+    row = launcher.build_status(app, tmp_path)
+
+    assert row.runs_in_app
+    assert "python3 build_desktop.py" in row.command and "ditto" in row.command
+
+
+def test_no_command_names_the_projects_build_guide(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    bundle = make_bundle(tmp_path, "SONAR")
+    _stamp(bundle, build=104)
+    project = _checkout(tmp_path, "sonar", monkeypatch=monkeypatch, build=109)
+    (project / "desktop").mkdir()
+    (project / "desktop" / "BUILDING.md").write_text("steps\n")
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    row = launcher.build_status(app, tmp_path)
+
+    assert row.command is None
+    assert row.guide == project / "desktop" / "BUILDING.md"
+    assert row.project == project
+    assert "desktop/BUILDING.md" in row.note
