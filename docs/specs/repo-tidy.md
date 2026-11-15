@@ -57,3 +57,10 @@ Merging branches, opening or merging PRs, committing uncommitted files, stashes,
 ## 8. Phases to run
 Define, Design, Architect (this file; **GATE**: it changes git state across repos), Plan, Build, Review (`code-reviewer`), Verify (`qa-engineer`, mutation check), Secure (`security-engineer`: destructive file and git writes, subprocess input from branch names), Document (README, TODO). Comply skipped: no new data, network or legal surface beyond `git push` to the owner's own remotes. Release: rebuilding Lab Hub stays with the owner.
 Estimate: Build 45–90 min agent time, plus Review/Verify/Secure 15–25 min.
+
+## 9. Amendment 2026-11-15: Resolve commits open work
+Owner: "check repos button should also offer a button to resolve in the app. commit, etc whatever is open and safe to resolve"; approved the plan below with "Yes, build it".
+- **Clean up…** is renamed **Resolve…**.
+- New action **Commit**: in a repo's main checkout, and in a linked worktree that passes the worktree guards (not in use, not a recent agent worktree, `lsof` working), commit *tracked* changes only (`git add -u`, message `Lab Hub: commit open work, <date>`). Skipped: a detached HEAD, a merge/rebase/cherry-pick/bisect in progress, unresolved conflicts. Untracked files are never added; they are listed as left for the owner, because `lab_hub` and others are public repos and a non-ignored secret would be published by the push.
+- When the main checkout is committed on its default branch tracking `origin/<default>` and is otherwise level or only ahead, a **Push** follows in the same preview; it still re-checks (fresh fetch, clean, not behind) before running. Behind plus local changes is left alone (it would diverge).
+- Commits run the repo's own hooks; a hook that refuses stops that commit.

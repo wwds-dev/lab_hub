@@ -695,6 +695,44 @@ def test_a_by_hand_install_gets_no_update_now(qapp, monkeypatch):
     shiboken6.delete(tab)
 
 
+def test_an_app_with_no_command_gets_open_in_terminal(qapp, monkeypatch, tmp_path):
+    """Nothing to run is not a dead end: its folder opens in Terminal."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from lab_hub import config
+    from ui.apps_tab import AppsTab
+
+    apps = (launcher.ExternalApp("s", "S", "s", "main.py", "x"),)
+    tab = AppsTab(config.Settings(), apps, "S", "intro", check_own_builds=True)
+    guide = tmp_path / "desktop" / "BUILDING.md"
+    monkeypatch.setattr(launcher, "build_report", lambda root, scope=None: (
+        launcher.BuildStatus(apps[0], launcher.Version(), "behind", "older.",
+                             project=tmp_path, guide=guide),
+    ))
+    opened = []
+    monkeypatch.setattr(launcher, "open_terminal", opened.append)
+    seen = {}
+
+    def press(box):
+        seen.update(info=box.informativeText(), labels={b.text() for b in box.buttons()})
+        for b in box.buttons():
+            if b.text() == "Open in Terminal":
+                b.click()
+
+    monkeypatch.setattr(QMessageBox, "exec", press)
+    tab.show_build_report()
+
+    assert "Update now" not in seen["labels"]
+    assert "Open in Terminal" in seen["labels"]
+    assert str(guide) in seen["info"]
+    assert opened == [tmp_path]
+
+    import shiboken6
+
+    tab._poll.stop()
+    shiboken6.delete(tab)
+
+
 def test_the_rebuild_dialog_runs_the_commands_in_order(qapp):
     """Two commands, both succeed, both show up in the log — and `succeeded`
     reports the run as clean."""

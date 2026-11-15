@@ -68,6 +68,10 @@ project = "syndustryx"
 entry = "server.py"
 summary = "An autonomous, money-generating agent company: AI agents run the fulfilment engine, storefront and departments, with the owner as the only approver."
 runs_from_source = false
+# Its builder stops at dist/; Update now installs the result (owner's choice,
+# 2026-11-15, over the project's own update preflight: desktop/BUILDING.md).
+build = "python3 build_desktop.py"
+build_output = "dist/SYNDUSTRYX.app"
 
 [[suites]]
 key = "backstage"

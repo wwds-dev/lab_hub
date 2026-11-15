@@ -1,4 +1,4 @@
-"""Clean up and Review branches, on real temporary git repos (no git mocks).
+"""Resolve and Review branches, on real temporary git repos (no git mocks).
 
 Spec `docs/specs/repo-tidy.md`, section 5: one test per guard.
 """
@@ -39,6 +39,8 @@ def lab(tmp_path):
     repo = tmp_path / "repo"
     sh(tmp_path, "clone", "-q", str(origin), str(repo))
     sh(repo, "checkout", "-q", "-b", "main")
+    sh(repo, "config", "user.name", "t")
+    sh(repo, "config", "user.email", "t@t")
     commit(repo, "a.txt")
     sh(repo, "push", "-q", "-u", "origin", "main")
     sh(repo, "remote", "set-head", "origin", "main")
@@ -209,7 +211,7 @@ def test_behind_with_uncommitted_changes_is_not_pulled(lab, tmp_path):
     (lab / "a.txt").write_text("edited")
     plan = run_plan(lab)
     assert ("pull", "main") not in kinds(plan)
-    assert any("uncommitted" in s.reason for s in plan.skipped)
+    assert any("would diverge" in s.reason for s in plan.skipped)
 
 
 def test_only_ahead_is_pushed(lab, tmp_path):
@@ -353,12 +355,15 @@ def test_busy_dirs_fails_closed(monkeypatch):
     assert tidy.in_use(Path("/anything"), None)
 
 
-def test_ahead_with_uncommitted_changes_is_not_pushed(lab):
+def test_ahead_with_uncommitted_changes_is_pushed_only_after_its_commit(lab, tmp_path):
     commit(lab, "local.txt")
     (lab / "a.txt").write_text("edited")
     plan = run_plan(lab)
-    assert ("push", "main") not in kinds(plan)
-    assert any("uncommitted" in s.reason for s in plan.skipped)
+    order = [a.kind for a in plan.actions]
+    assert order.index("commit") < order.index("push")
+    push = next(a for a in plan.actions if a.kind == "push")
+    done, msg = tidy.apply(push, tmp_path / "log", busy=(), now=OLD)
+    assert not done and "uncommitted" in msg  # the commit was unticked
 
 
 def test_a_default_branch_not_tracking_origin_is_not_synced(lab, tmp_path):
@@ -419,3 +424,87 @@ def test_delete_only_removes_the_branch_at_the_planned_tip(lab, tmp_path):
     done, _ = tidy._delete_branch_at(lab, "wip", old, tmp_path / "log", "test")
     assert not done
     assert "wip" in tidy.local_branches(lab)
+
+
+# ------------------------------------------------------------- commit
+def test_tracked_changes_are_committed_and_then_pushed(lab, tmp_path):
+    (lab / "a.txt").write_text("edited")
+    (lab / "secret.env").write_text("KEY=1")  # untracked: never added
+    plan = run_plan(lab)
+    order = [(a.kind, a.target) for a in plan.actions]
+    assert order.index(("commit", str(lab))) < order.index(("push", "main"))
+    assert any("1 untracked file" in s.reason for s in plan.skipped)
+    for action in plan.actions:
+        assert tidy.apply(action, tmp_path / "log", busy=(), now=OLD)[0], action
+    assert tidy.ahead_behind(lab) == (0, 0)
+    assert "secret.env" not in sh(lab, "ls-files")
+    assert (lab / "secret.env").exists()
+    assert sh(lab, "log", "-1", "--format=%s").startswith("Lab Hub: commit open work")
+
+
+def test_a_push_without_its_commit_is_refused(lab, tmp_path):
+    (lab / "a.txt").write_text("edited")
+    push = next(a for a in run_plan(lab).actions if a.kind == "push")
+    done, msg = tidy.apply(push, tmp_path / "log", busy=(), now=OLD)
+    assert not done and "uncommitted" in msg
+
+
+def test_behind_with_changes_is_committed_but_not_pushed(lab, tmp_path):
+    other = other_clone(lab, tmp_path)
+    commit(other, "remote.txt")
+    sh(other, "push", "-q")
+    sh(lab, "fetch", "-q")
+    (lab / "a.txt").write_text("edited")
+    planned = kinds(run_plan(lab))
+    assert ("commit", str(lab)) in planned
+    assert not {k for k, _ in planned} & {"push", "pull"}
+
+
+def test_untracked_only_is_not_committed(lab):
+    (lab / "new.txt").write_text("x")
+    assert not any(a.kind == "commit" for a in run_plan(lab).actions)
+
+
+def test_a_conflict_or_paused_rebase_is_not_committed(lab, tmp_path):
+    (lab / "a.txt").write_text("edited")
+    gitdir = Path(sh(lab, "rev-parse", "--absolute-git-dir"))
+    (gitdir / "rebase-merge").mkdir()
+    plan = run_plan(lab)
+    assert not any(a.kind == "commit" for a in plan.actions)
+    assert any("rebase is in progress" in s.reason for s in plan.skipped)
+
+
+def test_a_detached_head_is_not_committed(lab):
+    sh(lab, "checkout", "-q", "--detach")
+    (lab / "a.txt").write_text("edited")
+    assert not any(a.kind == "commit" for a in run_plan(lab).actions)
+
+
+def test_a_busy_or_recent_agent_worktree_is_not_committed(lab, tmp_path):
+    sh(lab, "branch", "wip")
+    wt = lab / ".claude" / "worktrees" / "wip"
+    sh(lab, "worktree", "add", "-q", str(wt), "wip")
+    (wt / "a.txt").write_text("agent edit")
+    assert ("commit", str(wt)) not in kinds(run_plan(lab, now=time.time()))
+    assert ("commit", str(wt)) not in kinds(run_plan(lab, busy=(wt,)))
+    assert ("commit", str(wt)) in kinds(run_plan(lab, now=OLD))
+
+
+def test_a_commit_is_skipped_when_the_branch_changed(lab, tmp_path):
+    (lab / "a.txt").write_text("edited")
+    action = next(a for a in run_plan(lab).actions if a.kind == "commit")
+    sh(lab, "checkout", "-q", "-b", "other")
+    done, msg = tidy.apply(action, tmp_path / "log", busy=(), now=OLD)
+    assert not done and "no longer on main" in msg
+
+
+def test_unresolved_conflicts_are_not_committed(lab):
+    """A conflicted stash apply leaves unmerged files and no MERGE_HEAD."""
+    (lab / "a.txt").write_text("mine")
+    sh(lab, "stash", "push", "-q", "-m", "test-conflict")
+    commit(lab, "a.txt", "theirs")
+    subprocess.run(["git", "stash", "apply", "-q"], cwd=lab, capture_output=True)
+    assert tidy.has_conflicts(lab)
+    plan = run_plan(lab)
+    assert not any(a.kind == "commit" for a in plan.actions)
+    assert any("unresolved conflicts" in s.reason for s in plan.skipped)

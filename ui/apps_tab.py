@@ -726,7 +726,7 @@ class AppsTab(TilePage):
         # app with no known build script is named rather than dropped.
         commands = [row.command for row in behind if row.runs_in_app]
         by_hand = [row.command for row in behind if row.by_hand and row.command]
-        no_command = [row.app.name for row in behind if not row.command]
+        no_command = [row for row in behind if not row.command]
         if commands:
             lines.append("")
             lines.append("Update now runs:")
@@ -737,7 +737,11 @@ class AppsTab(TilePage):
             lines.extend(f"  {command}" for command in by_hand)
         if no_command:
             lines.append("")
-            lines.append(f"No rebuild command for: {', '.join(no_command)}.")
+            lines.append(
+                f"No rebuild command for: {', '.join(r.app.name for r in no_command)}. "
+                "Open in Terminal opens its folder; build it there by its own steps."
+            )
+            lines.extend(f"  {r.app.name}: {r.guide}" for r in no_command if r.guide)
 
         box = QMessageBox(self)
         box.setWindowTitle("Build check")
@@ -760,6 +764,15 @@ class AppsTab(TilePage):
             terminal = box.addButton(
                 "Copy and open Terminal", QMessageBox.ButtonRole.ActionRole
             )
+        # An app Lab Hub cannot rebuild still gets a way forward: its folder in
+        # Terminal, where its own build guide applies.
+        folders = [r.project for r in no_command if r.project is not None]
+        open_folder = None
+        if folders:
+            open_folder = box.addButton("Open in Terminal",
+                                        QMessageBox.ButtonRole.ActionRole)
+            open_folder.setToolTip("Open a Terminal window in the project folder of "
+                                   + ", ".join(r.app.name for r in no_command))
         # A QMessageBox whose only buttons are ActionRole has nothing to map the
         # red close button or Escape onto, so both become dead and the dialog
         # cannot be dismissed at all. Give it an explicit way out.
@@ -775,6 +788,9 @@ class AppsTab(TilePage):
             # opens does not change what they do — it only has to be somewhere
             # sensible to land.
             launcher.open_terminal(self.settings.resolved_lab_root())
+        if open_folder is not None and clicked is open_folder:
+            for folder in folders:
+                launcher.open_terminal(folder)
         if update is not None and clicked is update:
             self.run_updates(commands)
 
@@ -906,13 +922,14 @@ class AppsTab(TilePage):
             box.setIcon(
                 QMessageBox.Icon.Warning if todo else QMessageBox.Icon.Information
             )
-        # Clean up does only what loses nothing; Review branches lists the
+        # Resolve does only what loses nothing; Review branches lists the
         # rest, one branch at a time. Neither merges (docs/specs/repo-tidy.md).
         cleanup = review = None
         if report is not None and report.rows:
-            cleanup = box.addButton("Clean up…", QMessageBox.ButtonRole.ActionRole)
-            cleanup.setToolTip("Delete branches already in main, remove their clean "
-                               "worktrees, and pull or push where nothing can be lost")
+            cleanup = box.addButton("Resolve…", QMessageBox.ButtonRole.ActionRole)
+            cleanup.setToolTip("Commit open tracked changes, delete branches already in "
+                               "main, remove their clean worktrees, and pull or push where "
+                               "nothing can be lost — previewed first")
             review = box.addButton("Review branches…", QMessageBox.ButtonRole.ActionRole)
             review.setToolTip("List every branch with work not yet in main")
         close = box.addButton("Close", QMessageBox.ButtonRole.RejectRole)
@@ -924,7 +941,7 @@ class AppsTab(TilePage):
             self.tidy_repos(report, review=clicked is review)
 
     def tidy_repos(self, report: hygiene.Report, review: bool = False) -> None:
-        """Open Clean up or Review branches; re-check the repos if anything changed."""
+        """Open Resolve or Review branches; re-check the repos if anything changed."""
         from ui.repo_tidy_dialogs import CleanupDialog, ReviewDialog
 
         repos = [(row.name, row.path) for row in report.rows]

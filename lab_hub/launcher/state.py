@@ -934,6 +934,36 @@ def needs_terminal(script: Path) -> bool:
 
 
 RELEASE_RUNBOOK = "docs/RUNBOOK-release.md"
+# Where a project with no build script Lab Hub knows says how to build it,
+# first match wins (SYNDUSTRYX: desktop/BUILDING.md).
+BUILD_GUIDES = ("desktop/BUILDING.md", "BUILDING.md", "docs/BUILDING.md",
+                RELEASE_RUNBOOK, "docs/RELEASE.md", "RELEASE.md")
+
+
+def build_guide(project: Path) -> Path | None:
+    for name in BUILD_GUIDES:
+        candidate = project / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def registered_build_command(app: ExternalApp, project: Path) -> str | None:
+    """Build with the app's own `build` command and install `build_output`.
+
+    The installed bundle is moved to the Trash (dated, so it can be put back)
+    only after the build produced a new one; then the new one is copied in.
+    """
+    if not app.build or not app.build_output:
+        return None
+    built = shlex.quote(app.build_output)
+    installed = shlex.quote(str(APPLICATIONS / f"{app.name}.app"))
+    trash = f'"$HOME/.Trash/{app.name} before update $(date +%Y-%m-%d-%H%M%S).app"'
+    return (
+        f"cd {shlex.quote(str(project))} && {app.build} && test -d {built} && "
+        f"{{ [ ! -e {installed} ] || mv {installed} {trash}; }} && "
+        f"ditto {built} {installed}"
+    )
 
 
 def dirty_checkout(project: Path) -> bool:
@@ -968,6 +998,10 @@ class BuildStatus:
     # The installer must be run by hand, in a terminal: Update now skips it and
     # the report hands it over instead.
     by_hand: bool = False
+    # The checkout, for Open in Terminal, and the doc that says how to build
+    # it when Lab Hub has no command for it.
+    project: Path | None = None
+    guide: Path | None = None
 
     @property
     def needs_rebuild(self) -> bool:
@@ -1002,12 +1036,15 @@ def build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
         steps = (f" Follow {guide} first." if guide.is_file() else "")
         note = (f"{note} Its installer only runs by hand, in a terminal, so "
                 f"Update now leaves it to you.{steps}")
-    elif row.needs_rebuild and command is None:
+    project = source_dir(app, lab_root)
+    guide = None
+    if row.needs_rebuild and command is None:
+        guide = build_guide(project) if project is not None else None
+        how = f"follow {guide}" if guide else "rebuild it the project's own way"
         note = (f"{note} Lab Hub has no rebuild command for it: none of "
-                f"{', '.join(BUILD_SCRIPTS)} exists, so rebuild it the "
-                "project's own way.")
+                f"{', '.join(BUILD_SCRIPTS)} exists, so {how}.")
     return replace(row, script=script, command=command, by_hand=by_hand,
-                   note=note)
+                   note=note, project=project, guide=guide)
 
 
 def _build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
@@ -1017,6 +1054,7 @@ def _build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
     command = (
         install_command(project, script)
         if project is not None and script is not None
+        else registered_build_command(app, project) if project is not None
         else None
     )
 
