@@ -41,8 +41,9 @@ def test_the_menu_lists_the_top_level_apps(menu_bar_item):
 
     labels = [a.text() for a in menu_bar_item._menu.actions() if a.text()]
 
-    for app in launcher.MENU_BAR_APPS:
+    for app in launcher.SUITES + launcher.BACKUP_SYNC_APPS:
         assert app.name in labels
+    assert "Unblock Tracker" not in labels
 
 
 def test_the_menu_lists_only_umbrella_apps(menu_bar_item):

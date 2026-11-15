@@ -117,7 +117,8 @@ class Tray(QObject):
             self._menu.removeAction(action)
             action.deleteLater()
         self._app_actions = []
-        for app in launcher.MENU_BAR_APPS:
+        # Unblock Tracker (the utilities group) is left off: Apps tab only.
+        for app in launcher.SUITES + launcher.BACKUP_SYNC_APPS:
             action = QAction(app.name, self._menu)
             action.triggered.connect(lambda _checked=False, a=app: self._launch(a))
             self._menu.insertAction(self._apps_end, action)
