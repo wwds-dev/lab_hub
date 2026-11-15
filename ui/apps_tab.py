@@ -906,10 +906,32 @@ class AppsTab(TilePage):
             box.setIcon(
                 QMessageBox.Icon.Warning if todo else QMessageBox.Icon.Information
             )
+        # Clean up does only what loses nothing; Review branches lists the
+        # rest, one branch at a time. Neither merges (docs/specs/repo-tidy.md).
+        cleanup = review = None
+        if report is not None and report.rows:
+            cleanup = box.addButton("Clean up…", QMessageBox.ButtonRole.ActionRole)
+            cleanup.setToolTip("Delete branches already in main, remove their clean "
+                               "worktrees, and pull or push where nothing can be lost")
+            review = box.addButton("Review branches…", QMessageBox.ButtonRole.ActionRole)
+            review.setToolTip("List every branch with work not yet in main")
         close = box.addButton("Close", QMessageBox.ButtonRole.RejectRole)
         box.setEscapeButton(close)
         box.setDefaultButton(close)
         box.exec()
+        clicked = box.clickedButton()
+        if report is not None and clicked is not None and clicked in (cleanup, review):
+            self.tidy_repos(report, review=clicked is review)
+
+    def tidy_repos(self, report: hygiene.Report, review: bool = False) -> None:
+        """Open Clean up or Review branches; re-check the repos if anything changed."""
+        from ui.repo_tidy_dialogs import CleanupDialog, ReviewDialog
+
+        repos = [(row.name, row.path) for row in report.rows]
+        dialog = (ReviewDialog if review else CleanupDialog)(repos, self)
+        dialog.exec()
+        if dialog.changed:
+            self.check_repos()
 
     def refresh(self) -> None:
         lab_root = self.settings.resolved_lab_root()

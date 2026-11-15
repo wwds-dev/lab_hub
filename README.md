@@ -283,8 +283,30 @@ work; the tooltip lists them. The data is `git_autosync`'s `hygiene.json`
 cost no git call. The button re-runs `git_autosync/scripts/hygiene.py` as a
 child process (local git only, no fetch, a few seconds, the window stays
 usable) and lists every repo that has work left, not only the ones with an app.
-Report only: it never commits, pushes or merges. `lab_hub/hygiene.py`,
+The check itself never commits, pushes or merges. `lab_hub/hygiene.py`,
 `tests/test_hygiene.py`.
+
+The report has two buttons for acting on it (`docs/specs/repo-tidy.md`):
+
+- **Clean up…** previews only what loses nothing, each line ticked and
+  explained: delete a branch whose changes are already in the default branch
+  (including squash-merged work), remove a clean worktree on such a branch or
+  detached at a commit already there, fast-forward a default branch that is
+  only behind with no local changes, push one that is only ahead. A worktree
+  with uncommitted or untracked files, a process inside it, a lock, or an
+  agent worktree under `.claude/worktrees/` used in the last 24 hours is left
+  alone, and the window says why. Every action is checked again just before it
+  runs; a diverged or dirty repo is never synced, and nothing is force-pushed.
+- **Review branches…** lists every branch with work not yet in the default
+  branch (commits ahead, last date and subject, worktree). Per branch: **Open in
+  Terminal**, **Delete branch…** (confirms with its commits; off while it is
+  checked out), **Remove worktree…** (only when clean and unused; the branch
+  stays). Lab Hub merges nothing.
+
+Every change is logged to `~/Library/Application Support/Lab Hub/repo-tidy.log`;
+a deleted branch is logged with its tip, so `git branch <name> <sha>` restores
+it. `lab_hub/repo_tidy.py`, `ui/repo_tidy_dialogs.py`,
+`tests/test_repo_tidy.py`, `tests/test_repo_tidy_ui.py`.
 
 A launcher bundle is never out of date, and being dirty does not change that:
 it runs the source, so uncommitted edits are exactly what opens.

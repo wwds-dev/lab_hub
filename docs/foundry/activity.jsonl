@@ -9,3 +9,11 @@
 {"ts": "2026-11-13T20:05:12", "phase": "verify", "state": "start", "spec": "lab-wide-build-marker"}
 {"ts": "2026-11-13T20:07:44", "phase": "verify", "state": "done", "spec": "lab-wide-build-marker"}
 {"ts": "2026-11-13T20:07:44", "phase": "document", "state": "done", "spec": "lab-wide-build-marker"}
+{"ts": "2026-11-15T19:55:10", "phase": "define", "state": "start", "spec": "repo-tidy"}
+{"ts": "2026-11-15T19:55:42", "phase": "define", "state": "done", "spec": "repo-tidy"}
+{"ts": "2026-11-15T19:56:15", "phase": "build", "state": "start", "spec": "repo-tidy"}
+{"ts": "2026-11-15T20:18:44", "phase": "build", "state": "done", "spec": "repo-tidy"}
+{"ts": "2026-11-15T20:18:44", "phase": "review", "state": "done", "spec": "repo-tidy"}
+{"ts": "2026-11-15T20:18:44", "phase": "verify", "state": "done", "spec": "repo-tidy"}
+{"ts": "2026-11-15T20:18:44", "phase": "secure", "state": "done", "spec": "repo-tidy"}
+{"ts": "2026-11-15T20:18:44", "phase": "document", "state": "done", "spec": "repo-tidy"}
