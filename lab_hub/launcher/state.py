@@ -918,6 +918,24 @@ def install_command(project: Path, script: Path) -> str:
     return f"cd {shlex.quote(str(project))} && ./{relative}{suffix}"
 
 
+def needs_terminal(script: Path) -> bool:
+    """Whether the install script refuses to run without a terminal.
+
+    Provisio's `install_app.sh` checks `[ ! -t 0 ]` and stops: it must be run
+    by hand, because it asks the owner to type "install". Lab Hub's Update now
+    runs commands with no terminal, so such a script can only fail there — it
+    is handed over instead. Read from the script, like the install flag.
+    """
+    try:
+        text = script.read_text()
+    except OSError:
+        return False
+    return "-t 0" in text
+
+
+RELEASE_RUNBOOK = "docs/RUNBOOK-release.md"
+
+
 def dirty_checkout(project: Path) -> bool:
     """Whether the checkout has changes that are not committed.
 
@@ -947,14 +965,52 @@ class BuildStatus:
     note: str
     script: Path | None = None
     command: str | None = None  # the shell line that would bring it up to date
+    # The installer must be run by hand, in a terminal: Update now skips it and
+    # the report hands it over instead.
+    by_hand: bool = False
 
     @property
     def needs_rebuild(self) -> bool:
         return self.verdict in ("behind", "uncommitted")
 
+    @property
+    def runs_in_app(self) -> bool:
+        """A rebuild Update now can run itself."""
+        return self.needs_rebuild and bool(self.command) and not self.by_hand
+
 
 def build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
-    """Whether what this tile would open is the newest thing available."""
+    """Whether what this tile would open is the newest thing available, and
+    how to bring it up to date.
+
+    A launcher bundle that records a root other than the working checkout
+    (Provisio: its release clone) is installed from that root, never from the
+    working checkout — its installer refuses the main checkout. An installer
+    that needs a terminal is marked `by_hand`, so Update now does not run it
+    only to watch it refuse.
+    """
+    row = _build_status(app, lab_root)
+    script, command = row.script, row.command
+    root = Path(row.version.root) if row.version.root else None
+    if root is not None and root.is_dir():
+        script = build_script(root)
+        command = install_command(root, script) if script is not None else None
+    by_hand = script is not None and needs_terminal(script)
+    note = row.note
+    if row.needs_rebuild and by_hand:
+        guide = (root or source_dir(app, lab_root) or Path()) / RELEASE_RUNBOOK
+        steps = (f" Follow {guide} first." if guide.is_file() else "")
+        note = (f"{note} Its installer only runs by hand, in a terminal, so "
+                f"Update now leaves it to you.{steps}")
+    elif row.needs_rebuild and command is None:
+        note = (f"{note} Lab Hub has no rebuild command for it: none of "
+                f"{', '.join(BUILD_SCRIPTS)} exists, so rebuild it the "
+                "project's own way.")
+    return replace(row, script=script, command=command, by_hand=by_hand,
+                   note=note)
+
+
+def _build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
     found = version(app, lab_root)
     project = source_dir(app, lab_root)
     script = build_script(project) if project is not None else None

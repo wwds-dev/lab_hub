@@ -863,6 +863,76 @@ def test_a_frozen_bundle_behind_its_source_needs_a_rebuild(tmp_path, monkeypatch
     assert row.script.name == "build_app.sh"
 
 
+def test_an_installer_that_needs_a_terminal_is_left_to_the_owner(
+    tmp_path, monkeypatch
+):
+    """Provisio's install_app.sh refuses without a terminal (`[ ! -t 0 ]`), so
+    Update now would only watch it fail: it is marked by hand instead."""
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    bundle = make_bundle(tmp_path, "SONAR")
+    _stamp(bundle, build=104)
+    project = _checkout(tmp_path, "sonar", monkeypatch=monkeypatch, build=109)
+    (project / "scripts").mkdir()
+    (project / "scripts" / "install_app.sh").write_text(
+        '#!/bin/sh\nif [ ! -t 0 ]; then exit 1; fi\n'
+    )
+    (project / "docs").mkdir()
+    (project / "docs" / "RUNBOOK-release.md").write_text("steps\n")
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    row = launcher.build_status(app, tmp_path)
+
+    assert row.verdict == "behind"
+    assert row.by_hand
+    assert not row.runs_in_app
+    assert row.command.endswith("./scripts/install_app.sh")
+    assert "by hand" in row.note
+    assert "RUNBOOK-release.md" in row.note
+
+
+def test_a_behind_app_with_no_build_script_is_named_not_dropped(
+    tmp_path, monkeypatch
+):
+    """SYNDUSTRYX builds with build_desktop.py, which Lab Hub does not run:
+    the report says there is no command rather than silently skipping it."""
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    bundle = make_bundle(tmp_path, "SONAR")
+    _stamp(bundle, build=104)
+    _checkout(tmp_path, "sonar", monkeypatch=monkeypatch, build=109)
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    row = launcher.build_status(app, tmp_path)
+
+    assert row.verdict == "behind"
+    assert row.command is None
+    assert not row.runs_in_app
+    assert "no rebuild command" in row.note
+
+
+def test_a_recorded_root_is_installed_from_that_root(tmp_path, monkeypatch):
+    """A launcher bundle that runs a release clone is installed from the clone,
+    never from the working checkout its installer refuses."""
+    from lab_hub.launcher import state
+
+    project = tmp_path / "sonar"
+    (project / "scripts").mkdir(parents=True)
+    (project / "scripts" / "install_app.sh").write_text("#!/bin/sh\n")
+    release = tmp_path / "release"
+    (release / "scripts").mkdir(parents=True)
+    (release / "scripts" / "install_app.sh").write_text("#!/bin/sh\n")
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+    found = launcher.Version("2.0.1", "bundle", behind=3, root=str(release))
+    monkeypatch.setattr(state, "_build_status", lambda _a, _r: launcher.BuildStatus(
+        app, found, "behind", "behind.", project / "scripts" / "install_app.sh",
+        f"cd {project} && ./scripts/install_app.sh",
+    ))
+
+    row = launcher.build_status(app, tmp_path)
+
+    assert row.command == f"cd {release} && ./scripts/install_app.sh"
+    assert row.runs_in_app
+
+
 def test_uncommitted_changes_also_make_a_frozen_build_old(tmp_path, monkeypatch):
     """The gap the commit count cannot see: it only moves on commit, so a
     bundle built from the last commit looks level while the source has since

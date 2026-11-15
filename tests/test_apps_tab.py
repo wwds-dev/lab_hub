@@ -662,6 +662,39 @@ def test_the_update_button_shows_only_when_something_is_behind(
     assert "Update now" in seen["labels"]
 
 
+def test_a_by_hand_install_gets_no_update_now(qapp, monkeypatch):
+    """An installer that needs a terminal is listed for the owner and copied,
+    never run by Update now; a behind app with no command is named."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from lab_hub import config
+    from ui.apps_tab import AppsTab
+
+    apps = (launcher.ExternalApp("p", "P", "p", "main.py", "s"),
+            launcher.ExternalApp("q", "Q", "q", "main.py", "s"))
+    tab = AppsTab(config.Settings(), apps, "P", "intro", check_own_builds=True)
+    seen = {}
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: seen.update(
+        info=self.informativeText(), labels={b.text() for b in self.buttons()}))
+    monkeypatch.setattr(launcher, "build_report", lambda root, scope=None: (
+        launcher.BuildStatus(apps[0], launcher.Version(), "behind", "older.",
+                             None, "cd /r && ./scripts/install_app.sh",
+                             by_hand=True),
+        launcher.BuildStatus(apps[1], launcher.Version(), "behind", "older."),
+    ))
+    tab.show_build_report()
+
+    assert "Update now" not in seen["labels"]
+    assert "Copy commands" in seen["labels"]
+    assert "Run yourself, in a terminal:" in seen["info"]
+    assert "No rebuild command for: Q." in seen["info"]
+
+    import shiboken6
+
+    tab._poll.stop()
+    shiboken6.delete(tab)
+
+
 def test_the_rebuild_dialog_runs_the_commands_in_order(qapp):
     """Two commands, both succeed, both show up in the log — and `succeeded`
     reports the run as clean."""

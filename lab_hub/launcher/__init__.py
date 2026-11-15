@@ -86,6 +86,7 @@ from .state import (  # noqa: F401
     install_command,
     is_running,
     launch_is_observable,
+    needs_terminal,
     presence,
     process_table,
     readiness,

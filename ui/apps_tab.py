@@ -721,11 +721,23 @@ class AppsTab(TilePage):
             version = row.version.text or "no version"
             lines.append(f"[{mark}] {row.app.name} — {version}\n      {row.note}")
 
-        commands = [row.command for row in behind if row.command]
+        # Update now runs only what can run without a terminal. An installer
+        # that refuses one (Provisio's) is listed for the owner to run, and an
+        # app with no known build script is named rather than dropped.
+        commands = [row.command for row in behind if row.runs_in_app]
+        by_hand = [row.command for row in behind if row.by_hand and row.command]
+        no_command = [row.app.name for row in behind if not row.command]
         if commands:
             lines.append("")
-            lines.append("Run this to bring it up to date:")
+            lines.append("Update now runs:")
             lines.extend(f"  {command}" for command in commands)
+        if by_hand:
+            lines.append("")
+            lines.append("Run yourself, in a terminal:")
+            lines.extend(f"  {command}" for command in by_hand)
+        if no_command:
+            lines.append("")
+            lines.append(f"No rebuild command for: {', '.join(no_command)}.")
 
         box = QMessageBox(self)
         box.setWindowTitle("Build check")
@@ -743,6 +755,7 @@ class AppsTab(TilePage):
             update = box.addButton(
                 "Update now", QMessageBox.ButtonRole.AcceptRole
             )
+        if commands or by_hand:
             copy = box.addButton("Copy commands", QMessageBox.ButtonRole.ActionRole)
             terminal = box.addButton(
                 "Copy and open Terminal", QMessageBox.ButtonRole.ActionRole
@@ -756,7 +769,7 @@ class AppsTab(TilePage):
         box.exec()
         clicked = box.clickedButton()
         if clicked is not None and clicked in (copy, terminal):
-            self.copy_commands(commands)
+            self.copy_commands(commands + by_hand)
         if terminal is not None and clicked is terminal:
             # The commands each begin with their own `cd`, so where the window
             # opens does not change what they do — it only has to be somewhere
