@@ -247,6 +247,55 @@ def commit_blocker(repo: Path, wt: Worktree, busy: tuple[Path, ...] | None,
     return ""
 
 
+def merges_cleanly(repo: Path, default: str, branch: str) -> bool:
+    rc, _, _ = git(repo, "merge-tree", "--write-tree",
+                   f"refs/heads/{default}", f"refs/heads/{branch}")
+    return rc == 0
+
+
+def merge_target_blocker(repo: Path, default: str, after_commit: bool = False) -> str:
+    """Why nothing may be merged into the default branch now, or ""."""
+    trees = worktrees(repo)
+    if not trees:
+        return "git cannot list its checkout"
+    main = trees[0]
+    branch = current_branch(main.path)
+    if branch != default:
+        return f"the checkout is on {branch or 'a detached HEAD'}, not {default}"
+    paused = paused_operation(main.path)
+    if paused:
+        return f"{paused} is in progress in the checkout"
+    if has_conflicts(main.path):
+        return "the checkout has unresolved conflicts"
+    if not after_commit and not tracked_clean(main.path):
+        return "the checkout has uncommitted changes"
+    counts = ahead_behind(repo)
+    if counts is not None and counts[1]:
+        return f"{default} is {counts[1]} behind origin: pull it first"
+    return ""
+
+
+def merge_source_blocker(repo: Path, wt: Worktree | None,
+                         busy: tuple[Path, ...] | None, now: float | None = None) -> str:
+    """Why a branch's worktree says its work is not finished, or ""."""
+    if wt is None:
+        return ""
+    if not wt.path.exists():
+        return ""
+    if not is_clean(wt.path):
+        return "its worktree has uncommitted or untracked files"
+    paused = paused_operation(wt.path)
+    if paused:
+        return f"{paused} is in progress in its worktree"
+    if busy is None:
+        return "could not check whether a process is running in its worktree"
+    if in_use(wt.path, busy):
+        return "a process is running in its worktree"
+    if recent_agent_worktree(repo, wt.path, now):
+        return f"its agent worktree was used in the last {RECENT_HOURS} hours"
+    return ""
+
+
 def tracked_clean(path: Path) -> bool:
     rc, out, _ = git(path, "status", "--porcelain", "--untracked-files=no")
     return rc == 0 and not out
@@ -378,7 +427,7 @@ def worktree_blocker(repo: Path, wt: Worktree, busy: tuple[Path, ...] | None,
 class Action:
     repo_name: str
     repo: Path
-    kind: str  # commit | delete_branch | remove_worktree | pull | push
+    kind: str  # commit | merge | delete_branch | remove_worktree | pull | push
     target: str  # branch name, or worktree path
     reason: str
     sha: str = ""  # a branch's tip when planned: deleted only if unchanged
@@ -388,6 +437,7 @@ class Action:
     def label(self) -> str:
         verb = {
             "commit": f"Commit in {self.target} (on {self.branch})",
+            "merge": f"Merge {self.target} into {self.branch}",
             "delete_branch": f"Delete branch {self.target}",
             "remove_worktree": f"Remove worktree {self.target}",
             "pull": f"Pull {self.target} (fast-forward)",
@@ -446,6 +496,50 @@ def plan_repo(name: str, repo: Path, busy: tuple[Path, ...] | None = (),
                               branch=branch))
         main_committed = main_committed or (wt.main and branch == default)
 
+    # Unlanded branches that merge into the default branch with no conflicts
+    # (owner's choice, spec section 10). Conflicting ones are left for a
+    # person: Review branches -> Open in Terminal.
+    merged_any = False
+    committed = {a.branch for a in actions if a.kind == "commit"}
+    target = merge_target_blocker(repo, default, after_commit=main_committed)
+    for branch in local_branches(repo):
+        if branch == default or is_landed(repo, default, branch):
+            continue
+        wt = by_branch.get(branch)
+        if wt is not None and wt.main:
+            continue  # the checkout itself is on it; target says why
+        if target:
+            skips.append(Skip(name, branch, f"not merged: {target}"))
+            continue
+        if branch in committed:
+            skips.append(Skip(name, branch, "not merged: its open work is committed in "
+                                            "this run; the next Resolve can merge it"))
+            continue
+        source = merge_source_blocker(repo, wt, busy, now)
+        if source:
+            skips.append(Skip(name, branch, f"not merged: {source}"))
+            continue
+        if not merges_cleanly(repo, default, branch):
+            skips.append(Skip(name, branch, f"not merged: it conflicts with {default} — "
+                                            "land it by hand (Review branches → Open in Terminal)"))
+            continue
+        rc, count, _ = git(repo, "rev-list", "--count",
+                           f"refs/heads/{default}..refs/heads/{branch}")
+        n = int(count) if rc == 0 and count.isdigit() else 0
+        sha = tip(repo, branch)
+        actions.append(Action(name, repo, "merge", branch,
+                              f"{n} commit{'s' if n != 1 else ''}, no conflicts", sha,
+                              branch=default))
+        merged_any = True
+        # Once merged it has landed: tidy its worktree and the branch too.
+        if wt is not None:
+            if worktree_blocker(repo, wt, busy, now):
+                continue
+            actions.append(Action(name, repo, "remove_worktree", str(wt.path),
+                                  f"its branch {branch} is merged above"))
+        actions.append(Action(name, repo, "delete_branch", branch,
+                              f"merged into {default} above", sha))
+
     # Landed branches, and the worktrees that hold them.
     for branch in local_branches(repo):
         if branch == default or not is_landed(repo, default, branch):
@@ -475,12 +569,13 @@ def plan_repo(name: str, repo: Path, busy: tuple[Path, ...] | None = (),
                                   f"clean, detached at a commit already in {default}"))
 
     # Sync the default branch, only when nothing can be lost or merged.
-    reason = sync_blocker(repo, default, after_commit=main_committed)
+    changed = main_committed or merged_any
+    reason = sync_blocker(repo, default, after_commit=changed)
     if reason:
         skips.append(Skip(name, default, reason))
-    elif main_committed:
+    elif changed:
         actions.append(Action(name, repo, "push", default,
-                              "after the commit above, nothing else to pull"))
+                              "after the commit or merges above"))
     else:
         ahead, behind = ahead_behind(repo) or (0, 0)
         if behind:
@@ -608,6 +703,22 @@ def check(action: Action, busy: tuple[Path, ...] | None = (),
         if not changed_tracked(wt.path):
             return "nothing to commit any more"
         return ""
+    if action.kind == "merge":
+        branch = action.target
+        if tip(repo, branch) != action.sha:
+            return "the branch has moved since the preview"
+        if is_landed(repo, default, branch):
+            return f"it is already in {default}"
+        reason = merge_target_blocker(repo, default)
+        if reason:
+            return reason
+        wt = next((w for w in worktrees(repo) if w.branch == branch), None)
+        reason = merge_source_blocker(repo, wt, busy, now)
+        if reason:
+            return reason
+        if not merges_cleanly(repo, default, branch):
+            return f"it now conflicts with {default}"
+        return ""
     if action.kind == "delete_branch":
         branch = action.target
         if branch == default:
@@ -662,7 +773,7 @@ def apply(action: Action, log: Path | None = None,
     (tests pass one): an earlier snapshot can be minutes old by now.
     """
     if busy == "fresh":
-        busy = busy_dirs() if action.kind in ("remove_worktree", "commit") else ()
+        busy = busy_dirs() if action.kind in ("remove_worktree", "commit", "merge") else ()
     reason = check(action, busy, now)  # type: ignore[arg-type]
     if reason:
         _log(f"SKIP {action.repo} {action.kind} {action.target}: {reason}", log)
@@ -671,7 +782,15 @@ def apply(action: Action, log: Path | None = None,
     if action.kind == "delete_branch":
         ok, message = _delete_branch_at(repo, action.target, action.sha, log, "landed branch")
         return ok, "done" if ok else message
-    if action.kind == "commit":
+    if action.kind == "merge":
+        main = worktrees(repo)[0].path
+        rc, _, err = git(main, "merge", "--no-ff", "--quiet", "-m",
+                         f"Lab Hub: merge {action.target}", action.sha)
+        if rc != 0:
+            git(main, "merge", "--abort")
+        else:
+            _log(f"MERGED {action.target} at {action.sha} into {action.branch} in {repo}", log)
+    elif action.kind == "commit":
         path = Path(action.target)
         rc, _, err = git(path, "add", "--update")
         if rc == 0:

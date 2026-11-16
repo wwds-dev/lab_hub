@@ -289,7 +289,9 @@ The check itself never commits, pushes or merges. `lab_hub/hygiene.py`,
 The report has two buttons for acting on it (`docs/specs/repo-tidy.md`):
 
 - **Resolve…** previews only what loses nothing, each line ticked and
-  explained: commit tracked changes (never untracked files, which are listed
+  explained: merge branches that merge into the default branch without
+  conflicts (not ones still being worked on, nor into a branch behind
+  origin), commit tracked changes (never untracked files, which are listed
   for you instead) and push that commit when the branch was otherwise level,
   delete a branch whose changes are already in the default branch
   (including squash-merged work), remove a clean worktree on such a branch or

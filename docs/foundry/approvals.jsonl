@@ -2,3 +2,4 @@
 {"ts": "2026-11-15T19:56:15", "gate": "define", "by": "owner", "words": "Approve as recommended", "recorded_by": "agent", "spec": "repo-tidy", "note": "A1: code in Lab Hub; A2: yes, skip .claude/worktrees touched in 24h"}
 {"ts": "2026-11-15T19:56:15", "gate": "architect", "by": "owner", "words": "Approve as recommended", "recorded_by": "agent", "spec": "repo-tidy", "note": "A1: code in Lab Hub; A2: yes, skip .claude/worktrees touched in 24h"}
 {"ts": "2026-11-15T20:56:53", "gate": "define", "by": "owner", "words": "Yes, build it", "recorded_by": "agent", "spec": "repo-tidy", "note": "amendment: Resolve commits tracked changes only, untracked skipped"}
+{"ts": "2026-11-16T00:54:17", "gate": "define", "by": "owner", "words": "Commit, add merging", "recorded_by": "agent", "spec": "repo-tidy", "note": "amendment: Resolve merges branches that merge without conflicts"}
