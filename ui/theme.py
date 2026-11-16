@@ -637,6 +637,15 @@ def stylesheet(p: Palette) -> str:
         color: {p.text};
         background: {p.nav_hover if not p.dark else p.border};
     }}
+    /* Land is the action for the amber "to land" badge beside it, so it is
+       a button, not text: tinted like the badge, never a second primary. */
+    AppCard QPushButton#land {{
+        background: {_rgba(p.warn, 0.18)};
+        color: {p.warn};
+        font-weight: 600;
+    }}
+    AppCard QPushButton#land:hover {{ background: {_rgba(p.warn, 0.30)}; }}
+    AppCard QPushButton#land:disabled {{ background: transparent; color: {p.faint}; }}
 
     /* A segmented control (the appearance switch). */
     QPushButton#segment {{

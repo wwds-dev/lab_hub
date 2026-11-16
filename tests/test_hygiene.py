@@ -115,61 +115,6 @@ def test_the_badge_clears_when_the_work_lands(qapp, tmp_path, monkeypatch):
     _drop(tab)
 
 
-def test_check_repos_button_is_the_launchpads_only(qapp, tmp_path, monkeypatch):
-    from PySide6.QtWidgets import QPushButton
-
-    def labels(tab):
-        return {b.text() for b in tab.findChildren(QPushButton)}
-
-    with_button, _ = _tab(qapp, tmp_path, monkeypatch, check_builds=True)
-    without, _ = _tab(qapp, tmp_path, monkeypatch)
-    assert "Check repos" in labels(with_button) and "Check repos" not in labels(without)
-    _drop(with_button)
-    _drop(without)
-
-
-def test_the_report_dialog_lists_what_has_not_landed(qapp, tmp_path, monkeypatch):
-    from PySide6.QtWidgets import QMessageBox
-
-    _write(tmp_path, [_row(tmp_path, "a", ["1 branch not merged into main"]),
-                      _row(tmp_path, "b")], fetched=False)
-    tab, _ = _tab(qapp, tmp_path, monkeypatch, check_builds=True)
-    seen = {}
-    monkeypatch.setattr(QMessageBox, "exec", lambda self: seen.update(
-        text=self.text(), body=self.informativeText()))
-    tab.show_repo_report()
-    assert seen["text"] == "1 of 2 repos have work that has not landed."
-    assert "[!!] a (main) — 1 branch not merged into main" in seen["body"]
-    assert "[ok] b" in seen["body"]
-    assert "last fetch" in seen["body"]
-    _drop(tab)
-
-
-def test_everything_landed_says_so(qapp, tmp_path, monkeypatch):
-    from PySide6.QtWidgets import QMessageBox
-
-    _write(tmp_path, [_row(tmp_path, "a")])
-    tab, _ = _tab(qapp, tmp_path, monkeypatch, check_builds=True)
-    seen = {}
-    monkeypatch.setattr(QMessageBox, "exec", lambda self: seen.update(text=self.text()))
-    tab.show_repo_report()
-    assert seen["text"] == "Everything is committed, pushed and merged."
-    _drop(tab)
-
-
-def test_without_the_script_check_repos_says_why_and_starts_nothing(qapp, tmp_path, monkeypatch):
-    from PySide6.QtWidgets import QMessageBox
-
-    tab, _ = _tab(qapp, tmp_path, monkeypatch, check_builds=True)
-    seen = {}
-    monkeypatch.setattr(QMessageBox, "exec", lambda self: seen.update(
-        text=self.text(), body=self.informativeText()))
-    tab.check_repos()
-    assert tab._hygiene_proc is None
-    assert seen["text"] == "No repo report yet." and "not found" in seen["body"]
-    _drop(tab)
-
-
 @pytest.mark.parametrize("problems, badge", [
     (["6 branches not merged into master", "2 worktrees with uncommitted work"],
      "6 branches · 2 worktrees to land"),

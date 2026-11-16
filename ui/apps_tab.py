@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import html
 import os
 import time
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QProcess, QProcessEnvironment, QTimer, Signal
+from PySide6.QtCore import QProcess, QProcessEnvironment, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -19,7 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from lab_hub import config, hygiene, launcher
+from lab_hub import config, hygiene, land, launcher
 
 from . import theme
 from .tiles import (  # noqa: F401 - the layout constants are re-exported
@@ -32,6 +34,7 @@ from .tiles import (  # noqa: F401 - the layout constants are re-exported
     arrange_tiles,
     columns_for,
 )
+from .lander import Lander
 from .web_open import OpenWhenServing
 
 STATE_LABELS = {
@@ -45,6 +48,12 @@ STATE_LABELS = {
     "server": ("Stopped", "hint"),
     "missing": ("Not found", "stateBad"),
 }
+
+def plain_tip(text: str) -> str:
+    """A tooltip that shows `text` as typed. Qt renders a tooltip as rich text
+    when it looks like HTML, and this text is git, pytest and Claude output."""
+    return "<qt>" + html.escape(text).replace("\n", "<br>") + "</qt>"
+
 
 # While an app is running, that is the more useful thing to say — where it
 # would have been started from is answered by the path underneath either way.
@@ -95,6 +104,8 @@ class AppCard(Tile):
 
     launched = Signal(str)
     start_failed = Signal(str)
+    land_requested = Signal(object)  # this card
+    review_requested = Signal(object)  # this card
 
     def __init__(self, app: launcher.ExternalApp, parent=None) -> None:
         super().__init__(app.name, app.summary, parent)
@@ -124,6 +135,7 @@ class AppCard(Tile):
         # 1 commit behind · 2 branches to land" on one unwrappable line sets a
         # minimum width wider than a tile column and pushes the grid off-window.
         self.hygiene.setWordWrap(True)
+        self.hygiene.setTextFormat(Qt.TextFormat.PlainText)  # the report is a file
 
         # Version and badge get a line of their own under the name. On the
         # name's line, "v0.6.53+g861546d · 1 behind" plus "3 to land" plus the
@@ -139,6 +151,44 @@ class AppCard(Tile):
         self.launch_button.setObjectName("primary")
         self.launch_button.clicked.connect(self._launch)
         self.buttons.addWidget(self.launch_button, 1)
+
+        # Land: the one action for the badge above. Shown only while this app's
+        # repo has work that has not landed; the outcome is stated on the tile
+        # (spec land-from-tiles), never left in a log.
+        self.hygiene_row: hygiene.RepoRow | None = None
+        self._landing = False
+        self._before: tuple | None = None
+        self._before_failed = False
+        self._land_allowed = True
+        self.land_button = QPushButton("Land")
+        self.land_button.setObjectName("land")
+        self.land_button.setToolTip(
+            "Commit this app's open work, merge its branches into the main "
+            "branch and push. You confirm once; nothing is forced."
+        )
+        self.land_button.clicked.connect(lambda: self.land_requested.emit(self))
+        self.land_button.hide()
+        self.buttons.addWidget(self.land_button)
+        self.outcome = QLabel()
+        self.outcome.setObjectName("hint")
+        self.outcome.setWordWrap(True)
+        self.outcome.setTextFormat(Qt.TextFormat.PlainText)  # git/pytest/Claude output
+        self.outcome.hide()
+        self.extra.addWidget(self.outcome)
+        self._repo_path: Path | None = None
+        self.terminal_button = QPushButton("Open in Terminal")
+        self.terminal_button.setFlat(True)
+        self.terminal_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.terminal_button.setToolTip("Open a Terminal window in this repo to look at it yourself")
+        self.terminal_button.clicked.connect(self._open_terminal)
+        self.terminal_button.hide()
+        self.extra.addWidget(self.terminal_button)
+        self.review_button = QPushButton()
+        self.review_button.setFlat(True)
+        self.review_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.review_button.clicked.connect(lambda: self.review_requested.emit(self))
+        self.review_button.hide()
+        self.extra.addWidget(self.review_button)
 
         # Only a web app has one. A server has no window to close, so without
         # this one started from here would run until the Mac restarts.
@@ -253,17 +303,105 @@ class AppCard(Tile):
 
     def refresh_hygiene(self, row: hygiene.RepoRow | None) -> None:
         """Say how much of this app's work has not landed yet, or nothing."""
+        self.hygiene_row = row
+        if row is not None:
+            self._repo_path = row.path
+        self._sync_land()
         if row is None or not row.badge:
             self.hygiene.setText("")
             self.hygiene.setToolTip("")
             self.restyle(self.hygiene, "hint")
             return
         self.hygiene.setText(row.badge)
-        self.hygiene.setToolTip(
+        self.hygiene.setToolTip(plain_tip(
             f"{self.app.name} ({row.branch or 'unknown branch'}): {row.detail}. "
-            "Commit, push or merge it, or press Check repos for the full list."
-        )
+            "Press Land to commit, merge and push it."
+        ))
         self.restyle(self.hygiene, "stateWarn")
+
+    def _sync_land(self) -> None:
+        """Land shows while there is work to land, and not while one is running."""
+        row = self.hygiene_row
+        show = row is not None and row.needs_attention
+        self.land_button.setVisible(show)
+        if not self._landing:
+            self.land_button.setText("Land")
+            self.land_button.setEnabled(
+                self._land_allowed and not (show and land.landing(row.path))
+            )
+
+    def set_land_enabled(self, allowed: bool) -> None:
+        """The page disables every Land while any one is running."""
+        self._land_allowed = allowed
+        self._sync_land()
+
+    def set_landing(self, line: str | None) -> None:
+        """Show progress on the tile; None ends it."""
+        if line is None:
+            # Cancelled before anything ran: put back what the tile said before.
+            if self._landing and self._before is not None:
+                text, style, tip, shown, review = self._before
+                failed = self._before_failed
+                self.outcome.setText(text)
+                self.outcome.setToolTip(tip)
+                self.restyle(self.outcome, style)
+                self.outcome.setVisible(shown)
+                self.review_button.setVisible(review)
+                self.terminal_button.setVisible(failed)
+            self._before = None
+            self._landing = False
+            self._sync_land()
+            return
+        if not self._landing:
+            self._before = (self.outcome.text(), self.outcome.objectName(),
+                            self.outcome.toolTip(), not self.outcome.isHidden(),
+                            not self.review_button.isHidden())
+            self._before_failed = not self.terminal_button.isHidden()
+        self._landing = True
+        self.land_button.setText("Landing…")
+        self.land_button.setEnabled(False)
+        self.land_button.show()
+        self.review_button.hide()
+        self.terminal_button.hide()
+        self.outcome.setText(line if len(line) <= 120 else line[:119] + "…")
+        self.outcome.setToolTip(plain_tip(line))
+        self.restyle(self.outcome, "hint")
+        self.outcome.show()
+
+    def show_outcome(self, result: land.LandResult) -> None:
+        """Say how Land went, in words, on the tile."""
+        self._landing = False
+        self._before = None
+        self.outcome.setText(result.line)
+        self.outcome.setToolTip(plain_tip("\n".join(result.notes)) if result.notes else "")
+        self.restyle(
+            self.outcome,
+            {"landed": "stateOk", "not_landed": "stateBad"}.get(result.state, "hint"),
+        )
+        self.outcome.show()
+        self.terminal_button.setVisible(result.state == "not_landed")
+        if result.remaining:
+            n = result.remaining
+            self.review_button.setText(
+                f"{n} branch{'es' if n != 1 else ''} need{'s' if n == 1 else ''} your decision — review"
+            )
+            self.review_button.show()
+        else:
+            self.review_button.hide()
+        self._sync_land()
+
+    def clear_outcome(self) -> None:
+        """Refresh (⌘R) forgets how the last Land went; the badge says what is left."""
+        if self._landing:
+            return
+        self._before = None
+        self.outcome.hide()
+        self.review_button.hide()
+        self.terminal_button.hide()
+
+    def _open_terminal(self) -> None:
+        if self._repo_path is not None:
+            launcher.open_terminal(self._repo_path)
 
     def _update_service(self, running: bool) -> None:
         """Report the background copy, for the apps that have one."""
@@ -591,6 +729,22 @@ class AppsTab(TilePage):
     ) -> None:
         super().__init__(POLL_MS, parent)
         self.settings = settings
+        # Land runs off the UI thread, one job at a time per page. A repo is
+        # also claimed in `lab_hub.land`, so two pages cannot land the same one.
+        self.lander = Lander(self)
+        self.lander.planned.connect(self._land_planned)
+        self.lander.progress.connect(self._land_progress)
+        self.lander.repo_done.connect(self._land_repo_done)
+        self.lander.finished.connect(self._land_finished)
+        # Cards Land was asked on, by repo name, held from the click: a hygiene
+        # refresh or a rebuilt tile mid-Land must not lose the outcome.
+        self._landing_cards: dict[str, AppCard] = {}
+        self._recheck_after = False
+        app = QApplication.instance()
+        if app is not None:
+            # Quitting mid-Land ends a running Claude or test step and waits a
+            # moment, so a repo is not left in a half-merged state.
+            app.aboutToQuit.connect(self.lander.shutdown)
 
         # One page, several headed sections. Suites, the sync companions and the
         # small utilities are different kinds of thing and reading them as one
@@ -614,7 +768,7 @@ class AppsTab(TilePage):
         # launchpad's question), otherwise only this tab's own.
         self._own_builds = check_own_builds and not check_builds
         self.check_button: QPushButton | None = None
-        self.repos_button: QPushButton | None = None
+        self.land_all_button: QPushButton | None = None
         self._hygiene_proc: QProcess | None = None
         self._hygiene_stamp: tuple[int, int] | None = None
         self._hygiene_report: hygiene.Report | None = None
@@ -629,13 +783,16 @@ class AppsTab(TilePage):
             check.clicked.connect(self.show_build_report)
             self.buttons.addWidget(check)
             self.check_button = check
-            repos = QPushButton("Check repos")
-            repos.setToolTip(
-                "List every repo with work not yet committed, pushed or merged"
+            land_all = QPushButton("Land all")
+            land_all.setToolTip(
+                "Land every repo that has work not yet committed, pushed or "
+                "merged. You confirm once; a repo that fails is reported and "
+                "the rest carry on."
             )
-            repos.clicked.connect(self.check_repos)
-            self.buttons.addWidget(repos)
-            self.repos_button = repos
+            land_all.setEnabled(False)
+            land_all.clicked.connect(self.land_all)
+            self.buttons.addWidget(land_all)
+            self.land_all_button = land_all
         elif check_own_builds:
             # Backstage and the two sync companions have no launchpad tile, so
             # their own tab carries the same check and Update now — scoped to
@@ -653,6 +810,14 @@ class AppsTab(TilePage):
             check.clicked.connect(self.show_build_report)
             self.buttons.addWidget(check)
             self.check_button = check
+        self.stop_land_button = QPushButton("Stop landing")
+        self.stop_land_button.setToolTip(
+            "End the running Claude Code or test run and skip everything after "
+            "it. Work already landed stays landed."
+        )
+        self.stop_land_button.clicked.connect(self.lander.stop)
+        self.stop_land_button.hide()
+        self.buttons.addWidget(self.stop_land_button)
         self.finish()
 
         self.refresh()
@@ -680,6 +845,9 @@ class AppsTab(TilePage):
                 card = AppCard(app)
                 card.launched.connect(self.launched)
                 card.start_failed.connect(self.start_failed)
+                card.land_requested.connect(self.land_card)
+                card.review_requested.connect(self.review_card)
+                card.set_land_enabled(not self.lander.busy)
                 cards.append(card)
             self.set_tiles(index, cards)
         self._shown = wanted
@@ -840,8 +1008,10 @@ class AppsTab(TilePage):
         lab_root = self.settings.resolved_lab_root()
         for card in self.cards:
             card.forget_failure()
+            card.clear_outcome()
             card.refresh_version(lab_root)
         self.refresh()
+        self.refresh_repos()
 
     def hygiene_report(self) -> hygiene.Report | None:
         """The last repo-hygiene report, re-read only when its file changed."""
@@ -863,22 +1033,23 @@ class AppsTab(TilePage):
         for card in self.cards:
             row = report.for_project(lab_root, card.app.project) if report else None
             card.refresh_hygiene(row)
+        self._update_land_controls()
 
-    def check_repos(self) -> None:
-        """Recompute the report (local git only, no fetch), then show it.
+    def refresh_repos(self, force: bool = False) -> None:
+        """Recompute the repo report in the background (local git only, no fetch).
 
-        Runs as a child process and returns at once: ten-odd repos with their
-        worktrees take a few seconds, and the window must not wait for them.
+        No button and no dialog: the badges and Land all simply update when it
+        finishes. A child process, so the window never waits for ten-odd repos
+        with their worktrees.
         """
         if self._hygiene_proc is not None:
+            # A check that started before Land finished would show the old
+            # state; run once more when it ends.
+            self._recheck_after = self._recheck_after or force
             return
         argv = hygiene.command(self.settings.resolved_lab_root())
         if argv is None:
-            self.show_repo_report(note="git_autosync's hygiene script was not found.")
             return
-        if self.repos_button is not None:
-            self.repos_button.setEnabled(False)
-            self.repos_button.setText("Checking…")
         proc = QProcess(self)
         env = QProcessEnvironment()
         for name, value in launcher.child_env().items():
@@ -895,78 +1066,133 @@ class AppsTab(TilePage):
         proc, self._hygiene_proc = self._hygiene_proc, None
         if proc is None:
             return  # errorOccurred and finished can both fire
-        if self.repos_button is not None:
-            self.repos_button.setEnabled(True)
-            self.repos_button.setText("Check repos")
         proc.deleteLater()
         self._apply_hygiene()
-        self.show_repo_report(
-            note="" if code == 0 else "The check did not finish; showing the last report."
-        )
+        if self._recheck_after:
+            self._recheck_after = False
+            self.refresh_repos()
 
-    def show_repo_report(self, note: str = "") -> None:
+    # -- Land (spec land-from-tiles) -----------------------------------
+    def _attention_rows(self) -> list[hygiene.RepoRow]:
         report = self.hygiene_report()
+        return [r for r in report.rows if r.needs_attention] if report else []
+
+    def _update_land_controls(self) -> None:
+        busy = self.lander.busy
+        if self.land_all_button is not None:
+            n = len([r for r in self._attention_rows() if not land.landing(r.path)])
+            self.land_all_button.setText(f"Land all ({n})" if n else "Land all")
+            self.land_all_button.setEnabled(bool(n) and not busy)
+        self.stop_land_button.setVisible(self.lander.running)
+        for card in self.cards:
+            card.set_land_enabled(not busy)
+
+    def _card_for(self, name: str) -> AppCard | None:
+        held = self._landing_cards.get(name)
+        if held is not None and any(held is card for card in self.cards):
+            return held
+        for card in self.cards:  # rebuilt since the click: find its replacement
+            if card.hygiene_row is not None and card.hygiene_row.name == name:
+                return card
+        return None
+
+    def land_card(self, card: AppCard) -> None:
+        """Land this app's repo: look, confirm once, run."""
+        row = card.hygiene_row
+        if row is None or not row.needs_attention:
+            return
+        if self.lander.plan([(row.name, row.path)]):
+            self._landing_cards[row.name] = card
+            card.set_landing("Looking at the repo…")
+            self._update_land_controls()
+
+    def land_all(self) -> None:
+        rows = [r for r in self._attention_rows() if not land.landing(r.path)]
+        if not rows:
+            return
+        if self.lander.plan([(r.name, r.path) for r in rows]):
+            for row in rows:
+                card = self._card_for(row.name)
+                if card is not None:
+                    self._landing_cards[row.name] = card
+                    card.set_landing("Looking at the repo…")
+            self._update_land_controls()
+
+    def confirm_land(self, plans: list[land.LandPlan]) -> bool:
+        """The one confirmation: what will happen, in words (tests replace this)."""
+        todo = [p for p in plans if p.actions]
         box = QMessageBox(self)
-        box.setWindowTitle("Repo check")
-        if report is None:
-            box.setText("No repo report yet.")
-            box.setInformativeText(
-                note or "git_autosync writes one on each run, or press Check repos again."
-            )
-            box.setIcon(QMessageBox.Icon.Information)
-        else:
-            todo = report.attention
-            if todo:
-                box.setText(
-                    f"{len(todo)} of {len(report.rows)} repos have work that has not landed."
-                )
-            else:
-                box.setText("Everything is committed, pushed and merged.")
-            lines = [f"[!!] {r.name} ({r.branch or '?'}) — {r.detail}" for r in todo]
-            lines += [f"[ok] {r.name}" for r in report.rows if not r.needs_attention]
-            tail = []
-            if todo:
-                tail.append("Resolve… lands what it safely can. Review branches… shows "
-                            "what is still open and why.")
-            if note:
-                tail.append(note)
-            if not report.fetched:
-                tail.append("Counts of unpushed and behind are as of each repo's last fetch.")
-            if report.stale:
-                tail.append("This report is old; autosync refreshes it on each run.")
-            box.setInformativeText("\n".join(lines + ([""] + tail if tail else [])))
-            box.setIcon(
-                QMessageBox.Icon.Warning if todo else QMessageBox.Icon.Information
-            )
-        # Resolve lands what it safely can; Review branches lists the rest and
-        # why the last Resolve left each one (docs/specs/repo-tidy.md).
-        cleanup = review = None
-        if report is not None and report.rows:
-            cleanup = box.addButton("Resolve…", QMessageBox.ButtonRole.ActionRole)
-            cleanup.setToolTip("Commit open tracked changes, merge branches into main "
-                               "(for a conflict, Claude Code resolves it and the tests "
-                               "decide), delete landed branches and their clean worktrees, "
-                               "and pull or push — previewed first")
-            review = box.addButton("Review branches…", QMessageBox.ButtonRole.ActionRole)
-            review.setToolTip("List every branch with work not yet in main, and why the "
-                              "last Resolve did not land it")
-        close = box.addButton("Close", QMessageBox.ButtonRole.RejectRole)
-        box.setEscapeButton(close)
-        box.setDefaultButton(close)
+        box.setWindowTitle("Land")
+        box.setTextFormat(Qt.TextFormat.PlainText)  # names and reasons come from files and git
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText("\n".join(p.sentence for p in todo))
+        notices = [p.claude_notice for p in todo if p.claude_notice]
+        box.setInformativeText("\n\n".join(notices) or "Each step is checked again just "
+                               "before it runs. Nothing is forced.")
+        box.setDetailedText("\n\n".join(p.detail for p in todo))
+        go = box.addButton("Land", QMessageBox.ButtonRole.AcceptRole)
+        cancel = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(cancel)
+        box.setEscapeButton(cancel)
         box.exec()
-        clicked = box.clickedButton()
-        if report is not None and clicked is not None and clicked in (cleanup, review):
-            self.tidy_repos(report, review=clicked is review)
+        return box.clickedButton() is go
 
-    def tidy_repos(self, report: hygiene.Report, review: bool = False) -> None:
-        """Open Resolve or Review branches; re-check the repos if anything changed."""
-        from ui.repo_tidy_dialogs import CleanupDialog, ReviewDialog
+    def _land_planned(self, plans) -> None:
+        try:
+            go = not any(p.actions for p in plans) or self.confirm_land(plans)
+        except Exception:  # noqa: BLE001 - never leave the tiles on "Looking…"
+            go = False
+        if not go:
+            for plan in plans:
+                card = self._card_for(plan.name)
+                if card is not None:
+                    card.set_landing(None)
+            self._landing_cards.clear()
+            self._update_land_controls()
+            return
+        self.lander.run(plans)
+        self._update_land_controls()
 
-        repos = [(row.name, row.path) for row in report.rows]
-        dialog = (ReviewDialog if review else CleanupDialog)(repos, self)
+    def _land_progress(self, name: str, line: str) -> None:
+        card = self._card_for(name)
+        if card is not None:
+            card.set_landing(line.strip())
+
+    def _land_repo_done(self, name: str, result) -> None:
+        card = self._card_for(name)
+        if card is not None:
+            card.show_outcome(result)
+
+    def _land_finished(self, results) -> None:
+        self._landing_cards.clear()
+        self._update_land_controls()
+        self.refresh_repos(force=True)
+        if len(results) > 1:
+            self.show_land_summary(results)
+
+    def show_land_summary(self, results) -> None:
+        """After Land all: how many landed, and why each other one did not."""
+        landed = [r for r in results if r.state == "landed"]
+        lines = [f"{r.name}: {r.line}" for r in results if r.state != "landed"]
+        box = QMessageBox(self)
+        box.setWindowTitle("Land all")
+        box.setTextFormat(Qt.TextFormat.PlainText)
+        box.setIcon(QMessageBox.Icon.Warning if lines else QMessageBox.Icon.Information)
+        box.setText(f"Landed {len(landed)} of {len(results)} repos.")
+        box.setInformativeText("\n".join(lines))
+        box.exec()
+
+    def review_card(self, card: AppCard) -> None:
+        """The branches Land left for you to decide, for this repo only."""
+        row = card.hygiene_row
+        if row is None:
+            return
+        from ui.repo_tidy_dialogs import ReviewDialog
+
+        dialog = ReviewDialog([(row.name, row.path)], self)
         dialog.exec()
         if dialog.changed:
-            self.check_repos()
+            self.refresh_repos()
 
     def refresh(self) -> None:
         lab_root = self.settings.resolved_lab_root()
