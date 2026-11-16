@@ -43,6 +43,12 @@ TOOLS = "Read,Edit,Write,Glob,Grep"
 # Linked into the temporary worktree only while tests run: a fresh worktree
 # has none, and Claude must never see (or write through) them.
 ENV_DIRS = (".venv", "venv", "node_modules")
+# Nested repos (spec land-from-tiles §9): a fresh worktree has none of them, and
+# the tests of a repo that imports one (SONAR's sonar/macro, Sentinel's
+# agents/bug_spray) fail at collection. Bounded, never over the network unless
+# the submodule list is the checkout's own.
+SUBMODULE_TIMEOUT = 120
+SUBMODULE_PROTOCOLS = ("https", "ssh")  # never git://, file or ext::
 CANNOT = "CANNOT RESOLVE:"
 # Never run through a shell, so `*` and `?` reach the program literally
 # (`node --test 'tests/*.test.mjs'` globs itself); anything that only a
@@ -674,9 +680,16 @@ def _touches_tests(name: str, cmd: TestCommand) -> bool:
             or name in programs)
 
 
-def _link_env(repo: Path, tmp: Path) -> tuple[list[Path], str]:
-    """Link the main checkout's environment folders in; (links, problem)."""
-    links = []
+def _link_env(repo: Path, tmp: Path, into: list[Path] | None = None) -> tuple[list[Path], str]:
+    """Link the environment folders and copy the nested repos in; (links, problem).
+
+    Everything added is removed again right after the test run (`_unlink`), so
+    Claude never sees it or writes through it. Nested repos are copied without
+    their `.git`. A submodule is initialised in the worktree when that is safe,
+    and copied from the main checkout when not. `into` is the caller's list, so
+    whatever was added is known to it even if this raises half way.
+    """
+    links = into if into is not None else []
     for name in ENV_DIRS:
         source = repo / name
         target = tmp / name
@@ -689,7 +702,142 @@ def _link_env(repo: Path, tmp: Path) -> tuple[list[Path], str]:
         except OSError as exc:
             return links, f"could not link {name}: {exc}"
         links.append(target)
-    return links, ""
+    problem = _link_nested(repo, tmp, links)
+    return links, problem
+
+
+def _submodule_paths(tmp: Path) -> list[str]:
+    if not (tmp / ".gitmodules").is_file():
+        return []
+    rc, out, _ = rt.git(tmp, "config", "-f", ".gitmodules", "--get-regexp", r"^submodule\..*\.path$")
+    paths = [line.split(None, 1)[1].strip() for line in out.splitlines() if " " in line] if rc == 0 else []
+    return [p for p in paths if _safe_rel(p)]
+
+
+def _safe_rel(rel: str) -> bool:
+    """A relative path inside the repo that is not git's own or an environment folder."""
+    parts = Path(rel).parts
+    if not rel or not parts or rel.startswith(("/", '"')):
+        return False
+    return (".." not in parts and "." not in parts and parts[0] not in ENV_DIRS
+            and not any(part.lower() == ".git" for part in parts))
+
+
+def _ignored_nested(repo: Path) -> list[str]:
+    """Gitignored directories of the main checkout that hold their own `.git`."""
+    rc, out, _ = rt.git(repo, "ls-files", "-z", "--others", "--ignored", "--exclude-standard",
+                        "--directory")
+    found = []
+    for line in out.split("\0") if rc == 0 else []:  # -z: no quoting of odd names
+        rel = line[:-1] if line.endswith("/") else ""
+        if not _safe_rel(rel) or (repo / rel).is_symlink():
+            continue
+        if (repo / rel / ".git").exists():
+            found.append(rel)
+    return found
+
+
+def _copy_ignore(src_root: Path):
+    """Skip every `.git` and any symlink that leaves the nested repo."""
+    root = src_root.resolve()
+
+    def ignore(folder: str, names: list[str]) -> list[str]:
+        skip = []
+        for name in names:
+            path = Path(folder) / name
+            if name.lower() == ".git":
+                skip.append(name)
+            elif path.is_symlink():
+                try:
+                    path.resolve().relative_to(root)
+                except (ValueError, OSError):
+                    skip.append(name)
+        return skip
+
+    return ignore
+
+
+def _copy_dir(source: Path, target: Path, name: str, restore_empty: bool, root: Path) -> str:
+    """Copy `source` (without its `.git`) to `target`, refusing to replace anything there."""
+    try:
+        if source.resolve() != source.parent.resolve() / source.name:
+            return f"{name} in the checkout is a link, not a nested repo"
+        source.resolve().relative_to(source.parents[len(Path(name).parts) - 1].resolve())
+    except (ValueError, OSError, IndexError):
+        return f"{name} in the checkout leaves the repo"
+    try:
+        if target.is_dir() and not target.is_symlink() and not any(target.iterdir()):
+            target.rmdir()  # git leaves an empty directory at a submodule path
+        if os.path.lexists(target):
+            return f"{name} already exists in the merge (it must come from the checkout)"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            target.parent.resolve().relative_to(root.resolve())
+        except (ValueError, OSError):
+            return f"{name} would be copied outside the worktree (a parent is a link)"
+        shutil.copytree(source, target, symlinks=True, ignore=_copy_ignore(source))
+    except (OSError, shutil.Error) as exc:
+        shutil.rmtree(target, ignore_errors=True)
+        return f"could not copy {name}: {exc}"
+    _COPIES[target] = restore_empty
+    return ""
+
+
+def _has_content(path: Path) -> bool:
+    try:
+        return path.is_dir() and any(item.name != ".git" for item in path.iterdir())
+    except OSError:
+        return False
+
+
+def _link_nested(repo: Path, tmp: Path, links: list[Path]) -> str:
+    submodules = _submodule_paths(tmp)
+    if submodules:
+        # Initialise them in the worktree only when `.gitmodules` is exactly the
+        # checkout's own: the merge (or Claude) must not choose a URL to fetch.
+        # No hooks, no `ext::`, file or plaintext transport, bounded in time. A
+        # submodule counts as ready only if that worked and it has files; a
+        # half-initialised one (timeout, unfetchable commit) is removed and the
+        # checkout's own copy is used instead.
+        same = (repo / ".gitmodules").is_file() and \
+            (repo / ".gitmodules").read_bytes() == (tmp / ".gitmodules").read_bytes()
+        todo = [p for p in submodules if not _has_content(tmp / p)]
+        updated = False
+        if same and todo:
+            allow = [x for p in SUBMODULE_PROTOCOLS for x in ("-c", f"protocol.{p}.allow=always")]
+            rc, _, _ = rt.git(tmp, "-c", "core.hooksPath=/dev/null", "-c", "protocol.allow=never",
+                              "-c", "protocol.ext.allow=never", *allow,
+                              "submodule", "update", "--init", "--recursive",
+                              timeout=SUBMODULE_TIMEOUT)
+            updated = rc == 0
+        for rel in submodules:
+            if _has_content(tmp / rel) and (updated or rel not in todo):
+                continue  # initialised, with files
+            if not (repo / rel / ".git").exists():
+                continue  # nothing in the checkout to copy; the tests will say what is missing
+            target = tmp / rel
+            if target.is_dir() and not target.is_symlink():
+                shutil.rmtree(target, ignore_errors=True)  # a half-initialised copy
+                target.mkdir(exist_ok=True)
+            problem = _copy_dir(repo / rel, target, rel, True, tmp)
+            if problem:
+                return problem
+            links.append(target)
+    for rel in _ignored_nested(repo):
+        if rt.git(tmp, "ls-files", "--", rel)[1]:
+            return f"{rel} is tracked in the merge, so it is not the checkout's nested repo"
+        problem = _copy_dir(repo / rel, tmp / rel, rel, False, tmp)
+        if problem:
+            return problem
+        links.append(tmp / rel)
+    return ""
+
+
+# Nested repos are copied in (without their `.git`), not linked, so a test run
+# cannot write hooks or config into the main checkout's nested repos or change
+# its files. A copy is removed after the run like a link; a submodule path goes
+# back to the empty directory git leaves there. path -> restore an empty dir.
+_COPIES: dict[Path, bool] = {}
 
 
 def _unlink(links: list[Path]) -> None:
@@ -697,6 +845,11 @@ def _unlink(links: list[Path]) -> None:
         try:
             if link.is_symlink():
                 link.unlink()
+            elif link in _COPIES:
+                restore = _COPIES.pop(link)
+                shutil.rmtree(link, ignore_errors=True)
+                if restore:
+                    link.mkdir(exist_ok=True)
         except OSError:
             pass
 
@@ -813,8 +966,12 @@ def _claude_round(tmp: _Tmp, claude: str, prompt: str, budget: float, stop: Stop
 
 def _tests(cmd, tmp: _Tmp, repo: Path, stop, progress, links: list[Path]) -> TestRun:
     """Run the tests with the environment linked in, and only then."""
-    new, problem = _link_env(repo, tmp.path)
-    links[:] = new
+    try:
+        _, problem = _link_env(repo, tmp.path, links)
+    except BaseException:
+        _unlink(links)
+        links.clear()
+        raise
     if problem:
         _unlink(links)
         raise _Fail(problem)

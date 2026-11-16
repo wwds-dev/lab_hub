@@ -8,3 +8,4 @@
 {"ts": "2026-11-16T16:04:28", "gate": "define", "by": "owner", "words": "Build fixes 1–4", "recorded_by": "agent", "spec": "repo-tidy"}
 {"ts": "2026-11-16T18:17:59", "gate": "define", "by": "owner", "words": "approve as recommended (one Resolve… button, beside Launch, on every tab that shows the badge)", "recorded_by": "agent", "spec": "tile-resolve"}
 {"ts": "2026-11-16T18:25:39", "gate": "define", "by": "owner", "words": "approve as recommended", "recorded_by": "agent", "spec": "land-from-tiles"}
+{"ts": "2026-11-16T19:15:56", "gate": "define", "by": "owner", "words": "approve section 9", "recorded_by": "agent", "spec": "land-from-tiles"}
