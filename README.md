@@ -274,60 +274,72 @@ count cannot see — it only moves on commit, so a bundle built from the last
 commit looks level while the source has since been edited), `unknown` (installed
 but carrying no stamp), and names the build script for anything out of date.
 
-**Check repos** (also on the launchpad) answers the neighbouring question: has
-the work *landed*? Each app tile carries an amber "N to land" badge when its repo
-has uncommitted files, unpushed commits, is behind or diverged, has local
-branches not merged into the default branch, or has a worktree with uncommitted
-work; the tooltip lists them. The data is `git_autosync`'s `hygiene.json`
-(refreshed by every autosync run, with a fetch), read as a file, so the tiles
-cost no git call. The button re-runs `git_autosync/scripts/hygiene.py` as a
-child process (local git only, no fetch, a few seconds, the window stays
-usable) and lists every repo that has work left, not only the ones with an app.
-The check itself never commits, pushes or merges. `lab_hub/hygiene.py`,
-`tests/test_hygiene.py`.
+**Land** answers the neighbouring question, and acts on it: has the work
+*landed*? Each app tile carries an amber "N to land" badge when its repo has
+uncommitted files, unpushed commits, is behind or diverged, has local branches
+not merged into the default branch, or has a worktree with uncommitted work;
+the tooltip lists them. The data is `git_autosync`'s `hygiene.json` (refreshed
+by every autosync run, with a fetch), read as a file, so the tiles cost no git
+call; Refresh (⌘R) also re-runs `git_autosync/scripts/hygiene.py` in the
+background (local git only, no fetch), so there is no button to press to look.
+`lab_hub/hygiene.py`, `tests/test_hygiene.py`.
 
-The report has two buttons for acting on it (`docs/specs/repo-tidy.md`):
+A tile with something to land shows **Land** beside Launch (spec
+`docs/specs/land-from-tiles.md`; it replaced Check repos, the Resolve window and
+its tick-boxes). One press looks at that repo, says in one sentence what it will
+do ("sonar: commit open changes in 2 worktrees, merge 3 branches into master,
+push master to origin, delete 3 landed branches."), and asks once; **Details**
+lists every step. Progress shows on the tile, and the outcome is stated there:
+**Landed**, or **Not landed: <the reason in one line>** (for example "no Claude
+run: the tests don't pass on master itself: ImportError: cannot import name
+'macro'"). A repo that still has branches only you can decide shows "N branches
+need your decision — review", which opens **Review branches…** for that repo.
+**Land all (N)** on the launchpad does the same for every flagged repo, with one
+confirmation listing one sentence per repo; a repo that fails is reported and
+the rest carry on, and a summary ends the run. **Stop landing** ends a running
+Claude Code or test step and skips the rest; work already landed stays landed.
+Only one Land runs at a time per page, and a repo is claimed while it lands, so
+the same repo can never be landed twice at once. `lab_hub/land.py`,
+`ui/lander.py`, `tests/test_land.py`, `tests/test_land_ui.py`.
 
-- **Resolve…** previews only what loses nothing, each line ticked and
-  explained: merge branches that merge into the default branch without
-  conflicts (not ones still being worked on, nor into a branch behind
-  origin), commit tracked changes (never untracked files, which are listed
-  for you instead) and push that commit when the branch was otherwise level,
-  delete a branch whose changes are already in the default branch
-  (including squash-merged work), remove a clean worktree on such a branch or
-  detached at a commit already there, fast-forward a default branch that is
-  only behind with no local changes, push one that is only ahead. A worktree
-  with uncommitted or untracked files, a process inside it, a lock, or an
-  agent worktree under `.claude/worktrees/` used in the last 24 hours is left
-  alone, and the window says why. Every action is checked again just before it
-  runs; a diverged or dirty repo is never synced, and nothing is force-pushed.
-  A branch that *conflicts* with the default branch (and passes the same
-  guards) becomes a **Resolve conflicts with Claude** row naming the test
-  command Lab Hub will run. After one more confirmation (model, cost cap of
-  $3 per branch), Lab Hub first runs the repo's tests on the default branch in
-  a temporary worktree (`~/Library/Caches/LabHub/resolve`); if they don't pass
-  there, the branch stops before Claude is called and costs nothing. Otherwise
-  it merges the branch there and runs Claude Code headless with file tools only (no shell,
-  web, MCP, hooks or CLAUDE.md) to resolve the conflicted files. Lab Hub then
-  checks that nothing else changed and no markers are left, commits, runs the
-  repo's tests itself (once more after a single Claude fix round if they
-  fail), and fast-forwards and pushes the default branch only when they pass
-  and neither tip moved. Progress, cost and turns stream into the window;
-  **Stop** ends the run. Anything that fails leaves the branch untouched.
-  Claude cannot delete files; when deleting a conflicted file that one side
-  already deleted is the right fix, it names it (`DELETE: <path>`) and Lab Hub
-  deletes only that file. **Review branches…** shows, per branch, why the last
-  Resolve did not land it, and each app tile counts what is open ("6 branches ·
-  2 worktrees to land").
-  The test command comes from the `Run tests` line of the repo's
-  `docs/foundry/app-context.md` (shell syntax is never run), else common
-  defaults; with none, the branch stays for a person. Claude Code must be
-  signed in once (`claude auth login`). Spec §11; `lab_hub/claude_resolve.py`.
-- **Review branches…** lists every branch with work not yet in the default
-  branch (commits ahead, last date and subject, worktree). Per branch: **Open in
-  Terminal**, **Delete branch…** (confirms with its commits; off while it is
-  checked out), **Remove worktree…** (only when clean and unused; the branch
-  stays). Lab Hub merges nothing.
+What Land is allowed to do is `lab_hub/repo_tidy.py`'s guarded set, unchanged
+(`docs/specs/repo-tidy.md`): merge branches that merge into the default branch
+without conflicts (not ones still being worked on, nor into a branch behind
+origin), commit tracked changes (never untracked files) and push that commit
+when the branch was otherwise level, delete a branch whose changes are already
+in the default branch (including squash-merged work), remove a clean worktree on
+such a branch or detached at a commit already there, fast-forward a default
+branch that is only behind with no local changes, push one that is only ahead.
+A worktree with uncommitted or untracked files, a process inside it, a lock, or
+an agent worktree under `.claude/worktrees/` used in the last 24 hours is left
+alone. Every step is checked again just before it runs; a diverged or dirty repo
+is never synced, and nothing is force-pushed or rewritten.
+
+A branch that *conflicts* with the default branch (and passes the same guards)
+is handed to Claude Code, and the confirmation says so, with the model and the
+cost cap ($3 per branch) and that the repo's code goes to Anthropic. Lab Hub
+first runs the repo's tests on the default branch in a temporary worktree
+(`~/Library/Caches/LabHub/resolve`); if they don't pass there, the branch stops
+before Claude is called and costs nothing. Otherwise it merges the branch there
+and runs Claude Code headless with file tools only (no shell, web, MCP, hooks or
+CLAUDE.md) to resolve the conflicted files. Lab Hub then checks that nothing
+else changed and no markers are left, commits, runs the repo's tests itself
+(once more after a single Claude fix round if they fail), and fast-forwards and
+pushes the default branch only when they pass and neither tip moved. Anything
+that fails leaves the branch untouched. Claude cannot delete files; when
+deleting a conflicted file that one side already deleted is the right fix, it
+names it (`DELETE: <path>`) and Lab Hub deletes only that file. The test command
+comes from the `Run tests` line of the repo's `docs/foundry/app-context.md`
+(shell syntax is never run), else common defaults; with none, the branch stays
+for a person. Claude Code must be signed in once (`claude auth login`). Spec
+`repo-tidy.md` §11; `lab_hub/claude_resolve.py`.
+
+**Review branches…** (from a tile's "need your decision" link) lists every branch
+with work not yet in the default branch (commits ahead, last date and subject,
+why the last Land did not take it, worktree). Per branch: **Open in Terminal**,
+**Delete branch…** (confirms with its commits; off while it is checked out),
+**Remove worktree…** (only when clean and unused; the branch stays). Lab Hub
+merges nothing here.
 
 Every change is logged to `~/Library/Application Support/Lab Hub/repo-tidy.log`;
 a deleted branch is logged with its tip, so `git branch <name> <sha>` restores
