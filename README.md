@@ -331,8 +331,13 @@ deleting a conflicted file that one side already deleted is the right fix, it
 names it (`DELETE: <path>`) and Lab Hub deletes only that file. The test command
 comes from the `Run tests` line of the repo's `docs/foundry/app-context.md`
 (shell syntax is never run), else common defaults; with none, the branch stays
-for a person. Claude Code must be signed in once (`claude auth login`). Spec
-`repo-tidy.md` §11; `lab_hub/claude_resolve.py`.
+for a person. The temporary worktree has what a fresh `git worktree` lacks: the
+repo's `.venv`/`node_modules` are linked in, its submodules are initialised (only
+when `.gitmodules` is the checkout's own; otherwise the checkout's copy is used),
+and its gitignored nested repos (SONAR's `sonar/macro` and `sonar/playmaker`) are
+copied in without their `.git`; all of it is removed after the test run. Claude
+Code must be signed in once (`claude auth login`). Spec `repo-tidy.md` §11 and
+`land-from-tiles.md` §9; `lab_hub/claude_resolve.py`.
 
 **Review branches…** (from a tile's "need your decision" link) lists every branch
 with work not yet in the default branch (commits ahead, last date and subject,
