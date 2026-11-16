@@ -39,6 +39,15 @@ MODEL = "sonnet"  # owner decision A3
 BUDGET_USD = 3.0  # owner decision A4, per branch, both rounds together
 CLAUDE_TIMEOUT = 20 * 60
 TEST_TIMEOUT = 30 * 60
+# A repo whose suite is slower says so in its app-context (`- Test timeout: 60 min`
+# under `## Commands`). The limit is per test command, and a branch has up to
+# three test runs (the default branch, the merge, one fix round), so it is
+# capped; Stop still ends a run at any time.
+MAX_TEST_TIMEOUT = 180 * 60
+# Where the tests' programs are looked up: Homebrew and /usr/local before the
+# system folders, as in the owner's shell. The other way round, a bare `python3`
+# is the macOS system one (3.9), which cannot even import code written for 3.10+.
+TEST_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 TOOLS = "Read,Edit,Write,Glob,Grep"
 # Linked into the temporary worktree only while tests run: a fresh worktree
 # has none, and Claude must never see (or write through) them.
@@ -400,13 +409,19 @@ class TestCommand:
     argv: tuple[tuple[str, ...], ...]  # each: VAR=value… then program and args
     source: str  # "app-context" or "default"
     note: str = ""  # a span on the Run tests line that was not used, and why
+    timeout: int = 0  # seconds for each command; 0 means TEST_TIMEOUT
+
+    @property
+    def limit(self) -> int:
+        return self.timeout or TEST_TIMEOUT
 
     @property
     def display(self) -> str:
         return " && ".join(shlex.join(a) for a in self.argv)
 
 
-def _run_tests_line(repo: Path) -> str:
+def _commands_line(repo: Path, label: str) -> str:
+    """The `- <label> …` line of the `## Commands` section of the repo's app-context."""
     try:
         text = (repo / "docs" / "foundry" / "app-context.md").read_text(errors="replace")
     except OSError:
@@ -416,9 +431,44 @@ def _run_tests_line(repo: Path) -> str:
         if line.startswith("## "):
             in_commands = line.strip().lower() == "## commands"
             continue
-        if in_commands and re.match(r"\s*-\s*Run tests\b", line):
+        # The label must be the whole name: `- Run tests timeout: …` is not the
+        # Run tests line.
+        if in_commands and re.match(rf"\s*-\s*{re.escape(label)}\s*[:(,]", line):
             return line
     return ""
+
+
+def _run_tests_line(repo: Path) -> str:
+    return _commands_line(repo, "Run tests")
+
+
+_TIMEOUT = re.compile(r"\s*-\s*Test timeout\s*:\s*([0-9]{1,4})\s*min(?:ute)?s?\b")
+
+
+def test_timeout(repo: Path) -> int:
+    """Seconds one test command may run: the repo's own `- Test timeout: N min`
+    (1 to 180 minutes), else 0 for the default."""
+    found = _TIMEOUT.match(_commands_line(repo, "Test timeout"))
+    if not found:
+        return 0
+    seconds = int(found.group(1)) * 60
+    return seconds if 60 <= seconds <= MAX_TEST_TIMEOUT else 0
+
+
+def timeout_note(repo: Path) -> str:
+    """For the preview: the repo's own limit, or that its line was not understood
+    (a mistyped limit must not be found out after a 30-minute wait)."""
+    line = _commands_line(repo, "Test timeout")
+    if not line:
+        return ""
+    seconds = test_timeout(repo)
+    if seconds:
+        return f"limit {seconds // 60} min per command"
+    return (f"its Test timeout line was not understood (write `- Test timeout: N min`, 1 to "
+            f"{MAX_TEST_TIMEOUT // 60}), so the limit is {TEST_TIMEOUT // 60} min")
+
+
+test_timeout.__test__ = False  # type: ignore[attr-defined]
 
 
 def _is_command(span: str) -> bool:
@@ -475,12 +525,13 @@ def test_command(repo: Path) -> TestCommand | None:
             rejected.append(span)
     note = (f"not run: `{rejected[0]}`" + (f" and {len(rejected) - 1} more" if len(rejected) > 1 else "")
             if rejected else "")
+    timeout = test_timeout(repo)
     if usable:
-        return TestCommand(tuple(usable), "app-context", note)
+        return TestCommand(tuple(usable), "app-context", note, timeout)
     default = _default_command(repo)
     if default is None:
         return None
-    return TestCommand((default,), "default", note)
+    return TestCommand((default,), "default", note, timeout)
 
 
 test_command.__test__ = False  # type: ignore[attr-defined]
@@ -516,7 +567,7 @@ def test_env() -> dict[str, str]:
     env = {k: v for k, v in os.environ.items()
            if k in _TEST_ENV_KEEP or k.startswith("LC_")}
     env.update(QT_QPA_PLATFORM="offscreen", CI="1", GIT_TERMINAL_PROMPT="0",
-               PATH=f"{rt._SEARCH_PATH}:/bin:/usr/bin:{Path.home() / '.local' / 'bin'}")
+               PATH=f"{TEST_PATH}:{Path.home() / '.local' / 'bin'}")
     return env
 
 
@@ -558,12 +609,16 @@ def run_tests(cmd: TestCommand, cwd: Path, repo: Path, stop: Stopper,
             if not found:
                 return TestRun("env", f"{exe} not found")
             argv[0] = found
-        progress(f"  Tests: {shlex.join(words)}")
-        run = _stream(argv, cwd, {**env, **extra}, TEST_TIMEOUT, stop, lambda _l: None)
+        # Name the program that will really run: a bare name is looked up.
+        where = f" ({argv[0]})" if "/" not in exe else ""
+        progress(f"  Tests: {shlex.join(words)}{where}")
+        run = _stream(argv, cwd, {**env, **extra}, cmd.limit, stop, lambda _l: None)
         if run.stopped:
             return TestRun("stopped")
         if run.timed_out:
-            return TestRun("timeout", f"the tests ran longer than {TEST_TIMEOUT // 60} minutes")
+            return TestRun("timeout", f"the tests ran longer than {cmd.limit // 60} minutes "
+                                      "(a repo can raise this with `- Test timeout: N min` "
+                                      "under `## Commands` in its app-context)")
         if run.returncode != 0:
             return TestRun("fail", "\n".join(run.lines[-80:]))
     return TestRun("pass")

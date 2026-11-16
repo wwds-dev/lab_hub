@@ -11,3 +11,4 @@
 {"ts": "2026-11-16T19:15:56", "gate": "define", "by": "owner", "words": "approve section 9", "recorded_by": "agent", "spec": "land-from-tiles"}
 {"ts": "2026-11-16T19:46:44", "gate": "define", "by": "owner", "words": "Approve", "recorded_by": "agent", "spec": "update-now-terminal"}
 {"ts": "2026-11-16T21:36:34", "gate": "define", "by": "owner", "words": "Approve", "recorded_by": "agent", "spec": "release-root-behind"}
+{"ts": "2026-11-16T23:02:27", "gate": "define", "by": "owner", "words": "fix the timeout and the python lookup order", "recorded_by": "agent", "spec": "land-from-tiles"}
