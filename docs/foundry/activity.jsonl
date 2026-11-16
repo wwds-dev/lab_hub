@@ -58,7 +58,14 @@
 {"ts": "2026-11-16T20:00:12", "phase": "secure", "state": "done", "spec": "update-now-terminal"}
 {"ts": "2026-11-16T20:00:12", "phase": "verify", "state": "done", "spec": "update-now-terminal"}
 {"ts": "2026-11-16T20:00:12", "phase": "document", "state": "done", "spec": "update-now-terminal"}
+{"ts": "2026-11-16T21:35:46", "phase": "define", "state": "start", "spec": "release-root-behind"}
 {"ts": "2026-11-16T21:36:21", "phase": "build", "state": "start", "spec": "viewer-filters", "note": "replace the two app-wide Python event filters that crash QtWebEngine"}
+{"ts": "2026-11-16T21:36:34", "phase": "define", "state": "done", "spec": "release-root-behind"}
+{"ts": "2026-11-16T21:36:34", "phase": "build", "state": "start", "spec": "release-root-behind"}
+{"ts": "2026-11-16T21:48:03", "phase": "build", "state": "done", "spec": "release-root-behind"}
+{"ts": "2026-11-16T21:48:03", "phase": "review", "state": "done", "spec": "release-root-behind"}
+{"ts": "2026-11-16T21:48:03", "phase": "verify", "state": "done", "spec": "release-root-behind"}
+{"ts": "2026-11-16T21:48:03", "phase": "document", "state": "done", "spec": "release-root-behind"}
 {"ts": "2026-11-16T21:59:46", "phase": "build", "state": "done", "spec": "viewer-filters"}
 {"ts": "2026-11-16T21:59:46", "phase": "review", "state": "done", "spec": "viewer-filters"}
 {"ts": "2026-11-16T21:59:46", "phase": "verify", "state": "done", "spec": "viewer-filters"}
