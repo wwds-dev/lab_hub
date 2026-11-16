@@ -6,3 +6,4 @@
 {"ts": "2026-11-16T01:15:46", "gate": "define", "by": "owner", "words": "Approve as recommended", "recorded_by": "agent", "spec": "repo-tidy", "note": "§11: A3 sonnet, A4 $3 cap per branch, A5 yes"}
 {"ts": "2026-11-16T01:15:46", "gate": "architect", "by": "owner", "words": "Approve as recommended", "recorded_by": "agent", "spec": "repo-tidy", "note": "§11 architecture: Lab Hub runs git and tests, Claude file tools only"}
 {"ts": "2026-11-16T16:04:28", "gate": "define", "by": "owner", "words": "Build fixes 1–4", "recorded_by": "agent", "spec": "repo-tidy"}
+{"ts": "2026-11-16T18:17:59", "gate": "define", "by": "owner", "words": "approve as recommended (one Resolve… button, beside Launch, on every tab that shows the badge)", "recorded_by": "agent", "spec": "tile-resolve"}

@@ -33,3 +33,5 @@
 {"ts": "2026-11-16T16:45:25", "phase": "build", "state": "done", "spec": "repo-tidy"}
 {"ts": "2026-11-16T16:45:25", "phase": "review", "state": "done", "spec": "repo-tidy"}
 {"ts": "2026-11-16T16:45:25", "phase": "document", "state": "done", "spec": "repo-tidy"}
+{"ts": "2026-11-16T18:17:48", "phase": "define", "state": "start", "spec": "tile-resolve"}
+{"ts": "2026-11-16T18:17:48", "phase": "define", "state": "done", "spec": "tile-resolve"}
