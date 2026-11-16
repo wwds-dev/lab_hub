@@ -379,3 +379,77 @@ def test_a_dialog_over_the_tabs_does_not_swipe_them(tabs):
     assert swipe_across(swipe, inner, -STEP) is False
     assert w.currentIndex() == 0
     dialog.deleteLater()
+
+
+# ---------------------------------------------------------------------------
+# Where the filter goes (regression: an app-wide filter crashed QtWebEngine)
+# ---------------------------------------------------------------------------
+
+
+class QWebEngineView(QWidget):
+    """Stands in for the real view: matched by class name, as `inherits` does."""
+
+
+def _filtered(widget, swipe):
+    return bool(widget.property("labHubSwipe"))
+
+
+def test_install_filters_every_widget_of_the_window_but_not_the_application(qapp, monkeypatch):
+    calls = []
+    monkeypatch.setattr(type(qapp), "installEventFilter", lambda self, f: calls.append(f), raising=False)
+    w = QTabWidget()
+    page = QWidget()
+    child = QLabel("x", page)
+    w.addTab(page, "One")
+    swipe = SwipeTabs(w, parent=w)
+    swipe.install()
+    assert calls == [], "never on the QApplication"
+    for widget in (w, page, child, w.tabBar()):
+        assert _filtered(widget, swipe)
+    swipe.remove()
+    assert not _filtered(child, swipe)
+    w.deleteLater()
+
+
+def test_widgets_added_later_are_filtered_on_the_next_loop_turn(qapp):
+    w = QTabWidget()
+    w.addTab(QLabel("One"), "One")
+    swipe = SwipeTabs(w, parent=w)
+    swipe.install()
+    late = QWidget()
+    inner = QLabel("deep", late)
+    w.addTab(late, "Late")
+    QApplication.processEvents()
+    assert _filtered(late, swipe) and _filtered(inner, swipe)
+    w.deleteLater()
+
+
+def test_a_web_view_and_everything_inside_it_is_never_filtered(qapp):
+    w = QTabWidget()
+    view = QWebEngineView()
+    inside = QWidget(view)
+    w.addTab(view, "Web")
+    swipe = SwipeTabs(w, parent=w)
+    swipe.install()
+    later = QWebEngineView()
+    QWidget(later)
+    w.addTab(later, "Later web")
+    QApplication.processEvents()
+    assert _filtered(w, swipe)
+    assert not _filtered(view, swipe) and not _filtered(inside, swipe)
+    assert not _filtered(later, swipe)
+    w.deleteLater()
+
+
+def test_a_filtered_widget_still_swipes_after_install(qapp):
+    w = QTabWidget()
+    for name in ("One", "Two"):
+        w.addTab(QLabel(name), name)
+    w.resize(400, 300)
+    swipe = SwipeTabs(w, parent=w)
+    swipe.install()
+    page = w.widget(0)
+    QApplication.sendEvent(page, wheel(page, 0, 0, Qt.ScrollBegin))
+    QApplication.sendEvent(page, wheel(page, -STEP))
+    assert w.currentIndex() == 1
+    w.deleteLater()

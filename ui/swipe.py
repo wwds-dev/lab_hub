@@ -28,10 +28,10 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import QEvent, QObject, QPointF, Qt
+import shiboken6
+from PySide6.QtCore import QEvent, QObject, QPointF, Qt, QTimer
 from PySide6.QtWidgets import (
     QAbstractScrollArea,
-    QApplication,
     QStackedWidget,
     QTabWidget,
     QWidget,
@@ -49,6 +49,14 @@ HORIZONTAL_DOMINANCE = 1.5
 # A mouse wheel and some trackpad drivers send no scroll phases at all, so
 # there is no "gesture ended" to reset on. Treat a pause as the end instead.
 IDLE_RESET_S = 0.4
+
+# Marks a widget that already has this filter, so a rescan does not walk it twice.
+_MARK = "labHubSwipe"
+
+# Never filtered, nor anything inside: a web view's internals are QtWebEngine's, and handing
+# them to Python while they are being built is what crashed the app. A swipe over a web page
+# scrolls the page instead of changing tab.
+_SKIP = ("QWebEngineView",)
 
 # macOS reports a swipe's direction as an angle: 0° right, 90° up, 180° left.
 SWIPE_ANGLE_LEFT = 180.0
@@ -86,11 +94,17 @@ class SwipeTabs(QObject):
     Works on anything with the tab widget's index API — a ``QTabWidget``, or the
     ``QStackedWidget`` pages the window's sidebar drives.
 
-    Installed on the ``QApplication`` rather than on the tab widgets. A wheel
-    event is delivered to the deepest widget under the pointer and only reaches
-    an ancestor if that widget ignores it, which the widgets inside a tab are
-    under no obligation to do — filtering at the application lets this decide
-    first, and consume the event so nothing sees it twice.
+    A wheel event is delivered to the deepest widget under the pointer and only
+    reaches an ancestor if that widget ignores it, which the widgets inside a tab
+    are under no obligation to do. So the filter goes on *every* widget of the
+    window, not only on the tab widgets, and lets this decide first.
+
+    Never on the ``QApplication``: an application-wide Python filter receives
+    every event to every object, and PySide wraps each receiver, QtWebEngine's
+    half-built internals included. That segfaulted the app as soon as a
+    dashboard opened (`ui/application.py`). Widgets created later are picked up
+    from their parent's ChildAdded/ChildPolished, on the next turn of the event
+    loop, once they are fully built.
     """
 
     def __init__(self, *tab_widgets: QTabWidget | QStackedWidget, parent: QObject | None = None):
@@ -106,19 +120,73 @@ class SwipeTabs(QObject):
         self._accumulated = 0.0
         self._armed = True
         self._last_event_at = 0.0
+        self._root: QWidget | None = None
+        self._pending: list[QWidget] | None = None  # set by install()
 
-    def install(self, app: QApplication | None = None) -> None:
-        (app or QApplication.instance()).installEventFilter(self)
+    def install(self, root: QWidget | None = None) -> None:
+        """Filter `root` (default: the window that owns this) and every widget inside it."""
+        self._root = root if root is not None else self._default_root()
+        self._pending = []
+        self._scan(self._root)
 
-    def remove(self, app: QApplication | None = None) -> None:
-        (app or QApplication.instance()).removeEventFilter(self)
+    def remove(self) -> None:
+        root = getattr(self, "_root", None)
+        if root is None or not shiboken6.isValid(root):
+            return
+        for widget in [root, *root.findChildren(QWidget)]:
+            if widget.property(_MARK):
+                widget.removeEventFilter(self)
+                widget.setProperty(_MARK, None)
+
+    def _default_root(self) -> QWidget:
+        owner = self.parent()
+        if isinstance(owner, QWidget):
+            return owner.window()
+        return self._tabs[0].window()
+
+    def _scan(self, widget: QWidget) -> None:
+        """Install on `widget` and its descendants, stopping at web views."""
+        # A child that already has the filter is not walked again: it rescans its own
+        # children when they arrive, so a rescan costs one level, not the whole window.
+        stack = [(widget, True)]
+        while stack:
+            w, top = stack.pop()
+            if not shiboken6.isValid(w) or any(w.inherits(name) for name in _SKIP):
+                continue
+            if w.property(_MARK):
+                if not top:
+                    continue
+            else:
+                w.installEventFilter(self)
+                w.setProperty(_MARK, True)
+            stack.extend((c, False) for c in w.children() if isinstance(c, QWidget))
+
+    def _later(self, widget: QWidget) -> None:
+        """Rescan `widget` on the next loop turn: its new child may still be under construction."""
+        pending = getattr(self, "_pending", None)
+        if pending is None:
+            return  # filter used directly (tests), never installed
+        if not pending:
+            QTimer.singleShot(0, self._flush)
+        if widget not in pending:
+            pending.append(widget)
+
+    def _flush(self) -> None:
+        pending, self._pending = self._pending, []
+        for widget in pending:
+            self._scan(widget)
 
     # -- the filter ---------------------------------------------------------
 
     def eventFilter(self, obj, event):  # noqa: N802 (Qt's name)
-        if event.type() == QEvent.Wheel:
+        kind = event.type()
+        if kind in (QEvent.ChildAdded, QEvent.ChildPolished):
+            # Never event.child(): on ChildAdded it can be an object still being constructed.
+            self._later(obj)
+            return False
+        if kind == QEvent.Wheel:
             return self._on_wheel(obj, event)
-        if event.type() == QEvent.NativeGesture:
+        if kind == QEvent.NativeGesture:
             return self._on_native_gesture(obj, event)
         return False
 

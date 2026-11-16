@@ -19,6 +19,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+from ui.application import LabHubApplication  # noqa: E402
+
 from lab_hub import config  # noqa: E402
 
 from .fakes import FakeTray  # noqa: E402
@@ -27,7 +29,8 @@ from .fakes import FakeTray  # noqa: E402
 @pytest.fixture(scope="session")
 def qapp():
     """One QApplication for the whole session — Qt allows no more than one."""
-    app = QApplication.instance() or QApplication([])
+    # The app's own class, so the Dock-quit hook (`event()`) is the one under test.
+    app = QApplication.instance() or LabHubApplication([])
     yield app
 
 

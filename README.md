@@ -450,15 +450,15 @@ reveals the file to edit. Each tile also carries a **Remote / Local / Both** chi
 (2026-11-13), derived from what the entry holds: a link only is Remote, a file only is
 Local, both is Both. A Both entry opens its **link** — the artifact is the copy that edits
 from a phone or iPad reach — and keeps *Show in Finder* for the local copy (the backup).
-**Not mergeable yet (branch `claude/dashboards-embed`, found 2026-11-13).** Opening this page in the
-running app segfaults. The macOS crash report puts it in a Python `eventFilter` on the application
-(`sbk_o_eventFilter` -> `getWrapperForQObject` -> `Shiboken::Graph::identifyType`): PySide builds a
-wrapper for *every* object that receives an event, including QtWebEngine's internal objects while
-they are still being constructed. Lab Hub has two such filters, `ui/swipe.py`'s swipe filter and
-`_QuitGuard` in `ui/main_window.py`. A web view alone, with a theme and a stack, does not crash
-(probes: standalone, themed, in a stack, remote and local pages); the app's filters do. Fixing it
-means replacing both: `_QuitGuard` as a `QApplication` subclass overriding `event()`, and the swipe
-filter installed per widget outside the web views. Until then do not merge or build this branch.
+**No application-wide Python event filter, ever (fixed 2026-11-16).** Opening this page used to
+segfault the app: a Python `eventFilter` on the `QApplication` sees every event to every object, and
+PySide builds a wrapper for each receiver, QtWebEngine's half-built internals included
+(`sbk_o_eventFilter` -> `getWrapperForQObject` -> `Shiboken::Graph::identifyType`). The Dock-quit
+guard now runs from `LabHubApplication.event()` (`ui/application.py`), which only sees events for
+the application object, and the swipe filter goes on each widget of the window, never into a web
+view (new widgets are picked up a loop turn after they arrive). A swipe over a dashboard's page
+scrolls the page. Proof: a probe opening all 14 dashboards in real web views with wheel events
+survives; the same probe on the old code segfaults before the first one.
 Since 2026-11-13 the page opens as a **viewer**: the catalog list on the left and the chosen
 dashboard showing on the right (**Show as tiles** returns to the tiles above). Each dashboard gets
 a web view of its own (QtWebEngine), created the first time it is chosen, only once the page is on

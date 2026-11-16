@@ -30,12 +30,14 @@ from PySide6.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl  # noqa: E402
 from PySide6.QtGui import QDragEnterEvent, QDropEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+from ui.application import LabHubApplication  # noqa: E402
+
 from lab_hub import config  # noqa: E402
 
 
 @pytest.fixture(scope="module")
 def app():
-    return QApplication.instance() or QApplication([])
+    return QApplication.instance() or LabHubApplication([])
 
 
 @pytest.fixture(scope="module")

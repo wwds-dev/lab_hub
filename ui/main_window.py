@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from lab_hub import APP_NAME, asset_path, config, launcher, login_item, version
 
 from . import appkit_guard, dock, swipe, theme, tray
+from .application import LabHubApplication
 from .apps_tab import AppsTab
 from .convert_tab import ConvertTab
 from .images_tab import ImagesTab
@@ -507,7 +508,7 @@ def run() -> int:
     appkit_guard.install()
 
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_DontShowIconsInMenus, False)
-    app = QApplication(sys.argv)
+    app = LabHubApplication(sys.argv)
     app.setApplicationName(APP_NAME)
 
     guard = SingleInstance()
@@ -612,16 +613,20 @@ class _QuitGuard(QObject):
     this event. That leaves exactly one way out of the app, which is the point —
     the Dock icon comes and goes with the window, so quitting from it means
     "clear this off my screen", not "shut the whole thing down".
+
+    Not an event filter on the application: that would see every event to every object and
+    crashes QtWebEngine (see `ui/application.py`). The app calls `handle` for each Quit only.
     """
 
     def __init__(self, window: MainWindow, app) -> None:
         super().__init__(app)
         self._window = window
-        app.installEventFilter(self)
+        app.quit_handler = self.handle
 
-    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt override
+    def handle(self, event) -> bool:
+        """True when this quit was refused and turned into a retreat to the menu bar."""
         if event.type() != QEvent.Type.Quit or not self._window.stays_resident():
-            return super().eventFilter(watched, event)
+            return False
         event.ignore()
         self._window.retreat_to_menu_bar()
         return True

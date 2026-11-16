@@ -367,13 +367,13 @@ def test_showing_the_window_also_brings_the_app_forward(window, fake_tray, monke
 def quit_guard(window, qapp):
     """A guard on the shared QApplication, taken back off afterwards.
 
-    The QApplication is session-scoped, so a filter left installed would
-    outlive its window and every later test would be filtering events through
-    a deleted object.
+    The QApplication is session-scoped, so a handler left in place would
+    outlive its window and every later test's Quit would go through a deleted
+    window.
     """
     guard = _QuitGuard(window, qapp)
     yield guard
-    qapp.removeEventFilter(guard)
+    qapp.quit_handler = None
 
 
 def _quit_event():
@@ -432,7 +432,7 @@ def test_without_a_menu_bar_item_quitting_really_quits(window, qapp, quit_guard)
     """
     window.tray = None
 
-    assert quit_guard.eventFilter(qapp, _quit_event()) is False
+    assert quit_guard.handle(_quit_event()) is False
 
 
 def test_quitting_from_the_menu_bar_is_not_intercepted(window, fake_tray, qapp, quit_guard):
@@ -440,14 +440,14 @@ def test_quitting_from_the_menu_bar_is_not_intercepted(window, fake_tray, qapp, 
     window.tray = fake_tray
     window._quitting = True
 
-    assert quit_guard.eventFilter(qapp, _quit_event()) is False
+    assert quit_guard.handle(_quit_event()) is False
 
 
 def test_other_application_events_pass_through(window, fake_tray, qapp, quit_guard):
-    """The filter sits on every event the application object sees."""
+    """The handler is only ever asked about Quit; anything else is not its business."""
     window.tray = fake_tray
 
-    assert quit_guard.eventFilter(qapp, QEvent(QEvent.Type.ApplicationActivate)) is False
+    assert quit_guard.handle(QEvent(QEvent.Type.ApplicationActivate)) is False
 
 
 def test_the_menu_bar_quit_still_ends_the_app(window, fake_tray, qapp, quit_guard):
@@ -528,3 +528,15 @@ def test_refresh_gives_a_newly_listed_app_its_tile(window, tmp_path, monkeypatch
         assert "newcomer" not in {card.app.key for card in window.backstage_tab.cards}
     finally:
         registry.use(None)
+
+
+def test_the_quit_guard_installs_no_application_event_filter(window, qapp, monkeypatch):
+    """Regression: an app-wide Python event filter segfaults QtWebEngine (ui/application.py)."""
+    calls = []
+    monkeypatch.setattr(type(qapp), "installEventFilter", lambda self, f: calls.append(f), raising=False)
+    guard = _QuitGuard(window, qapp)
+    try:
+        assert calls == []
+        assert qapp.quit_handler == guard.handle
+    finally:
+        qapp.quit_handler = None

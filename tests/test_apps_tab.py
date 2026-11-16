@@ -959,7 +959,9 @@ def test_build_check_dialog_can_be_dismissed(qapp_or_none=None):
     red close button or Escape onto — it becomes impossible to dismiss."""
     from PySide6.QtWidgets import QApplication, QMessageBox
 
-    app = QApplication.instance() or QApplication([])
+    from ui.application import LabHubApplication
+
+    app = QApplication.instance() or LabHubApplication([])
     box = QMessageBox()
     box.addButton("Copy commands", QMessageBox.ButtonRole.ActionRole)
     box.addButton("Copy and open Terminal", QMessageBox.ButtonRole.ActionRole)
