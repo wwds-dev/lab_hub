@@ -120,14 +120,18 @@ class AppCard(Tile):
         # report, so it costs a file read and never a git call on this thread.
         self.hygiene = QLabel()
         self.hygiene.setObjectName("hint")
+        # Wrapped, and stacked under the version below: "2 unpushed commits ·
+        # 1 commit behind · 2 branches to land" on one unwrappable line sets a
+        # minimum width wider than a tile column and pushes the grid off-window.
+        self.hygiene.setWordWrap(True)
 
         # Version and badge get a line of their own under the name. On the
         # name's line, "v0.6.53+g861546d · 1 behind" plus "3 to land" plus the
         # status chip set a minimum width wider than a tile column, and the
         # grid pushed the third column off the window.
-        self.meta = QHBoxLayout()
-        self.meta.setSpacing(12)
-        self.meta.addWidget(self.version, 1)
+        self.meta = QVBoxLayout()
+        self.meta.setSpacing(2)
+        self.meta.addWidget(self.version)
         self.meta.addWidget(self.hygiene)
         self.heading.addLayout(self.meta)
 

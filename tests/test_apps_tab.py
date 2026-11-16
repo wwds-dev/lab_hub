@@ -895,3 +895,15 @@ def test_long_version_and_badge_do_not_widen_a_tile(qapp):
     card.hygiene.setText("26 branches · 7 worktrees · 1 file to land")
     assert card.minimumSizeHint().width() <= base + 160
     assert card.header.indexOf(card.version) == -1 and card.header.indexOf(card.hygiene) == -1
+
+
+def test_the_longest_badge_wraps_instead_of_widening_a_tile(qapp):
+    """Regression (2026-11-16): "2 unpushed commits · 1 commit behind · 2
+    branches to land" on one unwrapped line pushed the grid off the window."""
+    from ui.apps_tab import AppCard
+
+    card = AppCard(launcher.ExternalApp("s", "Sentinel", "s", "main.py", "summary"))
+    base = card.minimumSizeHint().width()
+    card.hygiene.setText("2 unpushed commits · 1 commit behind · 2 branches to land")
+    assert card.hygiene.wordWrap()
+    assert card.minimumSizeHint().width() <= base + 20

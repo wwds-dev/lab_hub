@@ -221,5 +221,9 @@ class SwipeTabs(QObject):
                 return []
             if widget in self._tabs:
                 found.append(widget)
+            # A dialog's parent is the page that opened it, but it is its own
+            # window: its scrolling belongs to it, never to the pages behind.
+            if widget.isWindow():
+                break
             widget = widget.parentWidget()
         return found

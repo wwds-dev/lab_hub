@@ -362,3 +362,20 @@ def test_a_swipe_moves_the_real_window_tabs(window):
 def test_the_filter_dies_with_the_window(window):
     """An app-level filter that outlives its window decides later windows' swipes."""
     assert window.swipe.parent() is window
+
+
+def test_a_dialog_over_the_tabs_does_not_swipe_them(tabs):
+    """Regression (2026-11-16): scrolling inside Resolve repos moved the page
+    behind it from Apps to Websites. A dialog is its own window; its parent
+    page must not claim its gestures."""
+    from PySide6.QtWidgets import QDialog, QVBoxLayout
+
+    w, swipe, page = tabs
+    dialog = QDialog(page)
+    inner = QLabel("progress", dialog)
+    QVBoxLayout(dialog).addWidget(inner)
+    assert swipe._candidates(inner) == []
+    assert swipe._candidates(inner, vertical=True) == []
+    assert swipe_across(swipe, inner, -STEP) is False
+    assert w.currentIndex() == 0
+    dialog.deleteLater()
