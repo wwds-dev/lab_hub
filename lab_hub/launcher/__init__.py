@@ -84,6 +84,9 @@ from .state import (  # noqa: F401
     dirty_checkout,
     hands_off_and_exits,
     install_command,
+    install_record,
+    install_tree,
+    installs_dir,
     is_running,
     launch_is_observable,
     needs_terminal,
@@ -97,6 +100,7 @@ from .state import (  # noqa: F401
     source_dir,
     status,
     venv_python,
+    worktree_tree,
     version,
 )
 

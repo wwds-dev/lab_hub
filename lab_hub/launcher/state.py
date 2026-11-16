@@ -10,6 +10,7 @@ Launch is offered at all. Starting, stopping and raising an app is
 from __future__ import annotations
 
 import json
+import os
 import plistlib
 import re
 import shlex
@@ -430,6 +431,92 @@ def _plist_version(bundle: Path) -> Version:
 _COMMIT_RE = re.compile(r"[0-9a-f]{7,40}")
 
 
+def installs_dir() -> Path:
+    """Where Update now records which commit it installed an app from, for
+    apps whose own build stamps no commit (SYNDUSTRYX: its plist pins 0.6.53)."""
+    from ..config import SUPPORT_DIR
+
+    return SUPPORT_DIR / "installs"
+
+
+def _bundle_executable(bundle: Path) -> Path | None:
+    try:
+        with (bundle / "Contents" / "Info.plist").open("rb") as handle:
+            name = plistlib.load(handle).get("CFBundleExecutable")
+    except (OSError, plistlib.InvalidFileException, AttributeError):
+        return None
+    return bundle / "Contents" / "MacOS" / name if isinstance(name, str) and name else None
+
+
+def _sha256(path: Path) -> str:
+    import hashlib
+
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(chunk)
+    except OSError:
+        return ""
+    return digest.hexdigest()
+
+
+def worktree_tree(project: Path) -> str:
+    """A fingerprint of the checkout as it is: the tree `git add -A` would
+    write (tracked and untracked files, ignored ones left out), built in a
+    throwaway index so the real one is untouched. "" when git cannot tell."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        env = dict(os.environ, GIT_INDEX_FILE=str(Path(tmp) / "index"),
+                   GIT_OPTIONAL_LOCKS="0")
+        try:
+            added = subprocess.run(["git", "add", "-A"], cwd=project, env=env,
+                                   capture_output=True, timeout=60)
+            if added.returncode != 0:
+                return ""
+            tree = subprocess.run(["git", "write-tree"], cwd=project, env=env,
+                                  capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            return ""
+    return tree.stdout.strip() if tree.returncode == 0 else ""
+
+
+def install_tree(app: ExternalApp, bundle: Path) -> str:
+    """The checkout fingerprint Update now recorded right after installing
+    this bundle, or "" (no record, or the bundle has changed since)."""
+    if install_record(app, bundle) is None:
+        return ""
+    try:
+        tree = json.loads((installs_dir() / f"{app.key}.json").read_text()).get("tree")
+    except (OSError, ValueError, AttributeError):
+        return ""
+    return tree if isinstance(tree, str) and _COMMIT_RE.fullmatch(tree) else ""
+
+
+def install_record(app: ExternalApp, bundle: Path) -> tuple[str, bool] | None:
+    """(commit, dirty) Update now recorded for this bundle, or None.
+
+    Only believed while the installed executable is the one recorded: a bundle
+    replaced by anything else (a manual install, an older copy put back from
+    the Trash) no longer matches, and then nothing is claimed.
+    """
+    try:
+        data = json.loads((installs_dir() / f"{app.key}.json").read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    commit = _stamped_commit(data)
+    want = data.get("executable_sha256")
+    executable = _bundle_executable(bundle)
+    if not commit or not isinstance(want, str) or executable is None:
+        return None
+    if _sha256(executable) != want:
+        return None
+    return commit, data.get("dirty") is True
+
+
 def _stamped_commit(data: dict) -> str:
     commit = data.get("commit")
     commit = commit.strip() if isinstance(commit, str) else ""
@@ -760,6 +847,17 @@ def version(app: ExternalApp, lab_root: Path) -> Version:
             # number is the version. Where the source declares releases too,
             # place the bundle's in its history to say how far behind it is.
             plist = _plist_version(bundle)
+            record = install_record(app, bundle) if plist.known else None
+            if record is not None and project is not None:
+                commit, dirty = record
+                behind = _commits_behind(project, commit, None, None,
+                                         counts_comparable=False)
+                return replace(
+                    plist, commit=commit[:7], dirty=dirty, commit_note="",
+                    detail=f"{plist.detail}; Lab Hub's Update now installed it "
+                           f"from commit {commit[:7]}",
+                    behind=behind or 0, behind_unknown=behind is None,
+                )
             release = _release_number(project) if project is not None else None
             if plist.known and release is not None and plist.text.lstrip("v") != release:
                 since = _commits_since_release(project, plist.text.lstrip("v"))
@@ -957,12 +1055,34 @@ def registered_build_command(app: ExternalApp, project: Path) -> str | None:
     if not app.build or not app.build_output:
         return None
     built = shlex.quote(app.build_output)
-    installed = shlex.quote(str(APPLICATIONS / f"{app.name}.app"))
+    bundle = APPLICATIONS / f"{app.name}.app"
+    installed = shlex.quote(str(bundle))
     trash = f'"$HOME/.Trash/{app.name} before update $(date +%Y-%m-%d-%H%M%S).app"'
+    records = shlex.quote(str(installs_dir()))
+    record = shlex.quote(str(installs_dir() / f"{app.key}.json"))
+    plist = shlex.quote(str(bundle / "Contents" / "Info.plist"))
+    # The build stamps no commit, so record the one it was built from (and
+    # whether the checkout had changes before the build touched it), tied to
+    # the installed executable's hash: install_record() reads it back.
+    # `tree` fingerprints the checkout as the build left it: SYNDUSTRYX's build
+    # rewrites its own release-manifest.json, which must not read as "changes
+    # not in this build" (worktree_tree computes the same in Python).
+    stamp = (
+        f"mkdir -p {records} && "
+        f"exe=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' {plist}) && "
+        f"idx=$(mktemp -u) && GIT_INDEX_FILE=\"$idx\" git add -A && "
+        f"tree=$(GIT_INDEX_FILE=\"$idx\" git write-tree) && rm -f \"$idx\" && "
+        f"printf '{{\"commit\": \"%s\", \"dirty\": %s, \"tree\": \"%s\", "
+        f"\"executable_sha256\": \"%s\"}}\\n' "
+        f"\"$commit\" \"$dirty\" \"$tree\" "
+        f"\"$(shasum -a 256 {installed}/Contents/MacOS/\"$exe\" | cut -d' ' -f1)\" > {record}"
+    )
     return (
-        f"cd {shlex.quote(str(project))} && {app.build} && test -d {built} && "
+        f"cd {shlex.quote(str(project))} && commit=$(git rev-parse HEAD) && "
+        f"dirty=$([ -n \"$(git status --porcelain)\" ] && echo true || echo false) && "
+        f"{app.build} && test -d {built} && "
         f"{{ [ ! -e {installed} ] || mv {installed} {trash}; }} && "
-        f"ditto {built} {installed}"
+        f"ditto {built} {installed} && {stamp}"
     )
 
 
@@ -1120,6 +1240,14 @@ def _build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
             script, command,
         )
     if dirty_checkout(project):
+        bundle = bundle_path(app, lab_root)
+        recorded = install_tree(app, bundle) if bundle is not None else ""
+        if recorded and recorded == worktree_tree(project):
+            return BuildStatus(
+                app, found, "current",
+                "matches the checkout it was built from, including the files "
+                "its own build rewrites.", script, command,
+            )
         return BuildStatus(
             app, found, "uncommitted",
             "level with the last commit, but the checkout has uncommitted "
