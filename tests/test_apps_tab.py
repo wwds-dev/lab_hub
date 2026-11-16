@@ -882,3 +882,16 @@ def test_a_bundle_built_in_its_checkout_reads_built(qapp, tmp_path, monkeypatch)
 
     assert card.state.text() == "Built"
     assert card.launch_button.isEnabled()
+
+
+def test_long_version_and_badge_do_not_widen_a_tile(qapp):
+    """The version marker and the "to land" badge live on their own line,
+    so they cannot push a tile wider than the name, status and summary need."""
+    from ui.apps_tab import AppCard
+
+    card = AppCard(launcher.ExternalApp("s", "SYNDUSTRYX", "s", "main.py", "summary"))
+    base = card.minimumSizeHint().width()
+    card.version.setText("v0.6.53+g861546d-dirty · 126 behind · and a very long tail")
+    card.hygiene.setText("35 to land")
+    assert card.minimumSizeHint().width() <= base + 160
+    assert card.header.indexOf(card.version) == -1 and card.header.indexOf(card.hygiene) == -1

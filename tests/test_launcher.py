@@ -1404,6 +1404,7 @@ def _git_project(path: Path) -> str:
 
 
 _MAKE_BUNDLE = (
+    "printf 'built_at now' > a.txt && "  # the build rewrites a tracked file
     "mkdir -p out/X.app/Contents/MacOS && touch out/X.app/new && "
     "printf 'new build' > out/X.app/Contents/MacOS/X && "
     "/usr/libexec/PlistBuddy -c 'Add :CFBundleExecutable string X' "
@@ -1436,6 +1437,9 @@ def test_a_registered_build_command_builds_and_installs(tmp_path, monkeypatch):
     (trashed,) = (home / ".Trash").iterdir()
     assert trashed.name.startswith("X before update") and (trashed / "old").exists()
     assert launcher.install_record(app, apps / "X.app") == (head, False)
+    # The tracked file the build rewrote is back as committed: nothing for
+    # Resolve to commit, so the source does not move past the install.
+    assert (project / "a.txt").read_text() == "x"
     # The build's own outputs (out/) are part of the recorded fingerprint, so
     # they do not make the checkout read as changed since the build...
     assert launcher.install_tree(app, apps / "X.app") == launcher.worktree_tree(project)
@@ -1544,3 +1548,25 @@ def test_no_command_names_the_projects_build_guide(tmp_path, monkeypatch):
     assert row.guide == project / "desktop" / "BUILDING.md"
     assert row.project == project
     assert "desktop/BUILDING.md" in row.note
+
+
+def test_a_registered_build_keeps_edits_made_before_it(tmp_path, monkeypatch):
+    import subprocess
+
+    apps = tmp_path / "Applications"
+    apps.mkdir()
+    project = tmp_path / "x"
+    _git_project(project)
+    (project / "a.txt").write_text("my edit")
+    monkeypatch.setattr(launcher, "APPLICATIONS", apps)
+    monkeypatch.setattr(launcher, "installs_dir", lambda: tmp_path / "installs")
+    app = launcher.ExternalApp("x", "X", "x", "server.py", "", build=_MAKE_BUNDLE,
+                               build_output="out/X.app")
+    home = tmp_path / "home"
+    (home / ".Trash").mkdir(parents=True)
+
+    subprocess.run(["/bin/sh", "-c", launcher.registered_build_command(app, project)],
+                   check=True, env={**os.environ, "HOME": str(home)})
+
+    # It was already changed before the build, so it is not restored to HEAD.
+    assert (project / "a.txt").read_text() == "built_at now"

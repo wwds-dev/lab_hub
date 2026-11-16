@@ -1077,10 +1077,21 @@ def registered_build_command(app: ExternalApp, project: Path) -> str | None:
         f"\"$commit\" \"$dirty\" \"$tree\" "
         f"\"$(shasum -a 256 {installed}/Contents/MacOS/\"$exe\" | cut -d' ' -f1)\" > {record}"
     )
+    # A build may rewrite tracked files of its own (SYNDUSTRYX stamps
+    # `built_at` into release-manifest.json). Left behind, Resolve commits
+    # them, the source moves a commit past the install, and the tile reads
+    # "1 behind" after every update. So tracked files the build changed, and
+    # only those (`$pre` lists what was already changed before it), are put
+    # back to HEAD once the bundle exists. Edits made before the build stay.
+    restore = (
+        'git diff --name-only HEAD | grep -vxF -f "$pre" | '
+        'while IFS= read -r f; do git checkout -q HEAD -- "$f"; done; rm -f "$pre"'
+    )
     return (
         f"cd {shlex.quote(str(project))} && commit=$(git rev-parse HEAD) && "
         f"dirty=$([ -n \"$(git status --porcelain)\" ] && echo true || echo false) && "
-        f"{app.build} && test -d {built} && "
+        f"pre=$(mktemp) && git diff --name-only HEAD > \"$pre\" && "
+        f"{app.build} && test -d {built} && {{ {restore}; }} && "
         f"{{ [ ! -e {installed} ] || mv {installed} {trash}; }} && "
         f"ditto {built} {installed} && {stamp}"
     )

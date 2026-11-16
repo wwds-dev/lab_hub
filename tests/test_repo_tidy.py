@@ -78,11 +78,12 @@ def test_a_squash_landed_branch_is_deleted_and_logged(lab, tmp_path):
     assert f"branch feat {sha}" in log.read_text()
 
 
-def test_a_branch_with_unlanded_work_is_never_planned(lab):
+def test_unlanded_work_is_merged_before_its_branch_is_deleted(lab):
     sh(lab, "checkout", "-q", "-b", "wip")
     commit(lab, "c.txt")
     sh(lab, "checkout", "-q", "main")
-    assert ("delete_branch", "wip") not in kinds(run_plan(lab))
+    order = [(a.kind, a.target) for a in run_plan(lab).actions]
+    assert order.index(("merge", "wip")) < order.index(("delete_branch", "wip"))
     assert [r.branch for r in tidy.unlanded([("repo", lab)])] == ["wip"]
 
 
@@ -508,3 +509,104 @@ def test_unresolved_conflicts_are_not_committed(lab):
     plan = run_plan(lab)
     assert not any(a.kind == "commit" for a in plan.actions)
     assert any("unresolved conflicts" in s.reason for s in plan.skipped)
+
+
+
+# ------------------------------------------------------------- merge
+def make_branch(lab: Path, name: str, filename: str, text: str = "x") -> None:
+    sh(lab, "checkout", "-q", "-b", name)
+    commit(lab, filename, text)
+    sh(lab, "checkout", "-q", "main")
+
+
+def test_a_clean_branch_is_merged_pushed_and_tidied(lab, tmp_path):
+    make_branch(lab, "feat", "f.txt")
+    wt = add_worktree(lab, "feat", tmp_path / "wt")
+    plan = run_plan(lab)
+    order = [(a.kind, a.target) for a in plan.actions]
+    assert order == [("merge", "feat"), ("remove_worktree", str(wt)),
+                     ("delete_branch", "feat"), ("push", "main")]
+    for action in plan.actions:
+        assert tidy.apply(action, tmp_path / "log", busy=(), now=OLD) == (True, "done"), action
+    assert (lab / "f.txt").exists()
+    assert "feat" not in tidy.local_branches(lab) and not wt.exists()
+    assert tidy.ahead_behind(lab) == (0, 0)
+    assert sh(lab, "log", "-1", "--format=%s") == "Lab Hub: merge feat"
+
+
+def test_a_conflicting_branch_is_left_alone(lab):
+    make_branch(lab, "feat", "a.txt", "theirs")
+    commit(lab, "a.txt", "ours")
+    plan = run_plan(lab)
+    assert not any(a.target == "feat" for a in plan.actions)
+    assert any("conflicts with main" in s.reason for s in plan.skipped)
+
+
+def test_unfinished_work_in_a_worktree_is_not_merged(lab, tmp_path):
+    make_branch(lab, "feat", "f.txt")
+    wt = add_worktree(lab, "feat", tmp_path / "wt")
+    (wt / "new.txt").write_text("wip")
+    assert ("merge", "feat") not in kinds(run_plan(lab))
+    (wt / "new.txt").unlink()
+    assert ("merge", "feat") not in kinds(run_plan(lab, busy=(wt,)))
+    assert ("merge", "feat") in kinds(run_plan(lab))
+
+
+def test_a_recent_agent_branch_is_not_merged(lab):
+    make_branch(lab, "feat", "f.txt")
+    wt = lab / ".claude" / "worktrees" / "feat"
+    sh(lab, "worktree", "add", "-q", str(wt), "feat")
+    assert ("merge", "feat") not in kinds(run_plan(lab, now=time.time()))
+    assert ("merge", "feat") in kinds(run_plan(lab, now=OLD))
+
+
+def test_nothing_is_merged_into_a_main_that_is_behind(lab, tmp_path):
+    make_branch(lab, "feat", "f.txt")
+    other = other_clone(lab, tmp_path)
+    commit(other, "remote.txt")
+    sh(other, "push", "-q")
+    sh(lab, "fetch", "-q")
+    plan = run_plan(lab)
+    assert ("merge", "feat") not in kinds(plan)
+    assert any("pull it first" in s.reason for s in plan.skipped)
+
+
+def test_nothing_is_merged_while_the_checkout_is_on_another_branch(lab):
+    make_branch(lab, "feat", "f.txt")
+    sh(lab, "checkout", "-q", "-b", "side")
+    assert ("merge", "feat") not in kinds(run_plan(lab))
+
+
+def test_a_branch_committed_in_the_same_run_waits(lab, tmp_path):
+    sh(lab, "branch", "feat")
+    wt = add_worktree(lab, "feat", tmp_path / "wt")
+    commit(wt, "f.txt")
+    (wt / "f.txt").write_text("more")
+    plan = run_plan(lab)
+    assert ("commit", str(wt)) in kinds(plan)
+    assert ("merge", "feat") not in kinds(plan)
+    assert any("next Resolve" in s.reason for s in plan.skipped)
+
+
+def test_a_merge_of_a_moved_branch_is_skipped(lab, tmp_path):
+    make_branch(lab, "feat", "f.txt")
+    action = next(a for a in run_plan(lab).actions if a.kind == "merge")
+    sh(lab, "checkout", "-q", "feat")
+    commit(lab, "g.txt")
+    sh(lab, "checkout", "-q", "main")
+    done, msg = tidy.apply(action, tmp_path / "log", busy=(), now=OLD)
+    assert not done and "moved" in msg
+    assert not (lab / "f.txt").exists()
+
+
+def test_a_failed_merge_is_aborted(lab, tmp_path):
+    make_branch(lab, "feat", "f.txt")
+    action = next(a for a in run_plan(lab).actions if a.kind == "merge")
+    hook = Path(sh(lab, "rev-parse", "--absolute-git-dir")) / "hooks" / "pre-merge-commit"
+    hook.parent.mkdir(exist_ok=True)
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+    done, _ = tidy.apply(action, tmp_path / "log", busy=(), now=OLD)
+    assert not done
+    assert tidy.tracked_clean(lab) and not tidy.paused_operation(lab)
+    assert not (lab / "f.txt").exists()
