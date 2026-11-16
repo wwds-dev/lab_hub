@@ -114,13 +114,22 @@ class AppCard(Tile):
         # rebuild would be pure waste.
         self.version = QLabel()
         self.version.setObjectName("hint")
-        self.header.insertWidget(1, self.version)
+        self.version.setWordWrap(True)
 
         # Work not yet committed, pushed or merged: read from git_autosync's
         # report, so it costs a file read and never a git call on this thread.
         self.hygiene = QLabel()
         self.hygiene.setObjectName("hint")
-        self.header.insertWidget(2, self.hygiene)
+
+        # Version and badge get a line of their own under the name. On the
+        # name's line, "v0.6.53+g861546d · 1 behind" plus "3 to land" plus the
+        # status chip set a minimum width wider than a tile column, and the
+        # grid pushed the third column off the window.
+        self.meta = QHBoxLayout()
+        self.meta.setSpacing(12)
+        self.meta.addWidget(self.version, 1)
+        self.meta.addWidget(self.hygiene)
+        self.heading.addLayout(self.meta)
 
         self.launch_button = QPushButton("Launch")
         self.launch_button.setObjectName("primary")
