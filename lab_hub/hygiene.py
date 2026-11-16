@@ -9,6 +9,7 @@ script again without a fetch. Nothing here runs git, and nothing changes a repo.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -19,6 +20,27 @@ SCRIPT_REL = Path("git_autosync") / "scripts" / "hygiene.py"
 # A frozen app has a minimal PATH; python3 lives in one of these.
 _SEARCH_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin"
 STALE_AFTER_HOURS = 6
+
+
+_SHORT = (
+    (re.compile(r"^(\d+) branch(?:es)? not merged"), "branch", "branches"),
+    (re.compile(r"^(\d+) worktrees? with uncommitted"), "worktree", "worktrees"),
+    (re.compile(r"^(\d+) uncommitted files?"), "file", "files"),
+    (re.compile(r"^(?:diverged: )?(\d+) unpushed"), "unpushed commit", "unpushed commits"),
+    (re.compile(r"(?:^|, )(\d+) behind"), "commit behind", "commits behind"),
+)
+
+
+def _short(problem: str) -> str:
+    """Counts for the tile: "6 branches not merged into master" -> "6 branches";
+    "" for a line git_autosync words differently (counted as an item)."""
+    parts = []
+    for pattern, one, many in _SHORT:
+        m = pattern.search(problem)
+        if m:
+            n = int(m.group(1))
+            parts.append(f"{n} {one if n == 1 else many}")
+    return " · ".join(parts)
 
 
 @dataclass(frozen=True)
@@ -39,8 +61,11 @@ class RepoRow:
         """Short text for a tile: how many things are left to land."""
         if self.error:
             return "repo not readable"
-        n = len(self.problems)
-        return f"{n} to land" if n else ""
+        parts = [s for s in (_short(p) for p in self.problems) if s]
+        unknown = sum(1 for p in self.problems if not _short(p))
+        if unknown:
+            parts.append(f"{unknown} item{'s' if unknown != 1 else ''}")
+        return " · ".join(parts) + " to land" if parts else ""
 
     @property
     def detail(self) -> str:

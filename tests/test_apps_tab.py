@@ -892,6 +892,6 @@ def test_long_version_and_badge_do_not_widen_a_tile(qapp):
     card = AppCard(launcher.ExternalApp("s", "SYNDUSTRYX", "s", "main.py", "summary"))
     base = card.minimumSizeHint().width()
     card.version.setText("v0.6.53+g861546d-dirty · 126 behind · and a very long tail")
-    card.hygiene.setText("35 to land")
+    card.hygiene.setText("26 branches · 7 worktrees · 1 file to land")
     assert card.minimumSizeHint().width() <= base + 160
     assert card.header.indexOf(card.version) == -1 and card.header.indexOf(card.hygiene) == -1

@@ -198,3 +198,30 @@ The review findings (`docs/audit/resolve-with-claude-code-review.md`, `docs/audi
 **Stop** skips everything after the running step. A branch already landed stays landed, and its push waits for the next Resolve.
 
 **Open for the owner (security P1-2, residual):** the tests still run the branch's code as you, with network access and write access to your home folder. The allowlisted environment, the git-state fingerprint and the process-group kill narrow this, but do not confine it. Confining it fully means running the tests under `sandbox-exec` (no network except loopback, no writes outside the temporary worktree and `$TMPDIR`), which may break test suites that write elsewhere. **Decision A6 (owner, 2026-11-16, "Accept A6 as is"):** accepted as is; no sandbox. This residual risk stays open and is the owner's accepted risk.
+
+## 12. Amendment 2026-11-16: Resolve wastes nothing on branches it cannot land
+
+Status: **approved by the owner 2026-11-16 ("Build fixes 1–4")**, after the first real run (11 conflicting branches, 1 landed, about $3.90). Of the 10 that stopped, 9 stopped because the tests could not run in the temporary copy, not because of the merge.
+
+1. **Work folder without spaces.** Temporary worktrees go under `~/Library/Caches/LabHub/resolve` (the per-user temp folder if that path holds whitespace), not `Application Support`. Tests that build paths from URLs (provisio) broke on the space.
+2. **Tests on the default branch first.** Before Claude runs, the test command runs on the default branch's tip in the temporary worktree. Anything but a pass stops the branch at no Claude cost, with the reason: "the tests don't pass on main itself in a temporary copy: …" (missing pytest, `python` not found, an ignored nested repo such as `sonar/macro` missing). The copy is then reset (`reset --hard`, `clean -ffdx`) before the merge. Since the default branch now passes by construction, the later "already fails on main" re-run is dropped.
+3. **Claude may delete a conflicted file** that one side already deleted (a modify/delete conflict). It cannot delete files itself, so it names them in its reply, one `DELETE: <path>` line each; Lab Hub removes only files that are in the conflict list and missing from one of the two tips, with `git rm`, and fails the branch on any other name. Merge round only; the fix round still may not delete or add.
+4. **Say what is open, and why.**
+   - The tile counts things, not problem kinds: "6 branches · 2 worktrees to land" instead of "2 to land" (from git_autosync's problem lines; anything unrecognised still counts as one item).
+   - Review branches gets a "Last Resolve" column: the reason the last Resolve gave for that branch, shown only while the branch is still at the commit it tried. Its header text no longer says Lab Hub merges nothing.
+   - Check repos says in one line what Resolve does and that Review branches shows why the rest is open; the Resolve tooltip mentions merging.
+
+Tests: work root has no whitespace; a branch whose default branch fails or cannot run its tests stops with no Claude call (stub counts calls); the copy is clean before the merge; `DELETE:` removes a modify/delete file and lands, refuses a file both sides kept, a file outside the conflict and a path with `..`; badge texts for every problem line git_autosync writes; the log parser returns the last reason only for the matching commit; the Review dialog shows it. Phases: Define (this), Build, Review, Verify (mutation check), Document. Secure is light: `DELETE:` is new untrusted input from Claude and is checked against the conflict list.
+
+### 12.5 Build notes after Review (2026-11-16)
+
+- **A main-branch pass is reused** for the next branch into the same tip and test command, within one Lab Hub run.
+- **`DELETE:`:**
+  - The path is literal (`:(literal)`), and repeated lines count once.
+  - The prompt allows a deletion only when the other side's changes to the file are already elsewhere or no longer matter, and asks Claude to say why.
+  - Reviewer P2-3: such a deletion can drop the other side's edits to that file. They stay in history through the merge's second parent.
+  - **Open for the owner (A7):** keep this, or refuse every deletion. Refusing makes fix 3 inert, since git reports a modify/delete conflict only when the keeping side changed the file.
+- **Badge:**
+  - A diverged repo shows both counts ("2 unpushed commits · 1 commit behind").
+  - Lines it does not recognise are summed ("2 items").
+- Review: `docs/audit/resolve-wasteless-code-review.md` (0 P0/P1; P2s fixed or mitigated). 19 mutations caught.

@@ -921,6 +921,9 @@ class AppsTab(TilePage):
             lines = [f"[!!] {r.name} ({r.branch or '?'}) — {r.detail}" for r in todo]
             lines += [f"[ok] {r.name}" for r in report.rows if not r.needs_attention]
             tail = []
+            if todo:
+                tail.append("Resolve… lands what it safely can. Review branches… shows "
+                            "what is still open and why.")
             if note:
                 tail.append(note)
             if not report.fetched:
@@ -931,16 +934,18 @@ class AppsTab(TilePage):
             box.setIcon(
                 QMessageBox.Icon.Warning if todo else QMessageBox.Icon.Information
             )
-        # Resolve does only what loses nothing; Review branches lists the
-        # rest, one branch at a time. Neither merges (docs/specs/repo-tidy.md).
+        # Resolve lands what it safely can; Review branches lists the rest and
+        # why the last Resolve left each one (docs/specs/repo-tidy.md).
         cleanup = review = None
         if report is not None and report.rows:
             cleanup = box.addButton("Resolve…", QMessageBox.ButtonRole.ActionRole)
-            cleanup.setToolTip("Commit open tracked changes, delete branches already in "
-                               "main, remove their clean worktrees, and pull or push where "
-                               "nothing can be lost — previewed first")
+            cleanup.setToolTip("Commit open tracked changes, merge branches into main "
+                               "(for a conflict, Claude Code resolves it and the tests "
+                               "decide), delete landed branches and their clean worktrees, "
+                               "and pull or push — previewed first")
             review = box.addButton("Review branches…", QMessageBox.ButtonRole.ActionRole)
-            review.setToolTip("List every branch with work not yet in main")
+            review.setToolTip("List every branch with work not yet in main, and why the "
+                              "last Resolve did not land it")
         close = box.addButton("Close", QMessageBox.ButtonRole.RejectRole)
         box.setEscapeButton(close)
         box.setDefaultButton(close)
