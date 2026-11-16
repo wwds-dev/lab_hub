@@ -331,7 +331,10 @@ deleting a conflicted file that one side already deleted is the right fix, it
 names it (`DELETE: <path>`) and Lab Hub deletes only that file. The test command
 comes from the `Run tests` line of the repo's `docs/foundry/app-context.md`
 (shell syntax is never run), else common defaults; with none, the branch stays
-for a person. The temporary worktree has what a fresh `git worktree` lacks: the
+for a person. Each test command may run 30 minutes; a slower repo raises that with
+`- Test timeout: N min` (1 to 180) on its own line under `## Commands`, and the
+confirmation shows the limit. Programs are looked up in Homebrew and `/usr/local`
+before the system folders, so a bare `python3` is not the macOS system 3.9. The temporary worktree has what a fresh `git worktree` lacks: the
 repo's `.venv`/`node_modules` are linked in, its submodules are initialised (only
 when `.gitmodules` is the checkout's own; otherwise the checkout's copy is used),
 and its gitignored nested repos (SONAR's `sonar/macro` and `sonar/playmaker`) are

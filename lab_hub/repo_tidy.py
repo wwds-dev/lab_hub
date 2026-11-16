@@ -538,12 +538,14 @@ def plan_repo(name: str, repo: Path, busy: tuple[Path, ...] | None = (),
                 skips.append(Skip(name, branch, f"not merged: it conflicts with {default} — "
                                                 f"{reason}"))
                 continue
-            from .claude_resolve import conflicted_files, test_command
+            from .claude_resolve import conflicted_files, test_command, timeout_note
 
             cmd = test_command(repo)
             files = conflicted_files(repo, default, branch)
             k = len(files)
             note = f"; {cmd.note}" if cmd and cmd.note else ""
+            limit = timeout_note(repo)
+            note += f"; {limit}" if limit else ""
             actions.append(Action(
                 name, repo, "claude_merge", branch,
                 f"{commits}, conflicts in {k} file{'s' if k != 1 else ''}; "
