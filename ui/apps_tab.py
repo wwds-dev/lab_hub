@@ -907,6 +907,7 @@ class AppsTab(TilePage):
         # app with no known build script is named rather than dropped.
         commands = [row.command for row in behind if row.runs_in_app]
         by_hand = [row.command for row in behind if row.by_hand and row.command]
+        forward = [row.command for row in behind if row.forward and row.command]
         no_command = [row for row in behind if not row.command]
         if commands:
             lines.append("")
@@ -923,6 +924,16 @@ class AppsTab(TilePage):
                 "(Provisio's asks you to type install); Lab Hub types nothing:"
             )
             lines.extend(f"  {command}" for command in by_hand)
+        if forward:
+            names = ", ".join(row.app.name for row in behind if row.forward)
+            lines.append("")
+            lines.append(
+                f"Move the release clone first for {names} (its installer "
+                "would only rebuild the old clone). Lab Hub runs nothing there; "
+                "run it yourself after the runbook's CI and legal checks, then "
+                "do its dependency and selftest steps:"
+            )
+            lines.extend(f"  {command}" for command in forward)
         if no_command:
             lines.append("")
             lines.append(
@@ -947,8 +958,11 @@ class AppsTab(TilePage):
             update = box.addButton(
                 "Update now", QMessageBox.ButtonRole.AcceptRole
             )
-        if commands or by_hand:
+        if commands or by_hand or forward:
             copy = box.addButton("Copy commands", QMessageBox.ButtonRole.ActionRole)
+        # A report with only a release-clone move to show opens no Terminal:
+        # the owner chose show-and-copy for it (spec release-root-behind §5.1).
+        if commands or by_hand:
             terminal = box.addButton(
                 "Copy and open Terminal", QMessageBox.ButtonRole.ActionRole
             )
@@ -970,7 +984,7 @@ class AppsTab(TilePage):
         box.exec()
         clicked = box.clickedButton()
         if clicked is not None and clicked in (copy, terminal):
-            self.copy_commands(commands + by_hand)
+            self.copy_commands(commands + by_hand + forward)
         if terminal is not None and clicked is terminal:
             # The commands each begin with their own `cd`, so where the window
             # opens does not change what they do — it only has to be somewhere

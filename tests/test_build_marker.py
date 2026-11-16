@@ -620,3 +620,52 @@ def test_a_diverged_root_whose_histories_are_not_shared_is_unknown(tmp_path, mon
     found = launcher.version(_app(), tmp_path / "lab")
 
     assert found.behind_unknown and found.behind == 0
+
+
+# -- release-root-behind: the whole path, with real git ------------------------
+def test_a_stale_release_clone_gets_the_move_not_the_installer_and_the_move_works(
+    tmp_path, monkeypatch
+):
+    """Bundle -> recorded root -> behind -> forward row, then run the very
+    command it shows and see the tile go current: the 2026-11-16 Provisio case."""
+    work = make_repo(tmp_path / "lab" / "provisio", 1)
+    git(work, "branch", "-M", "main")
+    (work / "scripts").mkdir()
+    (work / "scripts" / "install_app.sh").write_text("#!/bin/sh\n[ ! -t 0 ] && exit 1\n")
+    git(work, "add", "scripts")
+    git(work, "commit", "-qm", "installer")
+    for n in (3, 4, 5):
+        commit(work, f"f{n}")
+    release = tmp_path / "rel"
+    git(tmp_path, "clone", "-q", str(work), str(release))
+    git(release, "reset", "-q", "--hard", "HEAD~2")
+    apps = tmp_path / "Applications"
+    apps.mkdir()
+    monkeypatch.setattr(launcher, "APPLICATIONS", apps)
+    _launcher_bundle(apps, "Provisio", release)
+    lab = tmp_path / "lab"
+
+    row = launcher.build_status(_app(), lab)
+
+    assert row.verdict == "behind" and row.forward and not row.by_hand
+    assert not row.runs_in_app and "install_app" not in row.command
+    assert row.command == (f"git -C {release} fetch origin && "
+                           f"git -C {release} merge --ff-only origin/main")
+
+    assert row.version.behind == 2
+
+    subprocess.run(["/bin/sh", "-c", row.command], check=True, capture_output=True, env=ENV)
+    for cache in (launcher.state._COMMIT_CACHE, launcher.state._COUNT_CACHE,
+                  launcher.state._DIRTY_CACHE, launcher.state._BEHIND_CACHE,
+                  launcher.state._SHALLOW_CACHE, launcher.state._ROOT_BEHIND_CACHE):
+        cache.clear()
+    after = launcher.build_status(_app(), lab)
+
+    assert after.verdict == "current" and not after.forward
+    assert git(release, "rev-parse", "HEAD") == git(work, "rev-parse", "HEAD")
+
+
+def test_no_registered_app_without_a_recorded_root_is_a_forward_row(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    rows = launcher.build_report(tmp_path)
+    assert rows and not any(row.forward for row in rows)

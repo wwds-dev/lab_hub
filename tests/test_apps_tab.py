@@ -808,6 +808,72 @@ def test_a_failed_in_app_rebuild_opens_no_terminal(qapp, monkeypatch):
     _drop(tab)
 
 
+def _forward_row(app):
+    return launcher.BuildStatus(
+        app, launcher.Version(), "behind", "its release clone is behind.", None,
+        "git -C /r fetch origin && git -C /r merge --ff-only origin/main",
+        forward=True)
+
+
+def test_a_release_clone_behind_is_listed_to_move_and_gets_no_update_now(qapp, monkeypatch):
+    """The forward command is shown and copyable under its own heading, the
+    installer is not offered, and Update now is not there for it."""
+    tab, seen = _by_hand_tab(qapp, monkeypatch, lambda apps: (_forward_row(apps[0]),))
+    tab.show_build_report()
+
+    assert "Update now" not in seen["labels"]
+    assert "Copy commands" in seen["labels"]
+    assert "Move the release clone first" in seen["info"]
+    assert "Lab Hub runs nothing there" in seen["info"]
+    assert "git -C /r fetch origin && git -C /r merge --ff-only origin/main" in seen["info"]
+    assert "Update now opens Terminal" not in seen["info"]
+    # Show and copy only (spec §5.1): no Terminal is offered for this report.
+    assert "Copy and open Terminal" not in seen["labels"]
+    _drop(tab)
+
+
+def test_copy_commands_includes_the_forward_command_and_nothing_runs_it(qapp, monkeypatch):
+    from ui import apps_tab
+
+    tab, seen = _by_hand_tab(qapp, monkeypatch, lambda apps: (
+        _forward_row(apps[0]),
+        launcher.BuildStatus(apps[1], launcher.Version(), "behind", "older.",
+                             None, "cd /q && ./build_app.sh")))
+    seen["press"] = "Copy commands"
+    copied, ran, opened = [], [], []
+    monkeypatch.setattr(tab, "copy_commands", lambda commands: copied.append(list(commands)))
+    monkeypatch.setattr(apps_tab, "RebuildDialog", lambda *a, **k: ran.append(a))
+    monkeypatch.setattr(launcher, "run_in_terminal",
+                        lambda commands, *a, **k: opened.append(commands) or [])
+    tab.show_build_report()
+
+    assert copied == [["cd /q && ./build_app.sh",
+                       "git -C /r fetch origin && git -C /r merge --ff-only origin/main"]]
+    assert ran == [] and opened == []
+    _drop(tab)
+
+
+def test_update_now_with_a_forward_row_runs_only_the_in_app_rebuilds(qapp, monkeypatch):
+    from ui import apps_tab
+
+    _FakeRebuild.ok, _FakeRebuild.asked = True, []
+    tab, seen = _by_hand_tab(qapp, monkeypatch, lambda apps: (
+        _forward_row(apps[0]),
+        launcher.BuildStatus(apps[1], launcher.Version(), "behind", "older.",
+                             None, "cd /q && ./build_app.sh")))
+    seen["press"] = "Update now"
+    opened = []
+    monkeypatch.setattr(apps_tab, "RebuildDialog", _FakeRebuild)
+    monkeypatch.setattr(launcher, "run_in_terminal",
+                        lambda commands, *a, **k: opened.append(commands) or [])
+    monkeypatch.setattr(tab, "recheck", lambda: None)
+    tab.show_build_report()
+
+    assert _FakeRebuild.asked == [["cd /q && ./build_app.sh"]]  # never the git command
+    assert opened == []
+    _drop(tab)
+
+
 def test_two_by_hand_apps_get_two_separate_windows(qapp, monkeypatch):
     tab, seen = _by_hand_tab(qapp, monkeypatch, lambda apps: (
         launcher.BuildStatus(apps[0], launcher.Version(), "behind", "older.",
