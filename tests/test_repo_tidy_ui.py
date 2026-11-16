@@ -118,9 +118,13 @@ def test_the_repo_report_offers_both_buttons(qapp, tmp_path, monkeypatch):
     tab, _ = _tab(qapp, tmp_path, monkeypatch, check_builds=True)
     seen = {}
     monkeypatch.setattr(QMessageBox, "exec", lambda self: seen.update(
-        labels={b.text() for b in self.buttons()}))
+        labels={b.text() for b in self.buttons()}, info=self.informativeText(),
+        tips={b.text(): b.toolTip() for b in self.buttons()}))
     tab.show_repo_report()
     assert {"Resolve…", "Review branches…", "Close"} <= seen["labels"]
+    assert "Resolve… lands what it safely can" in seen["info"]
+    assert "merge branches into main" in seen["tips"]["Resolve…"]
+    assert "why the last Resolve" in seen["tips"]["Review branches…"]
     _drop(tab)
 
 
@@ -226,4 +230,23 @@ def test_apply_without_claude_leaves_the_conflict(qapp, tmp_path, monkeypatch, l
     assert "feat" in repo_tidy.local_branches(repo)
     assert repo_tidy.tip(repo, "main") == main0
     assert not (tmp_path / "calls").exists() or '"-p"' not in (tmp_path / "calls").read_text()
+    dialog.reject()
+
+
+def test_review_fills_the_last_resolve_column(qapp, lab, tmp_path, monkeypatch):
+    from ui import repo_tidy_dialogs as dialogs
+
+    monkeypatch.setattr(repo_tidy, "log_path", lambda: tmp_path / "tidy.log")
+    monkeypatch.setattr(dialogs, "last_resolve", lambda rows: {0: "2026-11-16: no Claude run"})
+    sh(lab, "checkout", "-q", "-b", "wip")
+    commit(lab, "c.txt")
+    sh(lab, "checkout", "-q", "main")
+    dialog = dialogs.ReviewDialog([("repo", lab)])
+    assert _pump_until(lambda: dialog.table.rowCount() == 1)
+    col = dialogs.COLUMNS.index("Last Resolve")
+    assert dialog.table.horizontalHeaderItem(col).text() == "Last Resolve"
+    assert dialog.table.item(0, col).text() == "2026-11-16: no Claude run"
+    assert dialog.table.item(0, col).toolTip() == "2026-11-16: no Claude run"
+    assert dialog.table.item(0, col - 1).text() == "none"  # the worktree column
+    assert "merges nothing" not in dialog._status.text()
     dialog.reject()

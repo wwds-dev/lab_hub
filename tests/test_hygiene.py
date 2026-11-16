@@ -6,6 +6,8 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta
 
+import pytest
+
 from lab_hub import config, hygiene, launcher
 
 
@@ -40,7 +42,7 @@ def test_rows_are_matched_by_resolved_checkout(tmp_path):
     _write(tmp_path, [_row(tmp_path, "a", ["2 uncommitted files"])])
     report = hygiene.load(tmp_path)
     row = report.for_project(tmp_path, "a")
-    assert row.needs_attention and row.badge == "1 to land"
+    assert row.needs_attention and row.badge == "2 files to land"
     assert row.detail == "2 uncommitted files"
     assert report.for_project(tmp_path, "other") is None
 
@@ -96,7 +98,7 @@ def test_the_badge_shows_on_the_app_with_unfinished_work(qapp, tmp_path, monkeyp
     tab, _ = _tab(qapp, tmp_path, monkeypatch)
     tab.refresh()
     a, b = tab.cards
-    assert a.hygiene.text() == "2 to land"
+    assert a.hygiene.text() == "3 files · 1 unpushed commit to land"
     assert "3 uncommitted files; 1 unpushed commit" in a.hygiene.toolTip()
     assert b.hygiene.text() == ""
     _drop(tab)
@@ -106,7 +108,7 @@ def test_the_badge_clears_when_the_work_lands(qapp, tmp_path, monkeypatch):
     _write(tmp_path, [_row(tmp_path, "a", ["1 unpushed commit"])])
     tab, _ = _tab(qapp, tmp_path, monkeypatch)
     tab.refresh()
-    assert tab.cards[0].hygiene.text() == "1 to land"
+    assert tab.cards[0].hygiene.text() == "1 unpushed commit to land"
     _write(tmp_path, [_row(tmp_path, "a")] + [_row(tmp_path, "pad", ["x"])])  # new size and mtime
     tab.refresh()
     assert tab.cards[0].hygiene.text() == ""
@@ -166,3 +168,19 @@ def test_without_the_script_check_repos_says_why_and_starts_nothing(qapp, tmp_pa
     assert tab._hygiene_proc is None
     assert seen["text"] == "No repo report yet." and "not found" in seen["body"]
     _drop(tab)
+
+
+@pytest.mark.parametrize("problems, badge", [
+    (["6 branches not merged into master", "2 worktrees with uncommitted work"],
+     "6 branches · 2 worktrees to land"),
+    (["1 branch not merged into main"], "1 branch to land"),
+    (["diverged: 2 unpushed, 1 behind"], "2 unpushed commits · 1 commit behind to land"),
+    (["new words", "other new words"], "2 items to land"),
+    (["3 behind origin/main"], "3 commits behind to land"),
+    (["1 uncommitted file", "1 worktree with uncommitted work"], "1 file · 1 worktree to land"),
+    (["something git_autosync says in new words"], "1 item to land"),
+    ([], ""),
+])
+def test_the_badge_counts_things_not_problem_kinds(tmp_path, problems, badge):
+    row = hygiene.RepoRow("a", tmp_path, problems=tuple(problems))
+    assert row.badge == badge

@@ -304,14 +304,21 @@ The report has two buttons for acting on it (`docs/specs/repo-tidy.md`):
   A branch that *conflicts* with the default branch (and passes the same
   guards) becomes a **Resolve conflicts with Claude** row naming the test
   command Lab Hub will run. After one more confirmation (model, cost cap of
-  $3 per branch), Lab Hub merges it in a temporary worktree under its support
-  folder and runs Claude Code headless there with file tools only (no shell,
+  $3 per branch), Lab Hub first runs the repo's tests on the default branch in
+  a temporary worktree (`~/Library/Caches/LabHub/resolve`); if they don't pass
+  there, the branch stops before Claude is called and costs nothing. Otherwise
+  it merges the branch there and runs Claude Code headless with file tools only (no shell,
   web, MCP, hooks or CLAUDE.md) to resolve the conflicted files. Lab Hub then
   checks that nothing else changed and no markers are left, commits, runs the
   repo's tests itself (once more after a single Claude fix round if they
   fail), and fast-forwards and pushes the default branch only when they pass
   and neither tip moved. Progress, cost and turns stream into the window;
   **Stop** ends the run. Anything that fails leaves the branch untouched.
+  Claude cannot delete files; when deleting a conflicted file that one side
+  already deleted is the right fix, it names it (`DELETE: <path>`) and Lab Hub
+  deletes only that file. **Review branches…** shows, per branch, why the last
+  Resolve did not land it, and each app tile counts what is open ("6 branches ·
+  2 worktrees to land").
   The test command comes from the `Run tests` line of the repo's
   `docs/foundry/app-context.md` (shell syntax is never run), else common
   defaults; with none, the branch stays for a person. Claude Code must be

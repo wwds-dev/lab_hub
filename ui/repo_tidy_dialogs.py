@@ -274,7 +274,21 @@ class CleanupDialog(QDialog):
         super().done(result)
 
 
-COLUMNS = ("Repo", "Branch", "Ahead", "Last commit", "Subject", "Worktree")
+COLUMNS = ("Repo", "Branch", "Ahead", "Last commit", "Subject", "Worktree", "Last Resolve")
+
+
+def last_resolve(rows: list[repo_tidy.BranchInfo]) -> dict[int, str]:
+    """{row: why the last Resolve did not land it}, only while the branch is
+    still at the commit that Resolve tried (section 12.4)."""
+    from lab_hub import claude_resolve
+
+    tries = claude_resolve.last_tries()
+    out = {}
+    for i, r in enumerate(rows):
+        t = tries.get((str(r.repo), r.branch))
+        if t and r.sha and (t.sha.startswith(r.sha) or r.sha.startswith(t.sha)):
+            out[i] = f"{t.when[:10]}: {t.reason}"
+    return out
 
 
 class ReviewDialog(QDialog):
@@ -289,6 +303,7 @@ class ReviewDialog(QDialog):
         self._worktree_note: dict[int, str] = {}
         self._subjects: dict[int, list[str]] = {}
         self._recent: dict[int, bool] = {}
+        self._tries: dict[int, str] = {}
         self._last = ""  # what the last action did, kept across a reload
         self._bg = _Background(self)
 
@@ -336,7 +351,7 @@ class ReviewDialog(QDialog):
             subjects = {i: repo_tidy.commit_subjects(r) for i, r in enumerate(rows)}
             recent = {i: bool(r.worktree) and repo_tidy.recent_agent_worktree(
                 r.repo, Path(r.worktree)) for i, r in enumerate(rows)}
-            return rows, notes, subjects, recent
+            return rows, notes, subjects, recent, last_resolve(rows)
 
         self._bg.run(work, self._loaded)
         self._selection()
@@ -345,18 +360,23 @@ class ReviewDialog(QDialog):
         if result is None:
             self._status.setText(f"Could not read the branches: {exc}")
             return
-        self._rows, self._worktree_note, self._subjects, self._recent = result
+        self._rows, self._worktree_note, self._subjects, self._recent, self._tries = result
         self.table.setRowCount(len(self._rows))
         for i, r in enumerate(self._rows):
+            tried = self._tries.get(i, "")
             for col, text in enumerate((r.repo_name, r.branch, str(r.ahead), r.date,
-                                        r.subject, r.worktree or "none")):
-                self.table.setItem(i, col, QTableWidgetItem(text))
+                                        r.subject, r.worktree or "none", tried)):
+                item = QTableWidgetItem(text)
+                if col == len(COLUMNS) - 1 and text:
+                    item.setToolTip(text)
+                self.table.setItem(i, col, item)
         self.table.resizeColumnsToContents()
         n = len(self._rows)
         summary = (
             f"{n} branch{'es' if n != 1 else ''} with work not in the default branch. "
-            "Lab Hub merges nothing: open one in Terminal to land it, or delete what "
-            "you no longer want." if n else "Every branch has landed."
+            "Resolve… lands what it safely can; \"Last Resolve\" says why it did not "
+            "land one. Open a branch in Terminal to land it by hand, or delete what you "
+            "no longer want." if n else "Every branch has landed."
         )
         self._status.setText(f"{self._last}\n{summary}" if self._last else summary)
         self._selection()

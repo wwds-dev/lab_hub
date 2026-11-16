@@ -82,7 +82,10 @@ if mode == "outside":
     (cwd / "a.txt").write_text("sneaky\n")
 if mode == "newfile":
     (cwd / "extra.txt").write_text("new\n")
-emit(type="result", subtype="success", is_error=False, result="Merged both.", total_cost_usd=0.42, num_turns=3)
+reply = "Merged both."
+if mode.startswith("delete:"):
+    reply += "\n" + "\n".join("DELETE: " + n for n in mode.split(":", 1)[1].split(","))
+emit(type="result", subtype="success", is_error=False, result=reply, total_cost_usd=0.42, num_turns=3)
 '''
 
 CHECK = """import pathlib, subprocess, sys
@@ -266,13 +269,20 @@ def test_a_fix_round_that_makes_the_tests_pass_lands(conflict, stub, tmp_path):
     assert "fix round" in (tmp_path / "log").read_text()
 
 
-def test_a_default_branch_that_already_fails_is_named(conflict, stub, tmp_path):
-    stub.set_mode("bad")
+def claude_calls(tmp_path) -> int:
+    calls = tmp_path / "calls"
+    return calls.read_text().count('"-p"') if calls.exists() else 0
+
+
+def test_a_default_branch_that_already_fails_costs_nothing(conflict, stub, tmp_path):
     commit(conflict, "z.txt", "BAD\n")  # main itself fails check.py
     sh(conflict, "push", "-q")
-    _a, ok, msg = next(r for r in run_all(plan(conflict, stub), stub, tmp_path / "log")
-                       if r[0].kind == "claude_merge")
-    assert not ok and "main already fails these tests" in msg
+    main0, feat0 = tidy.tip(conflict, "main"), tidy.tip(conflict, "feat")
+    _a, ok, msg = _land_result(conflict, stub, tmp_path)
+    assert not ok and "no Claude run" in msg and "don't pass on main itself" in msg
+    assert "(they fail)" in msg
+    assert claude_calls(tmp_path) == 0
+    unchanged(conflict, main0, feat0, tmp_path / "resolve")
 
 
 @pytest.mark.parametrize("mode, why", [
@@ -531,8 +541,9 @@ def test_a_missing_test_program_is_not_sent_to_claude(conflict, stub, tmp_path):
     sh(conflict, "commit", "-qam", "venv tests")
     sh(conflict, "push", "-q")
     _a, ok, msg = _land_result(conflict, stub, tmp_path)
-    assert not ok and "could not run" in msg and "does not exist" in msg
-    assert (tmp_path / "calls").read_text().count('"-p"') == 1  # no fix round
+    assert not ok and "no Claude run" in msg and "(they cannot run)" in msg
+    assert "does not exist" in msg
+    assert claude_calls(tmp_path) == 0
 
 
 def test_the_resolve_itself_refuses_a_moved_branch(conflict, stub, tmp_path):
