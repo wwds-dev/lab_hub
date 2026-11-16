@@ -1389,20 +1389,44 @@ def test_the_current_release_is_not_behind(tmp_path, monkeypatch):
 # ----------------------------------------------------------------------
 # An app with its own build command (SYNDUSTRYX: build_desktop.py)
 # ----------------------------------------------------------------------
+def _git_project(path: Path) -> str:
+    import subprocess
+
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+    (path / "a.txt").write_text("x")
+    subprocess.run(["git", "add", "a.txt"], cwd=path, check=True)
+    subprocess.run(["git", "commit", "-qm", "one"], cwd=path, check=True, env=env)
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=path, check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+_MAKE_BUNDLE = (
+    "mkdir -p out/X.app/Contents/MacOS && touch out/X.app/new && "
+    "printf 'new build' > out/X.app/Contents/MacOS/X && "
+    "/usr/libexec/PlistBuddy -c 'Add :CFBundleExecutable string X' "
+    "-c 'Add :CFBundleShortVersionString string 0.6.53' out/X.app/Contents/Info.plist"
+)
+
+
 def test_a_registered_build_command_builds_and_installs(tmp_path, monkeypatch):
     """The build runs in the checkout; only after it produced a bundle is the
-    installed one moved to the Trash and the new one copied in."""
+    installed one moved to the Trash and the new one copied in; the commit it
+    was built from is recorded against the new executable."""
     import subprocess
 
     apps = tmp_path / "Applications"
     (apps / "X.app").mkdir(parents=True)
     (apps / "X.app" / "old").write_text("")
     project = tmp_path / "x"
-    project.mkdir()
+    head = _git_project(project)
     home = tmp_path / "home"
     (home / ".Trash").mkdir(parents=True)
     monkeypatch.setattr(launcher, "APPLICATIONS", apps)
-    app = launcher.ExternalApp("x", "X", "x", "server.py", "", build="mkdir -p out/X.app && touch out/X.app/new",
+    monkeypatch.setattr(launcher, "installs_dir", lambda: tmp_path / "installs")
+    app = launcher.ExternalApp("x", "X", "x", "server.py", "", build=_MAKE_BUNDLE,
                                build_output="out/X.app")
 
     command = launcher.registered_build_command(app, project)
@@ -1411,6 +1435,68 @@ def test_a_registered_build_command_builds_and_installs(tmp_path, monkeypatch):
     assert (apps / "X.app" / "new").exists() and not (apps / "X.app" / "old").exists()
     (trashed,) = (home / ".Trash").iterdir()
     assert trashed.name.startswith("X before update") and (trashed / "old").exists()
+    assert launcher.install_record(app, apps / "X.app") == (head, False)
+    # The build's own outputs (out/) are part of the recorded fingerprint, so
+    # they do not make the checkout read as changed since the build...
+    assert launcher.install_tree(app, apps / "X.app") == launcher.worktree_tree(project)
+    # ...but an edit after the build does.
+    (project / "a.txt").write_text("edited after the build")
+    assert launcher.install_tree(app, apps / "X.app") != launcher.worktree_tree(project)
+
+
+def test_an_install_record_is_dropped_when_the_bundle_changes(tmp_path, monkeypatch):
+    import json
+
+    bundle = tmp_path / "X.app"
+    (bundle / "Contents" / "MacOS").mkdir(parents=True)
+    (bundle / "Contents" / "MacOS" / "X").write_text("built")
+    import plistlib
+
+    (bundle / "Contents" / "Info.plist").write_bytes(plistlib.dumps({"CFBundleExecutable": "X"}))
+    monkeypatch.setattr(launcher, "installs_dir", lambda: tmp_path)
+    app = launcher.ExternalApp("x", "X", "x", "server.py", "")
+    digest = launcher.state._sha256(bundle / "Contents" / "MacOS" / "X")
+    (tmp_path / "x.json").write_text(json.dumps(
+        {"commit": "a" * 40, "dirty": True, "executable_sha256": digest}))
+    assert launcher.install_record(app, bundle) == ("a" * 40, True)
+
+    (bundle / "Contents" / "MacOS" / "X").write_text("something else")
+    assert launcher.install_record(app, bundle) is None
+
+
+def test_a_recorded_install_counts_behind_from_its_commit(tmp_path, monkeypatch):
+    """SYNDUSTRYX's plist is pinned at 0.6.53; with Update now's record the
+    tile counts from the commit it was built from, not from 0.6.53's cut."""
+    import json
+    import plistlib
+    import subprocess
+
+    apps = tmp_path / "Applications"
+    bundle = apps / "X.app"
+    (bundle / "Contents" / "MacOS").mkdir(parents=True)
+    (bundle / "Contents" / "MacOS" / "X").write_text("built")
+    (bundle / "Contents" / "Info.plist").write_bytes(plistlib.dumps(
+        {"CFBundleExecutable": "X", "CFBundleShortVersionString": "0.6.53"}))
+    project = tmp_path / "x"
+    built = _git_project(project)
+    (project / "server.py").write_text("")
+    monkeypatch.setattr(launcher, "APPLICATIONS", apps)
+    monkeypatch.setattr(launcher, "installs_dir", lambda: tmp_path / "installs")
+    (tmp_path / "installs").mkdir()
+    (tmp_path / "installs" / "x.json").write_text(json.dumps({
+        "commit": built, "dirty": False,
+        "executable_sha256": launcher.state._sha256(bundle / "Contents" / "MacOS" / "X")}))
+    app = launcher.ExternalApp("x", "X", "x", "server.py", "", runs_from_source=False)
+
+    found = launcher.version(app, tmp_path)
+    assert (found.text, found.commit, found.behind) == ("v0.6.53", built[:7], 0)
+
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "two"], cwd=project,
+                   check=True, env=env)
+    launcher.state._BEHIND_CACHE.clear()
+    assert launcher.version(app, tmp_path).behind == 1
 
 
 def test_a_failed_registered_build_leaves_the_installed_app(tmp_path, monkeypatch):
