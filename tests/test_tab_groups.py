@@ -78,8 +78,9 @@ def test_websites_and_dashboards_have_their_own_tabs(window):
     }
     # The same features as the app pages: a state on every tile, re-checked
     # by the window's Refresh rather than a button of their own.
-    for tab in (window.sites_tab, window.dashboards_tab):
-        assert tab in window.refreshables
+    for page, tab in ((window.sites_tab, window.sites_tab),
+                      (window.dashboards_page, window.dashboards_tab)):
+        assert page in window.refreshables
         assert all(card.state.text() for card in tab.cards)
 
 

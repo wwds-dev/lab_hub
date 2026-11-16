@@ -17,8 +17,8 @@ def test_there_are_no_tab_rows_left(window):
 
 
 def test_clicking_a_top_level_entry_shows_its_page(window):
-    window.sidebar.button_for(window.dashboards_tab).click()
-    assert window.tabs.currentWidget() is window.dashboards_tab
+    window.sidebar.button_for(window.dashboards_page).click()
+    assert window.tabs.currentWidget() is window.dashboards_page
     assert window.sidebar.current_title() == "Dashboards"
 
 
@@ -47,10 +47,10 @@ def test_the_selection_follows_a_page_change_made_elsewhere(window):
 def test_opening_a_page_still_refreshes_it(window, monkeypatch):
     calls = []
     monkeypatch.setattr(window.convert_tab, "refresh_calibre", lambda: calls.append("convert"))
-    monkeypatch.setattr(window.dashboards_tab, "refresh", lambda: calls.append("dash"))
+    monkeypatch.setattr(window.dashboards_page, "refresh", lambda: calls.append("dash"))
     window.tabs.setCurrentWidget(window.apps_tab)
 
-    window.sidebar.button_for(window.dashboards_tab).click()
+    window.sidebar.button_for(window.dashboards_page).click()
     window.tabs.setCurrentWidget(window.tools_tabs)
     window.tools_tabs.setCurrentWidget(window.convert_tab)
 

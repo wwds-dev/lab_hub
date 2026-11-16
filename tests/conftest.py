@@ -98,3 +98,15 @@ def _collect_qt_garbage():
     if QCoreApplication.instance() is not None:
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     gc.collect()
+
+
+@pytest.fixture(autouse=True)
+def no_real_web_views(monkeypatch):
+    """A real QtWebEngine view segfaults under the offscreen platform the suite runs on.
+
+    The viewer's own tests inject a fake view; any other test that reaches the Dashboards
+    page gets the "not part of this build" path instead of a browser.
+    """
+    from ui import dashboard_view
+
+    monkeypatch.setattr(dashboard_view, "web_available", lambda: False)

@@ -23,6 +23,7 @@ from .apps_tab import AppsTab
 from .convert_tab import ConvertTab
 from .images_tab import ImagesTab
 from .video_tab import VideoTab
+from .dashboard_view import DashboardsPage, DashboardViewer
 from .links_tab import DashboardsTab, SitesTab
 from .narrator_tab import NarratorTab
 from .settings_tab import SettingsTab
@@ -75,6 +76,9 @@ class MainWindow(QMainWindow):
         )
         self.sites_tab = SitesTab(self.settings)
         self.dashboards_tab = DashboardsTab(self.settings)
+        self.dashboards_page = DashboardsPage(
+            self.dashboards_tab, DashboardViewer(self.settings)
+        )
         self.backup_sync_tab = AppsTab(
             self.settings,
             apps=lambda: launcher.BACKUP_SYNC_APPS,
@@ -150,7 +154,7 @@ class MainWindow(QMainWindow):
         for page, title, glyph in (
             (self.apps_tab, "Apps", "apps"),
             (self.sites_tab, "Websites", "web"),
-            (self.dashboards_tab, "Dashboards", "dashboards"),
+            (self.dashboards_page, "Dashboards", "dashboards"),
             (self.backup_sync_tab, "Backup and Sync", "sync"),
             (self.tools_tabs, "Tools", "tools"),
             (self.settings_tab, "Settings", "settings"),
@@ -219,7 +223,7 @@ class MainWindow(QMainWindow):
         for tab in (self.apps_tab, self.backup_sync_tab, self.unblock_tracker_tab,
                     self.backstage_tab):
             tab.start_failed.connect(self._on_start_failed)
-        for tab in (self.sites_tab, self.dashboards_tab):
+        for tab in (self.sites_tab, self.dashboards_page):
             tab.opened.connect(self._on_launched)
             tab.failed.connect(self._on_start_failed)
         self.tools_overview.launched.connect(self._on_launched)
@@ -293,7 +297,7 @@ class MainWindow(QMainWindow):
         self.unblock_tracker_tab.apply_settings(self.settings)
         self.backstage_tab.apply_settings(self.settings)
         self.sites_tab.apply_settings(self.settings)
-        self.dashboards_tab.apply_settings(self.settings)
+        self.dashboards_page.apply_settings(self.settings)
         self.tools_overview.apply_settings(self.settings)
         self.statusBar().showMessage("Settings saved.", 4000)
 
@@ -391,6 +395,7 @@ class MainWindow(QMainWindow):
         is destroyed while still running, so this is not optional."""
         for panel in self._running_panels():
             panel.wait_for_stop()
+        self.dashboards_page.shutdown()
         if self.tray is not None:
             self.tray.hide()
 
