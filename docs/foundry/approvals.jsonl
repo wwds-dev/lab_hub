@@ -3,3 +3,5 @@
 {"ts": "2026-11-15T19:56:15", "gate": "architect", "by": "owner", "words": "Approve as recommended", "recorded_by": "agent", "spec": "repo-tidy", "note": "A1: code in Lab Hub; A2: yes, skip .claude/worktrees touched in 24h"}
 {"ts": "2026-11-15T20:56:53", "gate": "define", "by": "owner", "words": "Yes, build it", "recorded_by": "agent", "spec": "repo-tidy", "note": "amendment: Resolve commits tracked changes only, untracked skipped"}
 {"ts": "2026-11-16T00:54:17", "gate": "define", "by": "owner", "words": "Commit, add merging", "recorded_by": "agent", "spec": "repo-tidy", "note": "amendment: Resolve merges branches that merge without conflicts"}
+{"ts": "2026-11-16T01:15:46", "gate": "define", "by": "owner", "words": "Approve as recommended", "recorded_by": "agent", "spec": "repo-tidy", "note": "§11: A3 sonnet, A4 $3 cap per branch, A5 yes"}
+{"ts": "2026-11-16T01:15:46", "gate": "architect", "by": "owner", "words": "Approve as recommended", "recorded_by": "agent", "spec": "repo-tidy", "note": "§11 architecture: Lab Hub runs git and tests, Claude file tools only"}
