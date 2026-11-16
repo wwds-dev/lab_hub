@@ -73,7 +73,7 @@ Owner, after Resolve left 42 unlanded branches: "this is getting exhausting … 
 - This puts agent work into main without review; that is the owner's explicit choice for this tool.
 
 ## 11. Amendment 2026-11-16: Resolve lands conflicting branches with Claude
-Status: **Define/Architect approved 2026-11-16 ("Approve as recommended": A3 sonnet, A4 $3, A5 yes); Build, Review and Secure done, fixes applied (§11.10); A6 open.** Spec owner: this session (side session of the Lab Hub session).
+Status: **Define/Architect approved 2026-11-16 ("Approve as recommended": A3 sonnet, A4 $3, A5 yes); Build, Review and Secure done, fixes applied (§11.10); A6 accepted as is 2026-11-16 ("Accept A6 as is").** Spec owner: this session (side session of the Lab Hub session).
 Owner's choice (relayed by the Lab Hub session): the app resolves conflicts itself by running Claude Code with no window, accepting the token cost and that agent work lands in the default branch without review, with tests as the safety check. No Terminal, no manual steps.
 Evidence: a read-only dry run on 2026-11-16 left 12 branches that conflict with their default branch (Sonar 6, Provisio 3, Imprint 2, Sentinel, Autopilot, Backstage, Shopfront, Foundry master 3; numbers overlap repos). §10 skips each one as "land it by hand".
 
@@ -197,4 +197,4 @@ The review findings (`docs/audit/resolve-with-claude-code-review.md`, `docs/audi
 
 **Stop** skips everything after the running step. A branch already landed stays landed, and its push waits for the next Resolve.
 
-**Open for the owner (security P1-2, residual):** the tests still run the branch's code as you, with network access and write access to your home folder. The allowlisted environment, the git-state fingerprint and the process-group kill narrow this, but do not confine it. Confining it fully means running the tests under `sandbox-exec` (no network except loopback, no writes outside the temporary worktree and `$TMPDIR`), which may break test suites that write elsewhere. **Decision A6:** accept as is, or add the sandbox.
+**Open for the owner (security P1-2, residual):** the tests still run the branch's code as you, with network access and write access to your home folder. The allowlisted environment, the git-state fingerprint and the process-group kill narrow this, but do not confine it. Confining it fully means running the tests under `sandbox-exec` (no network except loopback, no writes outside the temporary worktree and `$TMPDIR`), which may break test suites that write elsewhere. **Decision A6 (owner, 2026-11-16, "Accept A6 as is"):** accepted as is; no sandbox. This residual risk stays open and is the owner's accepted risk.
