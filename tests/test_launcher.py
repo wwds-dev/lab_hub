@@ -1570,3 +1570,136 @@ def test_a_registered_build_keeps_edits_made_before_it(tmp_path, monkeypatch):
 
     # It was already changed before the build, so it is not restored to HEAD.
     assert (project / "a.txt").read_text() == "built_at now"
+
+
+# --- run_in_terminal (spec update-now-terminal) -----------------------------
+
+
+def _record_opens(monkeypatch):
+    """Capture the `open` calls run_in_terminal makes instead of running them."""
+    calls = []
+    monkeypatch.setattr(
+        launcher.control.subprocess, "run",
+        lambda command, **kwargs: calls.append(command)
+        or launcher.control.subprocess.CompletedProcess(command, 0, "", ""),
+    )
+    return calls
+
+
+def test_run_in_terminal_writes_one_private_command_file_per_command(tmp_path, monkeypatch):
+    """Each by-hand install gets its own file and its own Terminal window; the
+    file holds the command and a closing line, mode 0700, nothing else."""
+    calls = _record_opens(monkeypatch)
+    commands = ["cd '/r/a b' && ./scripts/install_app.sh", "cd /r/c && ./install.sh"]
+
+    files = launcher.run_in_terminal(commands, tmp_path / "runs")
+
+    assert len(files) == 2 and files[0] != files[1]
+    assert [c[:3] for c in calls] == [["open", "-a", "Terminal"]] * 2
+    assert [c[3] for c in calls] == [str(f) for f in files]
+    for command, path in zip(commands, files):
+        assert path.suffix == ".command"
+        assert (path.stat().st_mode & 0o777) == 0o700
+        assert path.read_text() == (
+            "#!/bin/zsh -l\n"
+            f"{command}\n"
+            "status=$?\n"
+            "echo\n"
+            'echo "Finished (exit $status). Close this window, then press '
+            'Refresh in Lab Hub."\n'
+            'rm -f -- "$0"\n'
+        )
+    assert files[0].parent == tmp_path / "runs"
+    assert ((tmp_path / "runs").stat().st_mode & 0o777) == 0o700
+
+
+def test_run_in_terminal_clears_the_previous_run_first(tmp_path, monkeypatch):
+    calls = _record_opens(monkeypatch)
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    (runs / "old.command").write_text("rm -rf /\n")
+    (runs / "notes.txt").write_text("keep")
+
+    (new,) = launcher.run_in_terminal(["cd /r && ./i.sh"], runs)
+
+    assert not (runs / "old.command").exists()
+    assert (runs / "notes.txt").exists()  # only .command files are ours to clear
+    assert new.exists() and len(calls) == 1
+
+
+def test_run_in_terminal_refuses_a_command_that_is_not_one_line(tmp_path, monkeypatch):
+    """The file is executable: a command with a line break or a NUL is more than
+    the one line Lab Hub means to run, so nothing is written or opened."""
+    calls = _record_opens(monkeypatch)
+    runs = tmp_path / "runs"
+
+    for bad in ("cd /r && ./i.sh\nrm -rf ~", "cd /r\r&& x", "cd /r\x00", "   "):
+        with pytest.raises(ValueError):
+            launcher.run_in_terminal(["cd /ok && ./ok.sh", bad], runs)
+
+    assert calls == []
+    assert not list(runs.glob("*.command")) if runs.exists() else True
+
+
+def test_run_in_terminal_with_nothing_to_run_opens_nothing(tmp_path, monkeypatch):
+    calls = _record_opens(monkeypatch)
+    assert launcher.run_in_terminal([], tmp_path / "runs") == []
+    assert calls == []
+    assert not (tmp_path / "runs").exists()  # and no folder or clean-up either
+
+
+def test_a_refused_command_leaves_the_previous_run_alone(tmp_path, monkeypatch):
+    """Validation happens before the clean-up, so a refusal destroys nothing."""
+    _record_opens(monkeypatch)
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    (runs / "install-1.command").write_text("old\n")
+
+    with pytest.raises(ValueError):
+        launcher.run_in_terminal(["cd /r\nrm x"], runs)
+
+    assert (runs / "install-1.command").read_text() == "old\n"
+
+
+def test_run_in_terminal_will_not_write_through_a_linked_folder(tmp_path, monkeypatch):
+    calls = _record_opens(monkeypatch)
+    real = tmp_path / "real"
+    real.mkdir()
+    (tmp_path / "runs").symlink_to(real)
+
+    with pytest.raises(OSError):
+        launcher.run_in_terminal(["cd /r && ./i.sh"], tmp_path / "runs")
+
+    assert list(real.iterdir()) == [] and calls == []
+
+
+def test_run_in_terminal_defaults_to_lab_hubs_own_support_folder(tmp_path, monkeypatch):
+    from lab_hub import config
+
+    _record_opens(monkeypatch)
+    monkeypatch.setattr(config, "SUPPORT_DIR", tmp_path / "Lab Hub")
+
+    (path,) = launcher.run_in_terminal(["cd /r && ./i.sh"])
+
+    assert path.parent == tmp_path / "Lab Hub" / "terminal-runs"
+
+
+def test_a_window_that_does_not_open_is_reported_after_trying_every_one(tmp_path, monkeypatch):
+    """`open` exiting non-zero is an error the owner is told about, and one
+    failure does not stop the other windows from opening."""
+    seen = []
+
+    def run(command, **kwargs):
+        seen.append(command[3])
+        code = 1 if command[3].endswith("install-1.command") else 0
+        return launcher.control.subprocess.CompletedProcess(
+            command, code, "", "Terminal not found" if code else "")
+
+    monkeypatch.setattr(launcher.control.subprocess, "run", run)
+
+    with pytest.raises(launcher.LaunchError) as raised:
+        launcher.run_in_terminal(["cd /a && ./a.sh", "cd /b && ./b.sh"], tmp_path / "runs")
+
+    assert len(seen) == 2
+    assert "cd /a && ./a.sh" in str(raised.value) and "Terminal not found" in str(raised.value)
+    assert "cd /b" not in str(raised.value)
