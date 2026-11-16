@@ -59,3 +59,6 @@
 {"ts": "2026-11-16T20:00:12", "phase": "verify", "state": "done", "spec": "update-now-terminal"}
 {"ts": "2026-11-16T20:00:12", "phase": "document", "state": "done", "spec": "update-now-terminal"}
 {"ts": "2026-11-16T21:36:21", "phase": "build", "state": "start", "spec": "viewer-filters", "note": "replace the two app-wide Python event filters that crash QtWebEngine"}
+{"ts": "2026-11-16T21:59:46", "phase": "build", "state": "done", "spec": "viewer-filters"}
+{"ts": "2026-11-16T21:59:46", "phase": "review", "state": "done", "spec": "viewer-filters"}
+{"ts": "2026-11-16T21:59:46", "phase": "verify", "state": "done", "spec": "viewer-filters"}

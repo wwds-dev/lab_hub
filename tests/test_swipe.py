@@ -391,7 +391,21 @@ class QWebEngineView(QWidget):
 
 
 def _filtered(widget, swipe):
-    return bool(widget.property("labHubSwipe"))
+    """Whether the filter really sits on `widget`: a wheel sent to it reaches `swipe`."""
+    seen = []
+    original = swipe.eventFilter
+
+    def spy(obj, event):
+        if obj is widget and event.type() == event.Type.Wheel:
+            seen.append(obj)
+        return False
+
+    swipe.eventFilter = spy
+    try:
+        QApplication.sendEvent(widget, wheel(widget, 0, 0, Qt.ScrollBegin))
+    finally:
+        swipe.eventFilter = original
+    return bool(seen)
 
 
 def test_install_filters_every_widget_of_the_window_but_not_the_application(qapp, monkeypatch):
@@ -452,4 +466,31 @@ def test_a_filtered_widget_still_swipes_after_install(qapp):
     QApplication.sendEvent(page, wheel(page, 0, 0, Qt.ScrollBegin))
     QApplication.sendEvent(page, wheel(page, -STEP))
     assert w.currentIndex() == 1
+    w.deleteLater()
+
+
+def test_remove_also_cancels_a_rescan_already_queued(qapp):
+    w = QTabWidget()
+    w.addTab(QLabel("One"), "One")
+    swipe = SwipeTabs(w, parent=w)
+    swipe.install()
+    late = QLabel("late")
+    w.addTab(late, "Late")  # queues a rescan
+    swipe.remove()
+    QApplication.processEvents()
+    assert not _filtered(late, swipe)
+    w.deleteLater()
+
+
+def test_a_mark_left_by_a_dead_filter_does_not_block_a_new_one(qapp):
+    w = QTabWidget()
+    page = QLabel("page")
+    w.addTab(page, "One")
+    first = SwipeTabs(w)
+    first.install(w)
+    first.deleteLater()
+    QApplication.processEvents()
+    second = SwipeTabs(w, parent=w)
+    second.install()
+    assert _filtered(page, second)
     w.deleteLater()

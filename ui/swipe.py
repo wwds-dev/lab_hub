@@ -50,7 +50,8 @@ HORIZONTAL_DOMINANCE = 1.5
 # there is no "gesture ended" to reset on. Treat a pause as the end instead.
 IDLE_RESET_S = 0.4
 
-# Marks a widget that already has this filter, so a rescan does not walk it twice.
+# Marks a widget that already has a filter, so a rescan does not walk it twice. Per instance
+# (see `_mark`): a mark left by a filter that has since died must not stop another one.
 _MARK = "labHubSwipe"
 
 # Never filtered, nor anything inside: a web view's internals are QtWebEngine's, and handing
@@ -122,6 +123,7 @@ class SwipeTabs(QObject):
         self._last_event_at = 0.0
         self._root: QWidget | None = None
         self._pending: list[QWidget] | None = None  # set by install()
+        self._mark = f"{_MARK}{id(self)}"
 
     def install(self, root: QWidget | None = None) -> None:
         """Filter `root` (default: the window that owns this) and every widget inside it."""
@@ -133,10 +135,11 @@ class SwipeTabs(QObject):
         root = getattr(self, "_root", None)
         if root is None or not shiboken6.isValid(root):
             return
+        self._pending = None  # a rescan already queued must not put the filter back
         for widget in [root, *root.findChildren(QWidget)]:
-            if widget.property(_MARK):
+            if widget.property(self._mark):
                 widget.removeEventFilter(self)
-                widget.setProperty(_MARK, None)
+                widget.setProperty(self._mark, None)
 
     def _default_root(self) -> QWidget:
         owner = self.parent()
@@ -153,12 +156,12 @@ class SwipeTabs(QObject):
             w, top = stack.pop()
             if not shiboken6.isValid(w) or any(w.inherits(name) for name in _SKIP):
                 continue
-            if w.property(_MARK):
+            if w.property(self._mark):
                 if not top:
                     continue
             else:
                 w.installEventFilter(self)
-                w.setProperty(_MARK, True)
+                w.setProperty(self._mark, True)
             stack.extend((c, False) for c in w.children() if isinstance(c, QWidget))
 
     def _later(self, widget: QWidget) -> None:
@@ -172,6 +175,8 @@ class SwipeTabs(QObject):
             pending.append(widget)
 
     def _flush(self) -> None:
+        if self._pending is None:
+            return  # removed meanwhile
         pending, self._pending = self._pending, []
         for widget in pending:
             self._scan(widget)
