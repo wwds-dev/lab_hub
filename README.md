@@ -366,6 +366,19 @@ window; press Refresh after it finishes. If an in-app rebuild fails, no
 Terminal window opens. Spec `update-now-terminal.md`; `run_in_terminal` in
 `lab_hub/launcher/control.py`.
 
+An app whose bundle runs a **release clone** (Provisio: `~/Releases/provisio`) that
+is behind its source gets neither an installer nor Update now: the installer
+rebuilds from the clone it sits in, so on a stale clone it changes nothing.
+The report lists `git -C <clone> fetch origin && git -C <clone> merge --ff-only
+origin/main` under "Move the release clone first", for you to run after the
+runbook's CI and legal checks (use a commit that passed CI if you have one;
+push the source first if it has unpushed commits). Lab Hub runs nothing in the
+clone and opens no Terminal for it. Once the clone is level the tile reads
+current after Refresh, with no installer run. This makes the by-hand Terminal
+route of Update now (above) apply only to an app whose installer needs a
+terminal and which has no recorded release clone; Provisio takes the move
+route. Spec `release-root-behind.md`.
+
 **Copy commands** puts the commands on the clipboard instead, and **Copy and
 open Terminal** does that and opens a window to paste into. The flag is read from each build script, because they
 disagree and do so silently: `sonar`, `unblock_tracker`, `lab_hub` and Sentinel

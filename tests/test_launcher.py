@@ -909,28 +909,92 @@ def test_a_behind_app_with_no_build_script_is_named_not_dropped(
     assert "no rebuild command" in row.note
 
 
-def test_a_recorded_root_is_installed_from_that_root(tmp_path, monkeypatch):
-    """A launcher bundle that runs a release clone is installed from the clone,
-    never from the working checkout its installer refuses."""
+def _root_fixture(tmp_path, monkeypatch, verdict, behind=3, release_name="release"):
     from lab_hub.launcher import state
 
     project = tmp_path / "sonar"
     (project / "scripts").mkdir(parents=True)
     (project / "scripts" / "install_app.sh").write_text("#!/bin/sh\n")
-    release = tmp_path / "release"
+    release = tmp_path / release_name
     (release / "scripts").mkdir(parents=True)
-    (release / "scripts" / "install_app.sh").write_text("#!/bin/sh\n")
+    # Provisio's installer needs a terminal: it must still not be by-hand here.
+    (release / "scripts" / "install_app.sh").write_text(
+        "#!/bin/sh\nif [ ! -t 0 ]; then exit 1; fi\n")
+    (release / "docs").mkdir()
+    (release / "docs" / "RUNBOOK-release.md").write_text("steps\n")
     app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
-    found = launcher.Version("2.0.1", "bundle", behind=3, root=str(release))
+    found = launcher.Version("2.0.1", "bundle", behind=behind, root=str(release))
     monkeypatch.setattr(state, "_build_status", lambda _a, _r: launcher.BuildStatus(
-        app, found, "behind", "behind.", project / "scripts" / "install_app.sh",
+        app, found, verdict, "behind.", project / "scripts" / "install_app.sh",
         f"cd {project} && ./scripts/install_app.sh",
     ))
+    return app, release
+
+
+def test_a_release_clone_that_is_behind_is_moved_forward_not_reinstalled(
+    tmp_path, monkeypatch
+):
+    """The installer rebuilds from the clone it sits in, so re-running it on a
+    clone that is behind changes nothing (2026-11-16, Provisio): the command is
+    the fast-forward, and nothing in the row runs an installer."""
+    app, release = _root_fixture(tmp_path, monkeypatch, "behind", behind=11)
+
+    row = launcher.build_status(app, tmp_path)
+
+    assert row.command == (f"git -C {release} fetch origin && "
+                           f"git -C {release} merge --ff-only origin/main")
+    assert row.forward and not row.by_hand and not row.runs_in_app
+    assert "install_app" not in row.command and "--force" not in row.command
+    assert "11 commits behind the source" in row.note and str(release) in row.note
+    assert "would rebuild that same clone" in row.note
+    assert "RUNBOOK-release.md" in row.note and "CI" in row.note
+    assert "selftest" in row.note  # the steps after the move are named too
+    assert "merge and push the source to main" in row.note  # the one trap
+    assert "Update now leaves it to you" not in row.note
+
+
+def test_the_note_is_right_for_one_commit_and_without_a_runbook(tmp_path, monkeypatch):
+    app, release = _root_fixture(tmp_path, monkeypatch, "behind", behind=1)
+    (release / "docs" / "RUNBOOK-release.md").unlink()
+
+    row = launcher.build_status(app, tmp_path)
+
+    assert "is 1 commit behind" in row.note and "1 commits" not in row.note
+    assert "RUNBOOK-release.md" not in row.note
+    assert "Use the project's release runbook" in row.note
+
+
+def test_the_forward_command_quotes_a_clone_path_with_a_space(tmp_path, monkeypatch):
+    app, release = _root_fixture(tmp_path, monkeypatch, "behind",
+                                 release_name="my release")
+
+    row = launcher.build_status(app, tmp_path)
+
+    assert f"git -C '{release}' fetch origin" in row.command
+    assert f"git -C '{release}' merge --ff-only origin/main" in row.command
+
+
+def test_a_release_clone_that_is_level_keeps_its_installer(tmp_path, monkeypatch):
+    """Nothing to move: the row is the shipped one (spec measure 4)."""
+    app, release = _root_fixture(tmp_path, monkeypatch, "current", behind=0)
 
     row = launcher.build_status(app, tmp_path)
 
     assert row.command == f"cd {release} && ./scripts/install_app.sh"
-    assert row.runs_in_app
+    assert not row.forward and not row.needs_rebuild
+
+
+def test_an_app_without_a_recorded_root_is_never_a_forward_row(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path)
+    bundle = make_bundle(tmp_path, "SONAR")
+    _stamp(bundle, build=104)
+    project = _checkout(tmp_path, "sonar", monkeypatch=monkeypatch, build=109)
+    (project / "build_app.sh").write_text("#!/bin/sh\n")
+    app = launcher.ExternalApp("sonar", "SONAR", "sonar", "main.py", "")
+
+    row = launcher.build_status(app, tmp_path)
+
+    assert not row.forward and row.runs_in_app and "git -C" not in row.command
 
 
 def test_uncommitted_changes_also_make_a_frozen_build_old(tmp_path, monkeypatch):

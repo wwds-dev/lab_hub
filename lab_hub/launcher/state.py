@@ -1129,6 +1129,9 @@ class BuildStatus:
     # The installer must be run by hand, in a terminal: Update now skips it and
     # the report hands it over instead.
     by_hand: bool = False
+    # The app runs a release clone that is behind: `command` moves the clone
+    # forward and nothing here runs an installer or runs that command.
+    forward: bool = False
     # The checkout, for Open in Terminal, and the doc that says how to build
     # it when Lab Hub has no command for it.
     project: Path | None = None
@@ -1141,7 +1144,8 @@ class BuildStatus:
     @property
     def runs_in_app(self) -> bool:
         """A rebuild Update now can run itself."""
-        return self.needs_rebuild and bool(self.command) and not self.by_hand
+        return (self.needs_rebuild and bool(self.command)
+                and not self.by_hand and not self.forward)
 
 
 def build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
@@ -1162,6 +1166,28 @@ def build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
         command = install_command(root, script) if script is not None else None
     by_hand = script is not None and needs_terminal(script)
     note = row.note
+    forward = False
+    if root is not None and root.is_dir() and row.needs_rebuild:
+        # The installer builds from the clone it sits in, so on a clone that is
+        # behind it rebuilds the same old build. The clone has to move first,
+        # and that is a release step (CI, legal check) the owner takes: Lab Hub
+        # shows the command and runs nothing in the clone.
+        quoted = shlex.quote(str(root))
+        command = (f"git -C {quoted} fetch origin && "
+                   f"git -C {quoted} merge --ff-only origin/main")
+        by_hand, forward = False, True
+        runbook = root / RELEASE_RUNBOOK
+        around = (f"Follow {runbook} for the steps around it" if runbook.is_file()
+                  else "Use the project's release runbook for the steps around it")
+        count = (f"{row.version.behind} commit"
+                 f"{'' if row.version.behind == 1 else 's'}")
+        note = (f"{note} Its release clone {root} is {count} behind the source; "
+                "the installer would rebuild that same clone and change nothing. "
+                f"Move the clone forward instead. {around}: CI and the legal "
+                "check before it, dependencies and the selftest after. Use a "
+                "commit that passed CI instead of origin/main if you have one, "
+                "and merge and push the source to main first if it is not "
+                "there. Then press Refresh.")
     if row.needs_rebuild and by_hand:
         guide = (root or source_dir(app, lab_root) or Path()) / RELEASE_RUNBOOK
         steps = (f" Follow {guide} first." if guide.is_file() else "")
@@ -1175,7 +1201,7 @@ def build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
         note = (f"{note} Lab Hub has no rebuild command for it: none of "
                 f"{', '.join(BUILD_SCRIPTS)} exists, so {how}.")
     return replace(row, script=script, command=command, by_hand=by_hand,
-                   note=note, project=project, guide=guide)
+                   forward=forward, note=note, project=project, guide=guide)
 
 
 def _build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
