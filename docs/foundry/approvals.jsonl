@@ -10,3 +10,4 @@
 {"ts": "2026-11-16T18:25:39", "gate": "define", "by": "owner", "words": "approve as recommended", "recorded_by": "agent", "spec": "land-from-tiles"}
 {"ts": "2026-11-16T19:15:56", "gate": "define", "by": "owner", "words": "approve section 9", "recorded_by": "agent", "spec": "land-from-tiles"}
 {"ts": "2026-11-16T19:46:44", "gate": "define", "by": "owner", "words": "Approve", "recorded_by": "agent", "spec": "update-now-terminal"}
+{"ts": "2026-11-16T22:58:29", "gate": "release", "by": "owner", "words": "merge and rebuild after the review", "recorded_by": "agent", "spec": "viewer-filters"}

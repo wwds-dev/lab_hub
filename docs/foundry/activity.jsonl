@@ -62,3 +62,4 @@
 {"ts": "2026-11-16T21:59:46", "phase": "build", "state": "done", "spec": "viewer-filters"}
 {"ts": "2026-11-16T21:59:46", "phase": "review", "state": "done", "spec": "viewer-filters"}
 {"ts": "2026-11-16T21:59:46", "phase": "verify", "state": "done", "spec": "viewer-filters"}
+{"ts": "2026-11-16T22:58:29", "phase": "release", "state": "start", "spec": "viewer-filters"}
