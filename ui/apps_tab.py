@@ -913,8 +913,15 @@ class AppsTab(TilePage):
             lines.append("Update now runs:")
             lines.extend(f"  {command}" for command in commands)
         if by_hand:
+            names = ", ".join(row.app.name for row in behind
+                              if row.by_hand and row.command)
+            after = " after the rebuilds above succeed" if commands else ""
             lines.append("")
-            lines.append("Run yourself, in a terminal:")
+            lines.append(
+                f"Update now opens Terminal for {names}{after} and starts the "
+                "installer there. Each one asks you to confirm in its window "
+                "(Provisio's asks you to type install); Lab Hub types nothing:"
+            )
             lines.extend(f"  {command}" for command in by_hand)
         if no_command:
             lines.append("")
@@ -936,7 +943,7 @@ class AppsTab(TilePage):
         # rebuild replaces an installed app and takes minutes — the difference
         # the buttons make is between "there is a command" and "it is running".
         update = copy = terminal = None
-        if commands:
+        if commands or by_hand:
             update = box.addButton(
                 "Update now", QMessageBox.ButtonRole.AcceptRole
             )
@@ -973,23 +980,58 @@ class AppsTab(TilePage):
             for folder in folders:
                 launcher.open_terminal(folder)
         if update is not None and clicked is update:
-            self.run_updates(commands)
+            self.run_updates(commands, by_hand)
 
-    def run_updates(self, commands: list[str]) -> None:
-        """Rebuild and reinstall the out-of-date apps without leaving Lab Hub.
+    def run_updates(self, commands: list[str], by_hand: list[str] | None = None) -> None:
+        """Rebuild and reinstall the out-of-date apps without leaving Lab Hub,
+        then hand the installers that need a terminal to Terminal.
 
         Whatever the outcome, re-check versions afterwards so the tiles stop
         saying "behind" the moment a rebuild lands — a cancelled or partial run
         simply leaves the ones it did not reach still saying so, which is true.
+        A run that failed or was cancelled opens no Terminal window: like the
+        rebuilds themselves, it stops rather than going on. The windows are not
+        watched; Refresh shows the result once the owner has answered there.
+        The Terminal commands are checked before the first rebuild starts, and a
+        Terminal step that fails is shown to the owner rather than lost.
         """
-        dialog = RebuildDialog(commands, self)
-        dialog.exec()
-        self.recheck()
-        if dialog.succeeded:
-            self.launched.emit(
+        by_hand = list(by_hand or [])
+        try:
+            launcher.check_terminal_commands(by_hand)
+        except ValueError as error:
+            QMessageBox.warning(self, "Update now",
+                                f"Nothing was started: {error}")
+            return
+        said = []
+        if commands:
+            dialog = RebuildDialog(commands, self)
+            dialog.exec()
+            self.recheck()
+            if not dialog.succeeded:
+                if by_hand:
+                    self.launched.emit(
+                        "No Terminal windows opened because the rebuild did "
+                        "not finish."
+                    )
+                return
+            said.append(
                 f"Rebuilt and reinstalled {len(commands)} app"
                 f"{'' if len(commands) == 1 else 's'}."
             )
+        if by_hand:
+            try:
+                launcher.run_in_terminal(by_hand)
+            except (launcher.LaunchError, OSError, ValueError) as error:
+                QMessageBox.warning(self, "Update now",
+                                    "Could not open Terminal. " + str(error))
+                return
+            said.append(
+                f"Opened Terminal for {len(by_hand)} installer"
+                f"{'' if len(by_hand) == 1 else 's'}: confirm there, "
+                "then press Refresh."
+            )
+        if said:
+            self.launched.emit(" ".join(said))
 
     def copy_commands(self, commands: list[str]) -> None:
         """Put the rebuild commands on the clipboard, one per line."""

@@ -8,6 +8,8 @@ what it says.
 
 from __future__ import annotations
 
+import pytest
+
 from lab_hub import launcher
 
 from ui.apps_tab import AppCard
@@ -662,9 +664,9 @@ def test_the_update_button_shows_only_when_something_is_behind(
     assert "Update now" in seen["labels"]
 
 
-def test_a_by_hand_install_gets_no_update_now(qapp, monkeypatch):
-    """An installer that needs a terminal is listed for the owner and copied,
-    never run by Update now; a behind app with no command is named."""
+def _by_hand_tab(qapp, monkeypatch, rows_for):
+    """An AppsTab whose build report is `rows_for(apps)`; the dialog's buttons
+    and text are recorded, and `press` (if given) clicks the named button."""
     from PySide6.QtWidgets import QMessageBox
 
     from lab_hub import config
@@ -673,10 +675,33 @@ def test_a_by_hand_install_gets_no_update_now(qapp, monkeypatch):
     apps = (launcher.ExternalApp("p", "P", "p", "main.py", "s"),
             launcher.ExternalApp("q", "Q", "q", "main.py", "s"))
     tab = AppsTab(config.Settings(), apps, "P", "intro", check_own_builds=True)
+    monkeypatch.setattr(launcher, "build_report",
+                        lambda root, scope=None: rows_for(apps))
     seen = {}
-    monkeypatch.setattr(QMessageBox, "exec", lambda self: seen.update(
-        info=self.informativeText(), labels={b.text() for b in self.buttons()}))
-    monkeypatch.setattr(launcher, "build_report", lambda root, scope=None: (
+
+    def exec_(box, press=None):
+        seen.update(info=box.informativeText(),
+                    labels={b.text() for b in box.buttons()})
+        for b in box.buttons():
+            if b.text() == seen.get("press"):
+                b.click()
+
+    monkeypatch.setattr(QMessageBox, "exec", exec_)
+    return tab, seen
+
+
+def _drop(tab):
+    import shiboken6
+
+    tab._poll.stop()
+    shiboken6.delete(tab)
+
+
+def test_a_by_hand_install_gets_update_now_and_is_named_in_the_text(qapp, monkeypatch):
+    """Provisio alone being behind used to leave no Update now. Now it is there,
+    says the installer opens in Terminal and asks the owner there, and an app
+    with no command is still named."""
+    tab, seen = _by_hand_tab(qapp, monkeypatch, lambda apps: (
         launcher.BuildStatus(apps[0], launcher.Version(), "behind", "older.",
                              None, "cd /r && ./scripts/install_app.sh",
                              by_hand=True),
@@ -684,15 +709,183 @@ def test_a_by_hand_install_gets_no_update_now(qapp, monkeypatch):
     ))
     tab.show_build_report()
 
-    assert "Update now" not in seen["labels"]
+    assert "Update now" in seen["labels"]
     assert "Copy commands" in seen["labels"]
-    assert "Run yourself, in a terminal:" in seen["info"]
+    assert "Update now opens Terminal for P" in seen["info"]
+    assert "confirm in its window" in seen["info"]
+    assert "after the rebuilds" not in seen["info"]  # nothing rebuilds first here
+    assert "cd /r && ./scripts/install_app.sh" in seen["info"]
     assert "No rebuild command for: Q." in seen["info"]
+    _drop(tab)
 
-    import shiboken6
 
-    tab._poll.stop()
-    shiboken6.delete(tab)
+def test_update_now_opens_terminal_for_a_by_hand_app_and_runs_no_dialog(qapp, monkeypatch):
+    """Only a by-hand app is behind: no in-app rebuild, one Terminal window."""
+    from ui import apps_tab
+
+    tab, seen = _by_hand_tab(qapp, monkeypatch, lambda apps: (
+        launcher.BuildStatus(apps[0], launcher.Version(), "behind", "older.",
+                             None, "cd /r && ./scripts/install_app.sh",
+                             by_hand=True),))
+    seen["press"] = "Update now"
+    ran, opened = [], []
+    monkeypatch.setattr(apps_tab, "RebuildDialog",
+                        lambda *a, **k: ran.append(a) or pytest.fail("no in-app run"))
+    monkeypatch.setattr(launcher, "run_in_terminal",
+                        lambda commands, *a, **k: opened.append(list(commands)) or [])
+    monkeypatch.setattr(tab, "recheck", lambda: None)
+    tab.show_build_report()
+
+    assert ran == []
+    assert opened == [["cd /r && ./scripts/install_app.sh"]]
+    _drop(tab)
+
+
+class _FakeRebuild:
+    """Stands in for RebuildDialog: records what it was asked to run."""
+    ok = True
+    asked: list = []
+
+    def __init__(self, commands, parent=None):
+        type(self).asked.append(list(commands))
+        self.succeeded = type(self).ok
+
+    def exec(self):
+        return 0
+
+
+def _mixed_rows(apps):
+    return (launcher.BuildStatus(apps[0], launcher.Version(), "behind", "older.",
+                                 None, "cd /r && ./scripts/install_app.sh",
+                                 by_hand=True),
+            launcher.BuildStatus(apps[1], launcher.Version(), "behind", "older.",
+                                 None, "cd /q && ./build_app.sh"))
+
+
+def test_update_now_runs_the_in_app_rebuilds_then_opens_terminal(qapp, monkeypatch):
+    from ui import apps_tab
+
+    _FakeRebuild.ok, _FakeRebuild.asked = True, []
+    tab, seen = _by_hand_tab(qapp, monkeypatch, _mixed_rows)
+    seen["press"] = "Update now"
+    order = []
+    monkeypatch.setattr(apps_tab, "RebuildDialog",
+                        lambda *a, **k: order.append("rebuild") or _FakeRebuild(*a, **k))
+    monkeypatch.setattr(launcher, "run_in_terminal",
+                        lambda commands, *a, **k: order.append(("terminal", list(commands))) or [])
+    rechecked, said = [], []
+    monkeypatch.setattr(tab, "recheck", lambda: rechecked.append(1))
+    tab.launched.connect(said.append)
+    tab.show_build_report()
+
+    assert "after the rebuilds above succeed" in seen["info"]
+    assert _FakeRebuild.asked == [["cd /q && ./build_app.sh"]]  # never the by-hand one
+    assert order == ["rebuild", ("terminal", ["cd /r && ./scripts/install_app.sh"])]
+    assert rechecked == [1]
+    # One message, saying both things; the first is not overwritten by the second.
+    assert len(said) == 1
+    assert "Rebuilt and reinstalled 1 app." in said[0] and "Opened Terminal for 1 installer" in said[0]
+    _drop(tab)
+
+
+def test_a_failed_in_app_rebuild_opens_no_terminal(qapp, monkeypatch):
+    from ui import apps_tab
+
+    _FakeRebuild.ok, _FakeRebuild.asked = False, []
+    tab, seen = _by_hand_tab(qapp, monkeypatch, _mixed_rows)
+    seen["press"] = "Update now"
+    opened = []
+    monkeypatch.setattr(apps_tab, "RebuildDialog", _FakeRebuild)
+    monkeypatch.setattr(launcher, "run_in_terminal",
+                        lambda commands, *a, **k: opened.append(list(commands)) or [])
+    monkeypatch.setattr(tab, "recheck", lambda: None)
+    said = []
+    tab.launched.connect(said.append)
+    tab.show_build_report()
+
+    assert _FakeRebuild.asked and opened == []
+    assert said and "No Terminal windows opened" in said[0]
+    _drop(tab)
+
+
+def test_two_by_hand_apps_get_two_separate_windows(qapp, monkeypatch):
+    tab, seen = _by_hand_tab(qapp, monkeypatch, lambda apps: (
+        launcher.BuildStatus(apps[0], launcher.Version(), "behind", "older.",
+                             None, "cd /r && ./a.sh", by_hand=True),
+        launcher.BuildStatus(apps[1], launcher.Version(), "behind", "older.",
+                             None, "cd /q && ./b.sh", by_hand=True)))
+    seen["press"] = "Update now"
+    opened = []
+    monkeypatch.setattr(launcher, "run_in_terminal",
+                        lambda commands, *a, **k: opened.append(list(commands)) or [])
+    monkeypatch.setattr(tab, "recheck", lambda: None)
+    tab.show_build_report()
+
+    assert opened == [["cd /r && ./a.sh", "cd /q && ./b.sh"]]  # one call, two commands
+    _drop(tab)
+
+
+def test_a_bad_terminal_command_stops_everything_before_any_rebuild(qapp, monkeypatch):
+    """A command that cannot be opened is found before minutes of rebuilding,
+    and the owner is told, not left with a click that did nothing."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from ui import apps_tab
+
+    _FakeRebuild.ok, _FakeRebuild.asked = True, []
+    tab, seen = _by_hand_tab(qapp, monkeypatch, lambda apps: (
+        launcher.BuildStatus(apps[0], launcher.Version(), "behind", "older.",
+                             None, "cd /r\nrm x", by_hand=True),
+        launcher.BuildStatus(apps[1], launcher.Version(), "behind", "older.",
+                             None, "cd /q && ./build_app.sh")))
+    seen["press"] = "Update now"
+    warned = []
+    monkeypatch.setattr(QMessageBox, "warning",
+                        staticmethod(lambda parent, title, text: warned.append(text)))
+    monkeypatch.setattr(apps_tab, "RebuildDialog", _FakeRebuild)
+    monkeypatch.setattr(tab, "recheck", lambda: None)
+    tab.show_build_report()
+
+    assert _FakeRebuild.asked == []
+    assert len(warned) == 1 and "Nothing was started" in warned[0]
+    _drop(tab)
+
+
+def test_a_terminal_that_will_not_open_is_shown_not_swallowed(qapp, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    tab, seen = _by_hand_tab(qapp, monkeypatch, lambda apps: (
+        launcher.BuildStatus(apps[0], launcher.Version(), "behind", "older.",
+                             None, "cd /r && ./i.sh", by_hand=True),))
+    seen["press"] = "Update now"
+    warned, said = [], []
+
+    def fail(commands, *a, **k):
+        raise launcher.LaunchError("Terminal did not open for: cd /r && ./i.sh")
+
+    monkeypatch.setattr(launcher, "run_in_terminal", fail)
+    monkeypatch.setattr(QMessageBox, "warning",
+                        staticmethod(lambda parent, title, text: warned.append(text)))
+    monkeypatch.setattr(tab, "recheck", lambda: None)
+    tab.launched.connect(said.append)
+    tab.show_build_report()
+
+    assert len(warned) == 1 and "Terminal did not open" in warned[0]
+    assert said == []  # no "Opened Terminal" claim
+    _drop(tab)
+
+
+def test_nothing_behind_means_no_update_now_and_no_terminal(qapp, monkeypatch):
+    tab, seen = _by_hand_tab(qapp, monkeypatch, lambda apps: (
+        launcher.BuildStatus(apps[0], launcher.Version(), "current", "matches."),))
+    opened = []
+    monkeypatch.setattr(launcher, "run_in_terminal",
+                        lambda commands, *a, **k: opened.append(commands) or [])
+    tab.show_build_report()
+
+    assert "Update now" not in seen["labels"]
+    assert opened == []
+    _drop(tab)
 
 
 def test_an_app_with_no_command_gets_open_in_terminal(qapp, monkeypatch, tmp_path):

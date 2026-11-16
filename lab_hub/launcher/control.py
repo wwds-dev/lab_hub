@@ -352,11 +352,84 @@ def open_terminal(path: Path) -> None:
     Paired with the clipboard rather than typing the command in: driving
     Terminal would need an Apple Events grant, and a window that runs something
     the moment it opens is the wrong shape for a command that replaces an
-    installed app. Paste and read it first.
+    installed app. Paste and read it first. (`run_in_terminal` is the one
+    exception, for installers that stop and ask the owner themselves.)
     """
     subprocess.run(
         ["open", "-a", "Terminal", str(path)], check=False, env=child_env()
     )
+
+
+def check_terminal_commands(commands: list[str]) -> None:
+    """Refuse a command that is not exactly one line, before anything runs.
+
+    Called up front by Update now so a bad command is found before the
+    rebuilds, not after minutes of them. Raises ValueError.
+    """
+    for command in commands:
+        if not command.strip() or any(ch in command for ch in "\n\r\0"):
+            raise ValueError(f"not a single command line: {command!r}")
+
+
+def run_in_terminal(commands: list[str], directory: Path | None = None) -> list[Path]:
+    """Open one Terminal window per command, each already running it.
+
+    For an installer that refuses to run without a terminal (Provisio's asks
+    the owner to type "install"): Lab Hub cannot run it, so it hands it to a
+    real terminal and the owner still answers there. Each command goes in a
+    one-line `.command` file that `open -a Terminal` runs — no Apple Events
+    grant, and nothing is typed into Terminal for the owner. This is the one
+    exception to `open_terminal`'s paste-only rule: that rule is about a
+    command the owner has not seen, and these installers stop and ask first.
+
+    The file is executable, so it holds exactly the one line given (see
+    `check_terminal_commands`) and is created 0700, never following a link, in
+    Lab Hub's own support folder. It removes itself when the command ends; the
+    previous run's files are removed first (only `.command` files are
+    touched). Raises ValueError for a bad command (nothing written), OSError if
+    the folder cannot be used, and LaunchError naming every window that did not
+    open — after trying all of them.
+    """
+    check_terminal_commands(commands)
+    if not commands:
+        return []
+    if directory is None:
+        from lab_hub import config
+
+        directory = config.SUPPORT_DIR / "terminal-runs"
+    if directory.is_symlink():
+        raise OSError(f"{directory} is a link; not writing install files there")
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    directory.chmod(0o700)
+    for old in directory.glob("*.command"):
+        old.unlink()
+    files: list[Path] = []
+    for number, command in enumerate(commands, 1):
+        path = directory / f"install-{number}.command"
+        body = (
+            "#!/bin/zsh -l\n"
+            f"{command}\n"
+            "status=$?\n"
+            "echo\n"
+            'echo "Finished (exit $status). Close this window, then press '
+            'Refresh in Lab Hub."\n'
+            'rm -f -- "$0"\n'
+        )
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o700)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(body)
+        files.append(path)
+    failed = []
+    for command, path in zip(commands, files):
+        result = subprocess.run(["open", "-a", "Terminal", str(path)],
+                                check=False, env=child_env(),
+                                capture_output=True, text=True)
+        if result.returncode != 0:
+            failed.append(f"{command} ({(result.stderr or '').strip() or 'open failed'})")
+    if failed:
+        raise LaunchError("Terminal did not open for: " + "; ".join(failed))
+    return files
 
 
 def reveal(path: Path) -> None:

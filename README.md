@@ -354,11 +354,20 @@ it. `lab_hub/repo_tidy.py`, `ui/repo_tidy_dialogs.py`,
 A launcher bundle is never out of date, and being dirty does not change that:
 it runs the source, so uncommitted edits are exactly what opens.
 
-It hands over the command rather than running it: **Copy commands** puts it on
-the clipboard, and **Copy and open Terminal** does that and opens a window to
-paste into. Not typed in for you — driving Terminal needs an Apple Events
-grant, and a window that runs something the instant it opens is the wrong shape
-for a command that replaces an installed app. The flag is read from each build script, because they
+**Update now** runs the rebuilds it can run itself, with a live log and a Cancel
+button. An installer that refuses to run without a terminal (Provisio's asks you
+to type `install`) is not run in the app: after the in-app rebuilds succeed,
+Update now opens one Terminal window per such app with its install command
+already started, and you confirm there. Lab Hub types nothing into Terminal and
+needs no Apple Events grant: each command is written alone to a `.command` file
+(mode 0700, in `~/Library/Application Support/Lab Hub/terminal-runs/`, replaced
+on the next run) that `open -a Terminal` runs. Lab Hub does not watch the
+window; press Refresh after it finishes. If an in-app rebuild fails, no
+Terminal window opens. Spec `update-now-terminal.md`; `run_in_terminal` in
+`lab_hub/launcher/control.py`.
+
+**Copy commands** puts the commands on the clipboard instead, and **Copy and
+open Terminal** does that and opens a window to paste into. The flag is read from each build script, because they
 disagree and do so silently: `sonar`, `unblock_tracker`, `lab_hub` and Sentinel
 build into `dist.noindex/` and copy into `/Applications` only when passed
 `--install`, while `backup_manager`, `git_autosync` and Imprint install by
