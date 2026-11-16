@@ -15,7 +15,9 @@ module is the one place Lab Hub changes a repo, and only on the owner's click:
 
 Every change is appended to `repo-tidy.log` in Lab Hub's support folder; a
 deleted branch is logged with its tip SHA so `git branch <name> <sha>` brings
-it back. Nothing here merges, rebases, force-pushes or touches a remote branch.
+it back. Nothing here rebases, force-pushes or touches a remote branch. A
+branch that merges cleanly is merged (section 10); one that conflicts can be
+handed to Claude Code (`claude_resolve`, section 11).
 
 All functions block on git; the UI runs them on a worker thread.
 """
@@ -427,17 +429,19 @@ def worktree_blocker(repo: Path, wt: Worktree, busy: tuple[Path, ...] | None,
 class Action:
     repo_name: str
     repo: Path
-    kind: str  # commit | merge | delete_branch | remove_worktree | pull | push
+    kind: str  # commit | merge | claude_merge | delete_branch | remove_worktree | pull | push
     target: str  # branch name, or worktree path
     reason: str
     sha: str = ""  # a branch's tip when planned: deleted only if unchanged
     branch: str = ""  # commit: the branch the worktree was on when planned
+    detail: str = ""  # claude_merge: the test command shown in the preview
 
     @property
     def label(self) -> str:
         verb = {
             "commit": f"Commit in {self.target} (on {self.branch})",
             "merge": f"Merge {self.target} into {self.branch}",
+            "claude_merge": f"Resolve conflicts with Claude: {self.target} into {self.branch}",
             "delete_branch": f"Delete branch {self.target}",
             "remove_worktree": f"Remove worktree {self.target}",
             "pull": f"Pull {self.target} (fast-forward)",
@@ -464,7 +468,11 @@ class Plan:
 
 
 def plan_repo(name: str, repo: Path, busy: tuple[Path, ...] | None = (),
-              now: float | None = None) -> tuple[list[Action], list[Skip]]:
+              now: float | None = None,
+              claude: str | None = None,
+              claude_why: str = "Claude Code not found") -> tuple[list[Action], list[Skip]]:
+    """`claude`: the Claude Code executable, or None to leave conflicting
+    branches for a person (section 11), saying `claude_why`."""
     actions: list[Action] = []
     skips: list[Skip] = []
     default = default_branch(repo)
@@ -519,17 +527,31 @@ def plan_repo(name: str, repo: Path, busy: tuple[Path, ...] | None = (),
         if source:
             skips.append(Skip(name, branch, f"not merged: {source}"))
             continue
-        if not merges_cleanly(repo, default, branch):
-            skips.append(Skip(name, branch, f"not merged: it conflicts with {default} — "
-                                            "land it by hand (Review branches → Open in Terminal)"))
-            continue
         rc, count, _ = git(repo, "rev-list", "--count",
                            f"refs/heads/{default}..refs/heads/{branch}")
         n = int(count) if rc == 0 and count.isdigit() else 0
+        commits = f"{n} commit{'s' if n != 1 else ''}"
         sha = tip(repo, branch)
-        actions.append(Action(name, repo, "merge", branch,
-                              f"{n} commit{'s' if n != 1 else ''}, no conflicts", sha,
-                              branch=default))
+        if not merges_cleanly(repo, default, branch):
+            reason = _claude_blocker(repo, claude, claude_why)
+            if reason:
+                skips.append(Skip(name, branch, f"not merged: it conflicts with {default} — "
+                                                f"{reason}"))
+                continue
+            from .claude_resolve import conflicted_files, test_command
+
+            cmd = test_command(repo)
+            files = conflicted_files(repo, default, branch)
+            k = len(files)
+            note = f"; {cmd.note}" if cmd and cmd.note else ""
+            actions.append(Action(
+                name, repo, "claude_merge", branch,
+                f"{commits}, conflicts in {k} file{'s' if k != 1 else ''}; "
+                f"tests ({cmd.source}): {cmd.display}{note}",
+                sha, branch=default, detail=cmd.display))
+        else:
+            actions.append(Action(name, repo, "merge", branch, f"{commits}, no conflicts",
+                                  sha, branch=default))
         merged_any = True
         # Once merged it has landed: tidy its worktree and the branch too.
         if wt is not None:
@@ -587,6 +609,18 @@ def plan_repo(name: str, repo: Path, busy: tuple[Path, ...] | None = (),
     return actions, skips
 
 
+def _claude_blocker(repo: Path, claude: str | None, why: str) -> str:
+    """Why a conflicting branch cannot go to Claude, or ""."""
+    if claude is None:
+        return f"land it by hand (Review branches → Open in Terminal); {why}"
+    from .claude_resolve import test_command
+
+    if test_command(repo) is None:
+        return ("land it by hand (Review branches → Open in Terminal); no test command "
+                "found in docs/foundry/app-context.md")
+    return ""
+
+
 def sync_blocker(repo: Path, default: str, after_commit: bool = False) -> str:
     """Why the default branch must not be pulled or pushed, or "" when one of
     the two may run (it is only behind, or only ahead, with nothing local).
@@ -621,7 +655,14 @@ def sync_blocker(repo: Path, default: str, after_commit: bool = False) -> str:
     return ""
 
 
-def plan(repos: list[tuple[str, Path]], now: float | None = None) -> Plan:
+def plan(repos: list[tuple[str, Path]], now: float | None = None,
+         claude: str | None | bool = True, claude_why: str = "Claude Code not found") -> Plan:
+    """`claude`: True finds Claude Code itself (and checks it is signed in); a
+    path uses that one; None leaves conflicting branches for a person."""
+    if claude is True:
+        from .claude_resolve import availability
+
+        claude, claude_why = availability()
     busy = busy_dirs()
     actions: list[Action] = []
     skips: list[Skip] = []
@@ -629,7 +670,7 @@ def plan(repos: list[tuple[str, Path]], now: float | None = None) -> Plan:
         if not repo.is_absolute() or not (repo / ".git").exists():
             skips.append(Skip(name, str(repo), "not a git checkout"))
             continue
-        a, s = plan_repo(name, repo, busy, now)
+        a, s = plan_repo(name, repo, busy, now, claude or None, claude_why)
         actions += a
         skips += [x for x in s if x.reason != "level with origin"]
     return Plan(tuple(actions), tuple(skips))
@@ -703,7 +744,7 @@ def check(action: Action, busy: tuple[Path, ...] | None = (),
         if not changed_tracked(wt.path):
             return "nothing to commit any more"
         return ""
-    if action.kind == "merge":
+    if action.kind in ("merge", "claude_merge"):
         branch = action.target
         if tip(repo, branch) != action.sha:
             return "the branch has moved since the preview"
@@ -716,8 +757,14 @@ def check(action: Action, busy: tuple[Path, ...] | None = (),
         reason = merge_source_blocker(repo, wt, busy, now)
         if reason:
             return reason
-        if not merges_cleanly(repo, default, branch):
+        if action.kind == "merge" and not merges_cleanly(repo, default, branch):
             return f"it now conflicts with {default}"
+        if action.kind == "claude_merge":
+            from .claude_resolve import test_command
+
+            cmd = test_command(repo)
+            if cmd is None or cmd.display != action.detail:
+                return "its test command changed since the preview"
         return ""
     if action.kind == "delete_branch":
         branch = action.target
@@ -766,19 +813,45 @@ def check(action: Action, busy: tuple[Path, ...] | None = (),
 
 def apply(action: Action, log: Path | None = None,
           busy: tuple[Path, ...] | None | str = "fresh",
-          now: float | None = None) -> tuple[bool, str]:
+          now: float | None = None, *, claude: str | None = None,
+          progress=None, stop=None) -> tuple[bool, str]:
     """Re-check, then run one action: (done, what happened).
 
     A worktree removal takes a fresh `lsof` snapshot unless `busy` is given
     (tests pass one): an earlier snapshot can be minutes old by now.
+    `claude`, `progress` and `stop` serve a claude_merge (section 11).
     """
     if busy == "fresh":
-        busy = busy_dirs() if action.kind in ("remove_worktree", "commit", "merge") else ()
+        busy = busy_dirs() if action.kind in ("remove_worktree", "commit", "merge",
+                                              "claude_merge") else ()
+    if stop is not None and stop.stopped:
+        _log(f"SKIP {action.repo} {action.kind} {action.target}: stopped", log)
+        return False, "skipped — stopped"
     reason = check(action, busy, now)  # type: ignore[arg-type]
     if reason:
         _log(f"SKIP {action.repo} {action.kind} {action.target}: {reason}", log)
         return False, f"skipped — {reason}"
     repo = action.repo
+    if action.kind == "claude_merge":
+        default = action.branch
+        if merges_cleanly(repo, default, action.target):
+            # It merges cleanly now: the plain merge path, no Claude.
+            return apply(Action(action.repo_name, repo, "merge", action.target,
+                                action.reason, action.sha, branch=default),
+                         log, busy, now)
+        from . import claude_resolve as cr
+
+        exe = claude or cr.find_claude()
+        if exe is None:
+            return False, "skipped — Claude Code not found"
+        cmd = cr.test_command(repo)
+        if cmd is None or cmd.display != action.detail:
+            return False, "skipped — its test command changed since the preview"
+        outcome = cr.resolve(repo, default, action.target, action.sha, cmd, exe, log,
+                             stop or cr.Stopper(), progress or (lambda _m: None))
+        if outcome.landed:
+            return True, outcome.message
+        return False, f"not landed — {outcome.message}"
     if action.kind == "delete_branch":
         ok, message = _delete_branch_at(repo, action.target, action.sha, log, "landed branch")
         return ok, "done" if ok else message

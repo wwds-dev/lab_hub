@@ -1,12 +1,14 @@
 """The two windows behind Check repos: Resolve… and Review branches….
 
-Spec `docs/specs/repo-tidy.md`, section 4. All git work runs on a worker
-thread (`_Background`); the windows only show results. Neither window merges
-anything.
+Spec `docs/specs/repo-tidy.md`, sections 4, 10 and 11. All git work runs on
+a worker thread (`_Background`); the windows only show results. Resolve merges
+what merges cleanly and, after a confirmation, hands conflicting branches to
+Claude Code (section 11), streaming its progress into the window.
 """
 
 from __future__ import annotations
 
+import queue
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable
@@ -29,7 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from lab_hub import launcher, repo_tidy
+from lab_hub import claude_resolve, launcher, repo_tidy
 
 Repos = list[tuple[str, Path]]
 
@@ -85,6 +87,12 @@ class CleanupDialog(QDialog):
         self.changed = False
         self._applying = False
         self._actions: list[repo_tidy.Action] = []
+        self._claude: str | None = None
+        self._stopper = claude_resolve.Stopper()
+        self._progress: queue.SimpleQueue[str] = queue.SimpleQueue()
+        self._drain = QTimer(self)
+        self._drain.setInterval(100)
+        self._drain.timeout.connect(self._show_progress)
         self._bg = _Background(self)
 
         layout = QVBoxLayout(self)
@@ -95,7 +103,8 @@ class CleanupDialog(QDialog):
         self._list.setMinimumSize(640, 220)
         self._list.itemChanged.connect(self._update_apply)
         layout.addWidget(self._list)
-        layout.addWidget(QLabel("Left alone:"))
+        self._skipped_label = QLabel("Left alone:")
+        layout.addWidget(self._skipped_label)
         self._skipped = QPlainTextEdit()
         self._skipped.setReadOnly(True)
         self._skipped.setObjectName("hint")
@@ -104,16 +113,27 @@ class CleanupDialog(QDialog):
         self.apply_button = QPushButton("Apply")
         self.apply_button.setEnabled(False)
         self.apply_button.clicked.connect(self._apply)
+        self.stop_button = QPushButton("Stop")
+        self.stop_button.setToolTip("End the running Claude Code or test run and skip "
+                                    "everything after it. A branch already landed stays "
+                                    "landed; its push waits for the next Resolve.")
+        self.stop_button.clicked.connect(self._stop)
+        self.stop_button.hide()
         self.close_button = QPushButton("Close")
         self.close_button.clicked.connect(self.reject)
-        layout.addLayout(_buttons(self.apply_button, self.close_button))
+        layout.addLayout(_buttons(self.apply_button, self.stop_button, self.close_button))
 
-        self._bg.run(lambda: repo_tidy.plan(repos), self._planned)
+        def work():
+            exe, why = claude_resolve.availability()
+            return exe, repo_tidy.plan(repos, claude=exe, claude_why=why)
 
-    def _planned(self, plan: repo_tidy.Plan | None, exc: BaseException | None) -> None:
-        if plan is None:
+        self._bg.run(work, self._planned)
+
+    def _planned(self, result, exc: BaseException | None) -> None:
+        if result is None:
             self._status.setText(f"Could not look at the repos: {exc}")
             return
+        self._claude, plan = result
         self._actions = list(plan.actions)
         self._list.blockSignals(True)
         for action in self._actions:
@@ -140,25 +160,90 @@ class CleanupDialog(QDialog):
     def _update_apply(self, *_args) -> None:
         self.apply_button.setEnabled(bool(self.checked()) and not self._bg.busy)
 
+    def confirm_claude(self, n: int) -> str:
+        """"all", "without" or "cancel" (tests replace this)."""
+        cap = claude_resolve.BUDGET_USD
+        box = QMessageBox(self)
+        box.setWindowTitle("Resolve conflicts with Claude")
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setText(f"{n} branch{'es' if n != 1 else ''} will be sent to Claude Code "
+                    f"(model {claude_resolve.MODEL}, at most ${cap:.0f} each, "
+                    f"${n * cap:.0f} in total).")
+        box.setInformativeText(
+            "Code from these repos goes to Anthropic, as in any Claude Code session. "
+            "Lab Hub runs each repo's tests itself; a merge that passes them lands in "
+            "the default branch and is pushed without review. A branch that fails "
+            "stays exactly as it is.")
+        go = box.addButton("Resolve with Claude", QMessageBox.ButtonRole.AcceptRole)
+        without = box.addButton("Apply without them", QMessageBox.ButtonRole.ActionRole)
+        cancel = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(cancel)
+        box.setEscapeButton(cancel)
+        box.exec()
+        clicked = box.clickedButton()
+        return "all" if clicked is go else "without" if clicked is without else "cancel"
+
     def _apply(self) -> None:
         todo = self.checked()
+        with_claude = [a for a in todo if a.kind == "claude_merge"]
+        if with_claude:
+            choice = self.confirm_claude(len(with_claude))
+            if choice == "cancel":
+                return
+            if choice == "without":
+                todo = [a for a in todo if a.kind != "claude_merge"]
+                with_claude = []
         if not todo:
             return
         self.apply_button.setEnabled(False)
         self._list.setEnabled(False)
         self._status.setText(f"Applying {len(todo)}…")
+        claude, stopper, progress = self._claude, self._stopper, self._progress.put
 
         def work() -> list[tuple[repo_tidy.Action, bool, str]]:
             # Each worktree removal takes its own lsof snapshot: a push before
             # it can take minutes.
-            return [(a, *repo_tidy.apply(a)) for a in todo]
+            results = []
+            for a in todo:
+                progress(f"{a.label}")
+                try:
+                    ok, message = repo_tidy.apply(a, claude=claude, progress=progress,
+                                                  stop=stopper)
+                except Exception as exc:  # noqa: BLE001 - one failure must not hide the rest
+                    ok, message = False, f"failed — {type(exc).__name__}: {exc}"
+                progress(f"  → {'done' if ok else 'not done'}: {message}")
+                results.append((a, ok, message))
+            return results
 
         self.close_button.setEnabled(False)
+        if with_claude:
+            self.stop_button.show()
+        self._skipped_label.setText("Progress:")
+        self._skipped.clear()
+        self._skipped.setMaximumHeight(16777215)
         self._applying = True
+        self._drain.start()
         self._bg.run(work, self._applied)
+
+    def _show_progress(self) -> None:
+        while True:
+            try:
+                line = self._progress.get_nowait()
+            except queue.Empty:
+                return
+            self._skipped.appendPlainText(line)
+
+    def _stop(self) -> None:
+        self.stop_button.setEnabled(False)
+        self._status.setText("Stopping — the running step is ended and the rest skipped. "
+                             "Branches already landed stay landed; the next Resolve pushes them.")
+        self._stopper.stop()
 
     def _applied(self, results, exc) -> None:
         self._applying = False
+        self._drain.stop()
+        self._show_progress()
+        self.stop_button.hide()
         self.close_button.setEnabled(True)
         if results is None:
             self._status.setText(f"Stopped: {exc}")
@@ -184,6 +269,7 @@ class CleanupDialog(QDialog):
         super().reject()
 
     def done(self, result: int) -> None:  # noqa: D401 - Qt override
+        self._drain.stop()
         self._bg.shutdown()
         super().done(result)
 

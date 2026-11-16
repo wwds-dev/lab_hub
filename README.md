@@ -301,6 +301,21 @@ The report has two buttons for acting on it (`docs/specs/repo-tidy.md`):
   agent worktree under `.claude/worktrees/` used in the last 24 hours is left
   alone, and the window says why. Every action is checked again just before it
   runs; a diverged or dirty repo is never synced, and nothing is force-pushed.
+  A branch that *conflicts* with the default branch (and passes the same
+  guards) becomes a **Resolve conflicts with Claude** row naming the test
+  command Lab Hub will run. After one more confirmation (model, cost cap of
+  $3 per branch), Lab Hub merges it in a temporary worktree under its support
+  folder and runs Claude Code headless there with file tools only (no shell,
+  web, MCP, hooks or CLAUDE.md) to resolve the conflicted files. Lab Hub then
+  checks that nothing else changed and no markers are left, commits, runs the
+  repo's tests itself (once more after a single Claude fix round if they
+  fail), and fast-forwards and pushes the default branch only when they pass
+  and neither tip moved. Progress, cost and turns stream into the window;
+  **Stop** ends the run. Anything that fails leaves the branch untouched.
+  The test command comes from the `Run tests` line of the repo's
+  `docs/foundry/app-context.md` (shell syntax is never run), else common
+  defaults; with none, the branch stays for a person. Claude Code must be
+  signed in once (`claude auth login`). Spec §11; `lab_hub/claude_resolve.py`.
 - **Review branches…** lists every branch with work not yet in the default
   branch (commits ahead, last date and subject, worktree). Per branch: **Open in
   Terminal**, **Delete branch…** (confirms with its commits; off while it is

@@ -4,11 +4,21 @@ from __future__ import annotations
 
 import time
 
+import pytest
+
 from PySide6.QtCore import Qt
 
 from lab_hub import repo_tidy
 
 from .test_repo_tidy import OLD, commit, lab, sh, squash_land  # noqa: F401 (fixture)
+
+
+@pytest.fixture(autouse=True)
+def no_real_claude(monkeypatch):
+    """Never start the real Claude Code from a window test."""
+    from lab_hub import claude_resolve
+
+    monkeypatch.setattr(claude_resolve, "availability", lambda: (None, "Claude Code not found"))
 
 
 def _pump_until(predicate, timeout_s=20.0):
@@ -157,4 +167,63 @@ def test_review_remove_worktree_warns_about_a_recent_agent_worktree(qapp, lab, m
     assert _pump_until(lambda: not wt.exists() and dialog.changed)
     assert "agent session may still be working" in asked[0][2]
     assert "wip" in repo_tidy.local_branches(lab)
+    dialog.reject()
+
+
+def test_claude_rows_need_a_confirmation_and_stream_progress(qapp, tmp_path, monkeypatch, lab):
+    from lab_hub import claude_resolve
+    from ui.repo_tidy_dialogs import CleanupDialog
+
+    from .test_claude_resolve import conflict as make_conflict  # noqa: F401
+    from .test_claude_resolve import stub as make_stub  # noqa: F401
+
+    repo = make_conflict.__wrapped__(lab)
+    stub = make_stub.__wrapped__(tmp_path, monkeypatch)
+    monkeypatch.setattr(claude_resolve, "availability", lambda: (str(stub), ""))
+    monkeypatch.setattr(repo_tidy, "log_path", lambda: tmp_path / "tidy.log")
+    monkeypatch.setattr(repo_tidy.time, "time", lambda: OLD)
+    asked: list[int] = []
+
+    dialog = CleanupDialog([("repo", repo)])
+    assert _pump_until(lambda: dialog._list.count() > 0)
+    assert any("Resolve conflicts with Claude" in dialog._list.item(i).text()
+               for i in range(dialog._list.count()))
+
+    dialog.confirm_claude = lambda n: asked.append(n) or "cancel"
+    dialog.apply_button.click()
+    assert asked == [1] and dialog.apply_button.isEnabled()  # cancelled: nothing ran
+    assert "feat" in repo_tidy.local_branches(repo)
+
+    dialog.confirm_claude = lambda n: asked.append(n) or "all"
+    dialog.apply_button.click()
+    assert _pump_until(lambda: dialog.apply_button.isHidden(), 60)
+    progress = dialog._skipped.toPlainText()
+    assert "Claude: Edit c.txt" in progress and "landed" in progress
+    assert "feat" not in repo_tidy.local_branches(repo)
+    assert dialog.stop_button.isHidden()
+    dialog.reject()
+
+
+def test_apply_without_claude_leaves_the_conflict(qapp, tmp_path, monkeypatch, lab):
+    from lab_hub import claude_resolve
+    from ui.repo_tidy_dialogs import CleanupDialog
+
+    from .test_claude_resolve import conflict as make_conflict  # noqa: F401
+    from .test_claude_resolve import stub as make_stub  # noqa: F401
+
+    repo = make_conflict.__wrapped__(lab)
+    stub = make_stub.__wrapped__(tmp_path, monkeypatch)
+    monkeypatch.setattr(claude_resolve, "availability", lambda: (str(stub), ""))
+    monkeypatch.setattr(repo_tidy, "log_path", lambda: tmp_path / "tidy.log")
+    monkeypatch.setattr(repo_tidy.time, "time", lambda: OLD)
+    main0 = repo_tidy.tip(repo, "main")
+
+    dialog = CleanupDialog([("repo", repo)])
+    assert _pump_until(lambda: dialog._list.count() > 0)
+    dialog.confirm_claude = lambda n: "without"
+    dialog.apply_button.click()
+    assert _pump_until(lambda: dialog.apply_button.isHidden(), 30)
+    assert "feat" in repo_tidy.local_branches(repo)
+    assert repo_tidy.tip(repo, "main") == main0
+    assert not (tmp_path / "calls").exists() or '"-p"' not in (tmp_path / "calls").read_text()
     dialog.reject()
