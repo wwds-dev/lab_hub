@@ -200,3 +200,87 @@ def test_plain_reason(message, expected):
 
 def test_plain_reason_is_cut_to_one_tile_line():
     assert len(land.plain_reason("x" * 1000)) <= land.MAX_REASON
+
+
+# ---------------------------------------------------------------- step events
+# Spec `progress-windows` §8.3: structured start/end events beside the text lines.
+def _counter():
+    ticks = iter(range(100, 10_000, 10))
+    return lambda: float(next(ticks))
+
+
+def test_step_events_come_in_start_end_pairs_in_plan_order(lab, tmp_path, monkeypatch):
+    make_branch(lab, "feat", "f.txt")
+    squash_land(lab, "old", "o.txt")
+    plan = plan_for(lab)
+    real = repo_tidy.apply
+
+    def apply(action, *a, **kw):
+        if action.kind == "merge":
+            return False, "failed — remote said no"
+        if action.kind == "delete_branch":
+            return False, "skipped — its changes are no longer all in main"
+        return real(action, *a, **kw)
+
+    monkeypatch.setattr(repo_tidy, "apply", apply)
+    events = []
+    run(plan, tmp_path, events=events.append, clock=_counter())
+
+    kinds = [a.kind for a in plan.actions]
+    assert [e.phase for e in events] == ["start", "end"] * len(kinds)
+    assert [e.kind for e in events[::2]] == kinds
+    assert [e.index for e in events[::2]] == list(range(len(kinds)))
+    assert {e.count for e in events} == {len(kinds)}
+    assert {e.repo for e in events} == {"repo"}
+    for start, end in zip(events[::2], events[1::2]):
+        assert end.started == start.at and end.at == start.at + 10
+        assert start.label == end.label != ""
+        assert start.outcome == ""
+    outcomes = {e.kind: e.outcome for e in events[1::2]}
+    assert outcomes["merge"] == "failed"
+    assert outcomes["delete_branch"] == "skipped"
+    assert outcomes["push"] == "done"
+
+
+@pytest.mark.parametrize("ok, message, outcome", [
+    (True, "merged", "done"),
+    (True, "skipped — ignored when ok", "done"),
+    (False, "skipped — stopped", "skipped"),
+    (False, "  Skipped — guard", "skipped"),
+    (False, "failed — no", "failed"),
+    (False, "not landed — tests fail", "failed"),
+    (False, "not landed — stopped", "skipped"),  # Stop during a Claude Code merge
+    (False, "not landed — stopped early by a guard", "failed"),
+    (False, "", "failed"),
+])
+def test_step_outcome(ok, message, outcome):
+    assert land.step_outcome(ok, message) == outcome
+
+
+def test_an_events_callback_that_raises_changes_nothing(lab, tmp_path):
+    make_branch(lab, "feat", "f.txt")
+    loud_lines = []
+
+    def boom(_event):
+        raise RuntimeError("window broke")
+
+    result = run(plan_for(lab), tmp_path, progress=loud_lines.append, events=boom)
+    assert result.state == "landed"
+    assert loud_lines and any("done" in line for line in loud_lines)
+
+
+def test_no_events_gives_the_same_lines_as_with_events(lab, tmp_path, monkeypatch):
+    """The text lines (and so the tiles) are the same with or without a window."""
+    make_branch(lab, "feat", "f.txt")
+    plan = plan_for(lab)
+    monkeypatch.setattr(repo_tidy, "apply", lambda action, *a, **k: (True, f"did {action.kind}"))
+    without, with_events, events = [], [], []
+    assert run(plan, tmp_path, progress=without.append) == run(
+        plan, tmp_path, progress=with_events.append, events=events.append)
+    assert without == with_events and events
+
+
+def test_nothing_to_land_sends_no_events(lab, tmp_path):
+    events = []
+    run(plan_for(lab), tmp_path, events=events.append)
+    assert events == []

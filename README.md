@@ -273,6 +273,16 @@ reports `behind` (commits since the build), `uncommitted` (edits the commit
 count cannot see — it only moves on commit, so a bundle built from the last
 commit looks level while the source has since been edited), `unknown` (installed
 but carrying no stamp), and names the build script for anything out of date.
+The answer opens in the **Check builds window** (it replaced the message box
+that listed `[ok]`/`[OLD]` lines), modal as the box was. A strip at the top
+shows where it is: Check, Review, Update, Done. Review has one row per app that
+needs a look, its verdict in words (out of date and why, needs Terminal,
+cannot check, not installed, needs you), and the apps that are up to
+date on one line under the rows. The buttons are the box's, shown under the
+same conditions and doing the same things: Update now, Copy commands, Copy and
+open Terminal, Open in Terminal, and Close (Escape and the red button close it
+too). Spec `docs/specs/progress-windows.md`; `ui/progress_window.py`,
+`lab_hub/progress.py`.
 
 **Land** answers the neighbouring question, and acts on it: has the work
 *landed*? Each app tile carries an amber "N to land" badge when its repo has
@@ -296,11 +306,54 @@ run: the tests don't pass on master itself: ImportError: cannot import name
 need your decision — review", which opens **Review branches…** for that repo.
 **Land all (N)** on the launchpad does the same for every flagged repo, with one
 confirmation listing one sentence per repo; a repo that fails is reported and
-the rest carry on, and a summary ends the run. **Stop landing** ends a running
+the rest carry on. **Stop landing** ends a running
 Claude Code or test step and skips the rest; work already landed stays landed.
 Only one Land runs at a time per page, and a repo is claimed while it lands, so
 the same repo can never be landed twice at once. `lab_hub/land.py`,
 `ui/lander.py`, `tests/test_land.py`, `tests/test_land_ui.py`.
+
+After the confirmation, Land and Land all open the **Land window**, which shows
+the run as it happens (spec `docs/specs/progress-windows.md`). At the top: a
+progress bar and percent (steps finished out of steps planned), time elapsed,
+time left with a "done around HH:MM" clock, and counts of repos landed, running,
+waiting and needing you. Each repo has a row with a four-part track (Commit,
+Merge and test, Push, Tidy). The repo being landed opens into its list of
+steps, with the running step's own timer and a "Then: …" line for what comes
+next; a repo that did not land says why under its name. **Live output**, folded
+away until you open it, holds what Land printed (the last 5000 lines), as
+plain text. The
+window is not modal: you can go on using Lab Hub, and closing it (or **Hide**)
+only hides it. Landing goes on, the tiles keep their line, and **Show
+progress** beside Stop landing on the page brings the window back while the
+Land runs. The window's own **Stop landing** does the same as the page's. At
+the end it states the outcome in one line and keeps the rows. For Land all
+over more than one repo that line is the summary that used to be a separate box ("Landed N of M
+repos.", then one line per repo that did not land), and a hidden window comes
+back to show it. A single tile's Land with nothing to do asks nothing and opens
+no window, as before.
+
+Both progress windows show that they are working, not frozen: while work
+runs, three dots move, the running row has a spinner, and a line reads "Last
+activity Ns ago", counting from the last output line or step. After 60 s with
+no output it turns amber and reads "No output for 1:00. Still running." It
+never claims that something froze. Time left comes from how long the same steps
+took before. Until every step still to come has a recorded time for that repo
+or app, the window shows the elapsed time and "Estimating…" instead of a
+guess. Time left reads "~N min" above a minute and "~N s" below; a step that
+runs past its usual time says "Taking longer than usual", never a negative
+number.
+
+Those times are kept in `~/Library/Application Support/Lab Hub/durations.json`:
+for each repo and each app, the last five durations of each kind of step (the
+Land steps; build, package, install, verify and the whole rebuild for an app).
+The estimate is their median (the middle value). Only a step that succeeded is
+recorded; a failed, skipped, stopped or cancelled one is not. The file holds
+repo and app names and seconds, nothing else. Deleting it only resets the
+estimates: the windows say "Estimating…" again until steps have run. A broken,
+unreadable or oversized file (over 256 KiB) is ignored the same way, never a
+crash, and the next good save replaces it. `lab_hub/durations.py`,
+`lab_hub/progress.py`, `ui/progress_window.py`, `tests/test_durations.py`,
+`tests/test_progress.py`, `tests/test_progress_window.py`.
 
 What Land is allowed to do is `lab_hub/repo_tidy.py`'s guarded set, unchanged
 (`docs/specs/repo-tidy.md`): merge branches that merge into the default branch
@@ -362,10 +415,27 @@ it. `lab_hub/repo_tidy.py`, `ui/repo_tidy_dialogs.py`,
 A launcher bundle is never out of date, and being dirty does not change that:
 it runs the source, so uncommitted edits are exactly what opens.
 
-**Update now** runs the rebuilds it can run itself, with a live log and a Cancel
-button. An installer that refuses to run without a terminal (Provisio's asks you
-to type `install`) is not run in the app: after the in-app rebuilds succeed,
-Update now opens one Terminal window per such app with its install command
+**Update now** runs the rebuilds it can run itself, one after another, in the
+same Check builds window, which moves to its Update step. The header has the
+Land window's bar, times and working signal (above). The app being rebuilt
+opens into its stages, Build, Package, Install and Verify, recognised from the
+build script's own output lines; an app whose output matches none of them
+shows one "Rebuilding" stage instead. Verify is Lab Hub reading the installed
+version afterwards, and the row says which version that is; it is for
+information and never turns a successful rebuild into a failure. **Live
+output** holds the build log and opens by itself when a rebuild fails. A failed
+rebuild stops the run. On this step Copy commands copies without closing the
+window. **Cancel** stops the whole run: the running build and everything its
+script started (PyInstaller, the copy into `/Applications`) are stopped, no
+later rebuild starts, and the window stays open at Done with the rows readable
+and Cancel turned into Close. Escape or closing the window during a rebuild
+stops it the same way and closes the window. (Before, Escape hid the rebuild
+window without stopping anything: the build went on unwatched and the next one
+started anyway.) `ui/rebuild.py` runs the commands; `tests/test_apps_tab.py`.
+
+An installer that refuses to run without a terminal (Provisio's asks you
+to type `install`) is not run in the app: after the in-app rebuilds succeed and
+you close the window, Update now opens one Terminal window per such app with its install command
 already started, and you confirm there. Lab Hub types nothing into Terminal and
 needs no Apple Events grant: each command is written alone to a `.command` file
 (mode 0700, in `~/Library/Application Support/Lab Hub/terminal-runs/`, replaced
@@ -820,7 +890,7 @@ suppressed.
     AGENTS.md            the engineering process agents follow here
     docs/foundry/        app-context.md (skeleton) and tooling/ templates
     docs/playbooks/      one practice file per agent role
-    docs/specs/, adr/, audit/   empty so far
+    docs/specs/, adr/, audit/   specs, decision records, review and audit reports
 
 The tools take a `Reporter` rather than printing, which is what lets the same
 function back both the GUI and a shell call. `ui/worker.py` supplies a Reporter
@@ -846,7 +916,7 @@ signature and loses everything on reinstall — settings go to
 
 ## Tests
 
-`python -m pytest` — offscreen, no display needed, about a second.
+`python -m pytest` — offscreen, no display needed, about five minutes.
 
 The weight is on the window lifecycle, because that is where this app has
 actually broken: the red button once quit instead of hiding, and the fix for

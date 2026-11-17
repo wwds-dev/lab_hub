@@ -3,27 +3,24 @@
 from __future__ import annotations
 
 import html
-import os
 import time
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QProcess, QProcessEnvironment, Qt, QTimer, Signal
+from PySide6.QtCore import QProcess, QProcessEnvironment, Qt, Signal
 from PySide6.QtWidgets import (
     QApplication,
-    QDialog,
-    QHBoxLayout,
     QLabel,
     QMessageBox,
-    QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
-    QWidget,
 )
 
-from lab_hub import config, hygiene, land, launcher
+from lab_hub import config, hygiene, land, launcher, progress
 
 from . import theme
+from .progress_window import BuildCheckWindow, LandWindow
+from .rebuild import Rebuild
 from .tiles import (  # noqa: F401 - the layout constants are re-exported
     GRID_MAX_WIDTH,
     POLL_MS,
@@ -571,135 +568,6 @@ LAUNCHPAD_INTRO = (
 )
 
 
-class RebuildDialog(QDialog):
-    """Run the rebuild commands in-app, one after another, showing their output.
-
-    The build report used to only *hand over* the commands, on the reasoning
-    that a rebuild takes minutes and you want somewhere to watch it and stop it.
-    This keeps both of those — a live log and a Cancel button that kills the
-    running build — without leaving Lab Hub, which is the whole point of a
-    button that says "Update now". The Terminal handoff stays for anyone who
-    would rather drive it themselves.
-
-    Each command is its own `cd … && ./build_app.sh`, so they are independent;
-    one that fails stops the run rather than rebuilding on top of a broken
-    build. They run through a login shell (`$SHELL -lc`) because that is the
-    environment the Terminal handoff always assumed — the build scripts reach
-    for `pyinstaller`, `uv` and friends that a bundle's bare PATH would miss —
-    and with `child_env()` so a rebuild is not poisoned by our own Qt runtime,
-    exactly as a real launch is.
-    """
-
-    def __init__(self, commands: list[str], parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Update apps")
-        self._commands = list(commands)
-        self._index = 0
-        self._cancelled = False
-        self._failed = False
-
-        layout = QVBoxLayout(self)
-        self._status = QLabel()
-        layout.addWidget(self._status)
-        self._log = QPlainTextEdit()
-        self._log.setReadOnly(True)
-        self._log.setMinimumSize(560, 320)
-        self._log.setObjectName("hint")
-        layout.addWidget(self._log)
-        self._button = QPushButton("Cancel")
-        self._button.clicked.connect(self._on_button)
-        row = QHBoxLayout()
-        row.addStretch(1)
-        row.addWidget(self._button)
-        layout.addLayout(row)
-
-        self._proc = QProcess(self)
-        env = QProcessEnvironment()
-        for name, value in launcher.child_env().items():
-            env.insert(name, value)
-        self._proc.setProcessEnvironment(env)
-        self._proc.setProcessChannelMode(
-            QProcess.ProcessChannelMode.MergedChannels
-        )
-        self._proc.readyReadStandardOutput.connect(self._read)
-        self._proc.finished.connect(self._finished)
-
-        # Start once the dialog is actually on screen, so the first line of
-        # output has somewhere to land.
-        QTimer.singleShot(0, self._start_next)
-
-    @property
-    def succeeded(self) -> bool:
-        return not self._cancelled and not self._failed and self._index >= len(
-            self._commands
-        )
-
-    def _shell(self) -> str:
-        return os.environ.get("SHELL", "/bin/zsh")
-
-    def _start_next(self) -> None:
-        if self._cancelled or self._index >= len(self._commands):
-            self._all_done()
-            return
-        command = self._commands[self._index]
-        self._append(f"$ {command}\n")
-        self._status.setText(
-            f"Rebuilding {self._index + 1} of {len(self._commands)}… "
-            "this takes a few minutes."
-        )
-        self._proc.start(self._shell(), ["-lc", command])
-
-    def _read(self) -> None:
-        chunk = bytes(self._proc.readAllStandardOutput()).decode(errors="replace")
-        self._append(chunk)
-
-    def _append(self, text: str) -> None:
-        self._log.moveCursor(self._log.textCursor().MoveOperation.End)
-        self._log.insertPlainText(text)
-        bar = self._log.verticalScrollBar()
-        bar.setValue(bar.maximum())
-
-    def _finished(self, code: int, _status: object) -> None:
-        if self._cancelled:
-            self._all_done()
-            return
-        if code != 0:
-            self._failed = True
-            self._append(f"\n[stopped — a rebuild exited with code {code}]\n")
-            self._all_done()
-            return
-        self._index += 1
-        self._start_next()
-
-    def _on_button(self) -> None:
-        # One button, two jobs: it cancels a running build and closes a
-        # finished one. There is never a moment where both apply.
-        if self._proc.state() != QProcess.ProcessState.NotRunning:
-            self._cancelled = True
-            self._append("\n[cancelled — the running build was stopped]\n")
-            self._proc.kill()
-        else:
-            self.accept()
-
-    def _all_done(self) -> None:
-        if self._cancelled:
-            self._status.setText("Cancelled. Some apps may still be out of date.")
-        elif self._failed:
-            self._status.setText("A rebuild failed — see the log above.")
-        else:
-            self._status.setText("Done. Every app was rebuilt and reinstalled.")
-        self._button.setText("Close")
-
-    def closeEvent(self, event: object) -> None:  # noqa: N802 (Qt override)
-        # Closing the window mid-build must not leave a detached rebuild
-        # running with nothing watching it.
-        if self._proc.state() != QProcess.ProcessState.NotRunning:
-            self._cancelled = True
-            self._proc.kill()
-            self._proc.waitForFinished(3000)
-        super().closeEvent(event)
-
-
 # Which apps a page shows: a fixed tuple, or a callable read again on every
 # Refresh — `lambda: launcher.SUITES` — so an app added to apps.toml gets its
 # tile without a restart.
@@ -734,11 +602,20 @@ class AppsTab(TilePage):
         self.lander = Lander(self)
         self.lander.planned.connect(self._land_planned)
         self.lander.progress.connect(self._land_progress)
+        self.lander.step.connect(self._land_step)
         self.lander.repo_done.connect(self._land_repo_done)
         self.lander.finished.connect(self._land_finished)
         # Cards Land was asked on, by repo name, held from the click: a hygiene
         # refresh or a rebuilt tile mid-Land must not lose the outcome.
         self._landing_cards: dict[str, AppCard] = {}
+        # The Land window (spec progress-windows): opened after the
+        # confirmation, fed from the same signals as the tiles. Closing it
+        # only hides it; Show progress brings it back while Land runs.
+        self.land_window: LandWindow | None = None
+        # True while the running Land is the one `land_window` shows. A later
+        # Land that opens no window (one repo, nothing to do) must not feed
+        # the finished window of an earlier run.
+        self._land_window_owns_run = False
         self._recheck_after = False
         app = QApplication.instance()
         if app is not None:
@@ -817,6 +694,11 @@ class AppsTab(TilePage):
         )
         self.stop_land_button.clicked.connect(self.lander.stop)
         self.stop_land_button.hide()
+        self.show_land_button = QPushButton("Show progress")
+        self.show_land_button.setToolTip("Show the Land window again")
+        self.show_land_button.clicked.connect(self.show_land_window)
+        self.show_land_button.hide()
+        self.buttons.addWidget(self.show_land_button)
         self.buttons.addWidget(self.stop_land_button)
         self.finish()
 
@@ -871,132 +753,37 @@ class AppsTab(TilePage):
         root = self.settings.resolved_lab_root()
         report = (launcher.build_report(root) if self._build_apps is None
                   else launcher.build_report(root, self._build_apps))
-        behind = [row for row in report if row.needs_rebuild]
-        unknown = [row for row in report if row.verdict == "unknown"]
+        # The words and commands are computed as the message box had them
+        # (spec progress-windows §8.7); the window shows them as rows and
+        # offers exactly the box's buttons, under the same conditions.
+        view = progress.build_check_view(report, scoped=self._build_apps is not None)
+        commands, by_hand, forward = (list(view.commands), list(view.by_hand),
+                                      list(view.forward))
+        folders = list(view.folders)
+        window = BuildCheckWindow(view, root, self)
+        window.copy_requested.connect(self.copy_commands)
+        try:
+            window.ask()
+            clicked = window.choice
+            if clicked in ("Copy commands", "Copy and open Terminal"):
+                self.copy_commands(commands + by_hand + forward)
+            if clicked == "Copy and open Terminal":
+                # The commands each begin with their own `cd`, so where the window
+                # opens does not change what they do — it only has to be somewhere
+                # sensible to land.
+                launcher.open_terminal(self.settings.resolved_lab_root())
+            if clicked == "Open in Terminal":
+                for folder in folders:
+                    launcher.open_terminal(folder)
+            if clicked == "Update now":
+                self.run_updates(commands, by_hand, window=window)
+        finally:
+            if window.isVisible():
+                window.done(0)
+            window.deleteLater()
 
-        if behind and len(report) == 1:
-            headline = (
-                f"{report[0].app.name} would open something older than its source."
-            )
-        elif behind:
-            headline = (
-                f"{len(behind)} of {len(report)} apps would open something older "
-                "than their source."
-            )
-        elif unknown:
-            headline = (
-                f"Nothing is out of date, but {len(unknown)} could not be checked."
-            )
-        elif self._build_apps is None:
-            headline = "Every app is the newest build of itself."
-        elif len(report) == 1:
-            headline = f"{report[0].app.name} is the newest build of itself."
-        else:
-            # A scoped report cannot speak for apps it never looked at.
-            headline = f"All {len(report)} apps are the newest build of themselves."
-
-        lines = []
-        for row in report:
-            mark = {"current": "ok", "behind": "OLD", "uncommitted": "OLD",
-                    "unknown": "??", "missing": "--"}[row.verdict]
-            version = row.version.text or "no version"
-            lines.append(f"[{mark}] {row.app.name} — {version}\n      {row.note}")
-
-        # Update now runs only what can run without a terminal. An installer
-        # that refuses one (Provisio's) is listed for the owner to run, and an
-        # app with no known build script is named rather than dropped.
-        commands = [row.command for row in behind if row.runs_in_app]
-        by_hand = [row.command for row in behind if row.by_hand and row.command]
-        forward = [row.command for row in behind if row.forward and row.command]
-        no_command = [row for row in behind if not row.command]
-        if commands:
-            lines.append("")
-            lines.append("Update now runs:")
-            lines.extend(f"  {command}" for command in commands)
-        if by_hand:
-            names = ", ".join(row.app.name for row in behind
-                              if row.by_hand and row.command)
-            after = " after the rebuilds above succeed" if commands else ""
-            lines.append("")
-            lines.append(
-                f"Update now opens Terminal for {names}{after} and starts the "
-                "installer there. Each one asks you to confirm in its window "
-                "(Provisio's asks you to type install); Lab Hub types nothing:"
-            )
-            lines.extend(f"  {command}" for command in by_hand)
-        if forward:
-            names = ", ".join(row.app.name for row in behind if row.forward)
-            lines.append("")
-            lines.append(
-                f"Move the release clone first for {names} (its installer "
-                "would only rebuild the old clone). Lab Hub runs nothing there; "
-                "run it yourself after the runbook's CI and legal checks, then "
-                "do its dependency and selftest steps:"
-            )
-            lines.extend(f"  {command}" for command in forward)
-        if no_command:
-            lines.append("")
-            lines.append(
-                f"No rebuild command for: {', '.join(r.app.name for r in no_command)}. "
-                "Open in Terminal opens its folder; build it there by its own steps."
-            )
-            lines.extend(f"  {r.app.name}: {r.guide}" for r in no_command if r.guide)
-
-        box = QMessageBox(self)
-        box.setWindowTitle("Build check")
-        box.setText(headline)
-        box.setInformativeText("\n".join(lines))
-        box.setIcon(
-            QMessageBox.Icon.Warning if behind else QMessageBox.Icon.Information
-        )
-        # Update now runs the rebuilds here; the two copy buttons still hand the
-        # commands off for anyone who would rather drive them in a terminal. A
-        # rebuild replaces an installed app and takes minutes — the difference
-        # the buttons make is between "there is a command" and "it is running".
-        update = copy = terminal = None
-        if commands or by_hand:
-            update = box.addButton(
-                "Update now", QMessageBox.ButtonRole.AcceptRole
-            )
-        if commands or by_hand or forward:
-            copy = box.addButton("Copy commands", QMessageBox.ButtonRole.ActionRole)
-        # A report with only a release-clone move to show opens no Terminal:
-        # the owner chose show-and-copy for it (spec release-root-behind §5.1).
-        if commands or by_hand:
-            terminal = box.addButton(
-                "Copy and open Terminal", QMessageBox.ButtonRole.ActionRole
-            )
-        # An app Lab Hub cannot rebuild still gets a way forward: its folder in
-        # Terminal, where its own build guide applies.
-        folders = [r.project for r in no_command if r.project is not None]
-        open_folder = None
-        if folders:
-            open_folder = box.addButton("Open in Terminal",
-                                        QMessageBox.ButtonRole.ActionRole)
-            open_folder.setToolTip("Open a Terminal window in the project folder of "
-                                   + ", ".join(r.app.name for r in no_command))
-        # A QMessageBox whose only buttons are ActionRole has nothing to map the
-        # red close button or Escape onto, so both become dead and the dialog
-        # cannot be dismissed at all. Give it an explicit way out.
-        close = box.addButton("Close", QMessageBox.ButtonRole.RejectRole)
-        box.setEscapeButton(close)
-        box.setDefaultButton(update or close)
-        box.exec()
-        clicked = box.clickedButton()
-        if clicked is not None and clicked in (copy, terminal):
-            self.copy_commands(commands + by_hand + forward)
-        if terminal is not None and clicked is terminal:
-            # The commands each begin with their own `cd`, so where the window
-            # opens does not change what they do — it only has to be somewhere
-            # sensible to land.
-            launcher.open_terminal(self.settings.resolved_lab_root())
-        if open_folder is not None and clicked is open_folder:
-            for folder in folders:
-                launcher.open_terminal(folder)
-        if update is not None and clicked is update:
-            self.run_updates(commands, by_hand)
-
-    def run_updates(self, commands: list[str], by_hand: list[str] | None = None) -> None:
+    def run_updates(self, commands: list[str], by_hand: list[str] | None = None,
+                    window: BuildCheckWindow | None = None) -> None:
         """Rebuild and reinstall the out-of-date apps without leaving Lab Hub,
         then hand the installers that need a terminal to Terminal.
 
@@ -1008,6 +795,7 @@ class AppsTab(TilePage):
         watched; Refresh shows the result once the owner has answered there.
         The Terminal commands are checked before the first rebuild starts, and a
         Terminal step that fails is shown to the owner rather than lost.
+        The rebuilds run in the Check builds window's Update step.
         """
         by_hand = list(by_hand or [])
         try:
@@ -1018,8 +806,18 @@ class AppsTab(TilePage):
             return
         said = []
         if commands:
-            dialog = RebuildDialog(commands, self)
-            dialog.exec()
+            created = window is None
+            if created:
+                window = BuildCheckWindow(
+                    progress.build_check_view((), scoped=True),
+                    self.settings.resolved_lab_root(), self)
+                window.show()
+            try:
+                dialog = Rebuild(commands, window)
+                dialog.exec()
+            finally:
+                if created:  # show_build_report deletes the window it passed in
+                    window.deleteLater()
             self.recheck()
             if not dialog.succeeded:
                 if by_hand:
@@ -1032,6 +830,8 @@ class AppsTab(TilePage):
                 f"Rebuilt and reinstalled {len(commands)} app"
                 f"{'' if len(commands) == 1 else 's'}."
             )
+        elif window is not None and window.isVisible():
+            window.done(0)  # nothing to watch here: the installers run in Terminal
         if by_hand:
             try:
                 launcher.run_in_terminal(by_hand)
@@ -1140,6 +940,7 @@ class AppsTab(TilePage):
             self.land_all_button.setText(f"Land all ({n})" if n else "Land all")
             self.land_all_button.setEnabled(bool(n) and not busy)
         self.stop_land_button.setVisible(self.lander.running)
+        self.show_land_button.setVisible(self.lander.running and self._run_window() is not None)
         for card in self.cards:
             card.set_land_enabled(not busy)
 
@@ -1206,37 +1007,75 @@ class AppsTab(TilePage):
             self._landing_cards.clear()
             self._update_land_controls()
             return
-        self.lander.run(plans)
+        # The window opens after the confirmation. A single repo with nothing
+        # to do (no confirmation either) says so on its tile alone, as before;
+        # Land all always gets the window, whose end state is its summary.
+        self._land_window_owns_run = False
+        if self.lander.run(plans) and (len(plans) > 1 or any(p.actions for p in plans)):
+            self._open_land_window(plans)
         self._update_land_controls()
+
+    def _open_land_window(self, plans) -> None:
+        old, self.land_window = self.land_window, LandWindow(self)
+        self.land_window.stop_requested.connect(self.lander.stop)
+        if old is not None:
+            old.hide()
+            old.deleteLater()
+        self._land_window_owns_run = True
+        self.land_window.start(plans)
+
+    def _run_window(self) -> LandWindow | None:
+        """The Land window, if it shows the Land now running; else None."""
+        return self.land_window if self._land_window_owns_run else None
+
+    def show_land_window(self) -> None:
+        """Show progress: bring the hidden Land window back."""
+        if self.land_window is not None:
+            self.land_window.show()
+            self.land_window.raise_()
+            self.land_window.activateWindow()
 
     def _land_progress(self, name: str, line: str) -> None:
         card = self._card_for(name)
         if card is not None:
             card.set_landing(line.strip())
+        if (window := self._run_window()) is not None:
+            window.on_progress(name, line)
+
+    def _land_step(self, event) -> None:
+        if (window := self._run_window()) is not None:
+            window.on_step(event)
 
     def _land_repo_done(self, name: str, result) -> None:
         card = self._card_for(name)
         if card is not None:
             card.show_outcome(result)
+        if (window := self._run_window()) is not None:
+            window.on_repo_done(name, result)
 
     def _land_finished(self, results) -> None:
         self._landing_cards.clear()
         self._update_land_controls()
         self.refresh_repos(force=True)
-        if len(results) > 1:
-            self.show_land_summary(results)
+        try:
+            if len(results) > 1:
+                self.show_land_summary(results)
+            elif (window := self._run_window()) is not None:
+                window.finish(results)
+        finally:
+            self._land_window_owns_run = False  # the next run's lines are not this window's
 
     def show_land_summary(self, results) -> None:
-        """After Land all: how many landed, and why each other one did not."""
+        """After Land all: how many landed, and why each other one did not.
+        The Land window's end state, shown again if it was hidden: it replaces
+        the box that used to say this."""
         landed = [r for r in results if r.state == "landed"]
-        lines = [f"{r.name}: {r.line}" for r in results if r.state != "landed"]
-        box = QMessageBox(self)
-        box.setWindowTitle("Land all")
-        box.setTextFormat(Qt.TextFormat.PlainText)
-        box.setIcon(QMessageBox.Icon.Warning if lines else QMessageBox.Icon.Information)
-        box.setText(f"Landed {len(landed)} of {len(results)} repos.")
-        box.setInformativeText("\n".join(lines))
-        box.exec()
+        lines = tuple(f"{r.name}: {r.line}" for r in results if r.state != "landed")
+        window = self._run_window()
+        if window is None:
+            return
+        window.finish(results, f"Landed {len(landed)} of {len(results)} repos.", lines)
+        self.show_land_window()
 
     def review_card(self, card: AppCard) -> None:
         """The branches Land left for you to decide, for this repo only."""

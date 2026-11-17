@@ -508,7 +508,7 @@ def test_the_launchpad_has_a_build_check_and_the_others_do_not(qapp, tmp_path, m
 def test_a_tools_only_tab_checks_its_own_build(qapp, tmp_path, monkeypatch):
     """A Tools-only app has no launchpad tile, so its tab carries the same
     check and Update now — asking about its own apps, never every app."""
-    from PySide6.QtWidgets import QMessageBox
+    from ui.progress_window import BuildCheckWindow
 
     from lab_hub import config
     from ui.apps_tab import AppsTab
@@ -527,7 +527,7 @@ def test_a_tools_only_tab_checks_its_own_build(qapp, tmp_path, monkeypatch):
 
     seen = {}
     monkeypatch.setattr(launcher, "build_report", report)
-    monkeypatch.setattr(QMessageBox, "exec", lambda self: seen.update(
+    monkeypatch.setattr(BuildCheckWindow, "ask", lambda self: seen.update(
         text=self.text(), labels={b.text() for b in self.buttons()}))
     tab.show_build_report()
 
@@ -546,7 +546,7 @@ def test_a_tools_only_tab_checks_its_own_build(qapp, tmp_path, monkeypatch):
 def test_a_scoped_check_never_speaks_for_every_app(qapp, tmp_path, monkeypatch):
     """Backup and Sync checks its own two apps. "Every app is the newest build"
     is the launchpad's answer, and this report has not looked at every app."""
-    from PySide6.QtWidgets import QMessageBox
+    from ui.progress_window import BuildCheckWindow
 
     from lab_hub import config
     from ui.apps_tab import AppsTab
@@ -569,7 +569,7 @@ def test_a_scoped_check_never_speaks_for_every_app(qapp, tmp_path, monkeypatch):
 
     seen = {}
     monkeypatch.setattr(launcher, "build_report", report)
-    monkeypatch.setattr(QMessageBox, "exec", lambda self: seen.update(
+    monkeypatch.setattr(BuildCheckWindow, "ask", lambda self: seen.update(
         text=self.text(), labels={b.text() for b in self.buttons()}))
     tab.show_build_report()
 
@@ -620,7 +620,7 @@ def test_the_update_button_shows_only_when_something_is_behind(
 ):
     """Nothing to rebuild, no rebuild button — the same reason the copy buttons
     only appear when there is a command to copy."""
-    from PySide6.QtWidgets import QMessageBox
+    from ui.progress_window import BuildCheckWindow
 
     from lab_hub import config
     from ui.apps_tab import AppsTab
@@ -634,7 +634,7 @@ def test_the_update_button_shows_only_when_something_is_behind(
     def capture(box):
         seen["labels"] = {b.text() for b in box.buttons()}
 
-    monkeypatch.setattr(QMessageBox, "exec", lambda self: capture(self))
+    monkeypatch.setattr(BuildCheckWindow, "ask", lambda self: capture(self))
 
     # A checkout that is level with its source: no command, so no Update now.
     monkeypatch.setattr(
@@ -667,7 +667,7 @@ def test_the_update_button_shows_only_when_something_is_behind(
 def _by_hand_tab(qapp, monkeypatch, rows_for):
     """An AppsTab whose build report is `rows_for(apps)`; the dialog's buttons
     and text are recorded, and `press` (if given) clicks the named button."""
-    from PySide6.QtWidgets import QMessageBox
+    from ui.progress_window import BuildCheckWindow
 
     from lab_hub import config
     from ui.apps_tab import AppsTab
@@ -686,7 +686,7 @@ def _by_hand_tab(qapp, monkeypatch, rows_for):
             if b.text() == seen.get("press"):
                 b.click()
 
-    monkeypatch.setattr(QMessageBox, "exec", exec_)
+    monkeypatch.setattr(BuildCheckWindow, "ask", exec_)
     return tab, seen
 
 
@@ -729,7 +729,7 @@ def test_update_now_opens_terminal_for_a_by_hand_app_and_runs_no_dialog(qapp, mo
                              by_hand=True),))
     seen["press"] = "Update now"
     ran, opened = [], []
-    monkeypatch.setattr(apps_tab, "RebuildDialog",
+    monkeypatch.setattr(apps_tab, "Rebuild",
                         lambda *a, **k: ran.append(a) or pytest.fail("no in-app run"))
     monkeypatch.setattr(launcher, "run_in_terminal",
                         lambda commands, *a, **k: opened.append(list(commands)) or [])
@@ -742,7 +742,7 @@ def test_update_now_opens_terminal_for_a_by_hand_app_and_runs_no_dialog(qapp, mo
 
 
 class _FakeRebuild:
-    """Stands in for RebuildDialog: records what it was asked to run."""
+    """Stands in for Rebuild: records what it was asked to run."""
     ok = True
     asked: list = []
 
@@ -769,7 +769,7 @@ def test_update_now_runs_the_in_app_rebuilds_then_opens_terminal(qapp, monkeypat
     tab, seen = _by_hand_tab(qapp, monkeypatch, _mixed_rows)
     seen["press"] = "Update now"
     order = []
-    monkeypatch.setattr(apps_tab, "RebuildDialog",
+    monkeypatch.setattr(apps_tab, "Rebuild",
                         lambda *a, **k: order.append("rebuild") or _FakeRebuild(*a, **k))
     monkeypatch.setattr(launcher, "run_in_terminal",
                         lambda commands, *a, **k: order.append(("terminal", list(commands))) or [])
@@ -795,7 +795,7 @@ def test_a_failed_in_app_rebuild_opens_no_terminal(qapp, monkeypatch):
     tab, seen = _by_hand_tab(qapp, monkeypatch, _mixed_rows)
     seen["press"] = "Update now"
     opened = []
-    monkeypatch.setattr(apps_tab, "RebuildDialog", _FakeRebuild)
+    monkeypatch.setattr(apps_tab, "Rebuild", _FakeRebuild)
     monkeypatch.setattr(launcher, "run_in_terminal",
                         lambda commands, *a, **k: opened.append(list(commands)) or [])
     monkeypatch.setattr(tab, "recheck", lambda: None)
@@ -842,7 +842,7 @@ def test_copy_commands_includes_the_forward_command_and_nothing_runs_it(qapp, mo
     seen["press"] = "Copy commands"
     copied, ran, opened = [], [], []
     monkeypatch.setattr(tab, "copy_commands", lambda commands: copied.append(list(commands)))
-    monkeypatch.setattr(apps_tab, "RebuildDialog", lambda *a, **k: ran.append(a))
+    monkeypatch.setattr(apps_tab, "Rebuild", lambda *a, **k: ran.append(a))
     monkeypatch.setattr(launcher, "run_in_terminal",
                         lambda commands, *a, **k: opened.append(commands) or [])
     tab.show_build_report()
@@ -863,7 +863,7 @@ def test_update_now_with_a_forward_row_runs_only_the_in_app_rebuilds(qapp, monke
                              None, "cd /q && ./build_app.sh")))
     seen["press"] = "Update now"
     opened = []
-    monkeypatch.setattr(apps_tab, "RebuildDialog", _FakeRebuild)
+    monkeypatch.setattr(apps_tab, "Rebuild", _FakeRebuild)
     monkeypatch.setattr(launcher, "run_in_terminal",
                         lambda commands, *a, **k: opened.append(commands) or [])
     monkeypatch.setattr(tab, "recheck", lambda: None)
@@ -908,7 +908,7 @@ def test_a_bad_terminal_command_stops_everything_before_any_rebuild(qapp, monkey
     warned = []
     monkeypatch.setattr(QMessageBox, "warning",
                         staticmethod(lambda parent, title, text: warned.append(text)))
-    monkeypatch.setattr(apps_tab, "RebuildDialog", _FakeRebuild)
+    monkeypatch.setattr(apps_tab, "Rebuild", _FakeRebuild)
     monkeypatch.setattr(tab, "recheck", lambda: None)
     tab.show_build_report()
 
@@ -956,7 +956,7 @@ def test_nothing_behind_means_no_update_now_and_no_terminal(qapp, monkeypatch):
 
 def test_an_app_with_no_command_gets_open_in_terminal(qapp, monkeypatch, tmp_path):
     """Nothing to run is not a dead end: its folder opens in Terminal."""
-    from PySide6.QtWidgets import QMessageBox
+    from ui.progress_window import BuildCheckWindow
 
     from lab_hub import config
     from ui.apps_tab import AppsTab
@@ -978,7 +978,7 @@ def test_an_app_with_no_command_gets_open_in_terminal(qapp, monkeypatch, tmp_pat
             if b.text() == "Open in Terminal":
                 b.click()
 
-    monkeypatch.setattr(QMessageBox, "exec", press)
+    monkeypatch.setattr(BuildCheckWindow, "ask", press)
     tab.show_build_report()
 
     assert "Update now" not in seen["labels"]
@@ -992,53 +992,432 @@ def test_an_app_with_no_command_gets_open_in_terminal(qapp, monkeypatch, tmp_pat
     shiboken6.delete(tab)
 
 
+def _rebuild_window(commands, rows=(), lab_root=None):
+    """A Check builds window at its Update step, running `commands` for real."""
+    from lab_hub import progress
+    from ui.progress_window import BuildCheckWindow
+    from ui.rebuild import Rebuild
+
+    window = BuildCheckWindow(progress.build_check_view(rows, scoped=True), lab_root)
+    rebuild = Rebuild(commands, window)
+    return window, rebuild
+
+
+def _exec_bounded(rebuild, limit_s=8.0) -> float:
+    """`rebuild.exec()`, with a watchdog so a run that never ends fails the test
+    instead of hanging the suite. Returns how long exec() took."""
+    import time as _time
+
+    from PySide6.QtCore import QTimer
+
+    hung = []
+
+    def watchdog():
+        if rebuild._loop is not None:
+            hung.append(True)
+            rebuild._loop.quit()
+
+    QTimer.singleShot(int(limit_s * 1000), watchdog)
+    start = _time.monotonic()
+    rebuild.exec()
+    took = _time.monotonic() - start
+    assert not hung, f"exec() did not return within {limit_s} s"
+    return took
+
+
 def test_the_rebuild_dialog_runs_the_commands_in_order(qapp):
     """Two commands, both succeed, both show up in the log — and `succeeded`
     reports the run as clean."""
-    from ui.apps_tab import RebuildDialog
-
-    dialog = RebuildDialog(["echo first-command", "echo second-command"])
+    dialog, rebuild = _rebuild_window(["echo first-command", "echo second-command"])
     dialog.show()
-    assert _pump_until(qapp, lambda: dialog._button.text() == "Close")
-    log = dialog._log.toPlainText()
+    assert _pump_until(qapp, lambda: dialog.cancel_button.text() == "Close")
+    log = dialog.output_text()
     assert "first-command" in log and "second-command" in log
-    assert dialog.succeeded
+    assert rebuild.succeeded
+    assert dialog.header.outcome.text() == "Done. Every app was rebuilt and reinstalled."
     dialog.close()
 
 
 def test_a_failed_rebuild_stops_the_run(qapp):
     """A command that exits non-zero halts the run rather than rebuilding on top
     of a broken build — the later command never runs."""
-    from ui.apps_tab import RebuildDialog
-
-    dialog = RebuildDialog(["false", "echo should-not-run"])
+    dialog, rebuild = _rebuild_window(["false", "echo should-not-run"])
     dialog.show()
-    assert _pump_until(qapp, lambda: dialog._button.text() == "Close")
-    log = dialog._log.toPlainText()
+    assert _pump_until(qapp, lambda: dialog.cancel_button.text() == "Close")
+    log = dialog.output_text()
     assert "should-not-run" not in log
-    assert not dialog.succeeded
+    assert not rebuild.succeeded
+    assert dialog.header.outcome.text() == "A rebuild failed — see the live output."
     dialog.close()
 
 
 def test_build_check_dialog_can_be_dismissed(qapp_or_none=None):
-    """A QMessageBox whose only buttons are ActionRole has nothing to map the
-    red close button or Escape onto — it becomes impossible to dismiss."""
-    from PySide6.QtWidgets import QApplication, QMessageBox
+    """A window whose only buttons are copy buttons still has Close, and the
+    red close button and Escape both dismiss it."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication
 
+    from lab_hub import progress
     from ui.application import LabHubApplication
+    from ui.progress_window import BuildCheckWindow
 
     app = QApplication.instance() or LabHubApplication([])
-    box = QMessageBox()
-    box.addButton("Copy commands", QMessageBox.ButtonRole.ActionRole)
-    box.addButton("Copy and open Terminal", QMessageBox.ButtonRole.ActionRole)
-    close = box.addButton("Close", QMessageBox.ButtonRole.RejectRole)
-    box.setEscapeButton(close)
+    a = launcher.ExternalApp("f", "F", "f", "main.py", "s")
+    rows = (launcher.BuildStatus(a, launcher.Version(), "behind", "older.", None,
+                                 "git -C /r merge --ff-only origin/main", forward=True),)
+    box = BuildCheckWindow(progress.build_check_view(rows, scoped=True))
+    assert {b.text() for b in box.buttons()} == {"Copy commands", "Close"}
 
     box.show()
     app.processEvents()
     assert box.close(), "dialog refused to close"
     app.processEvents()
     assert not box.isVisible()
+
+    box.show()
+    app.processEvents()
+    QTest.keyClick(box, Qt.Key.Key_Escape)
+    app.processEvents()
+    assert not box.isVisible()
+    assert box.choice is None
+
+
+def test_escape_during_a_rebuild_kills_it_and_the_next_command_never_starts(qapp, tmp_path):
+    """Regression (spec progress-windows §8.7): Escape on the old RebuildDialog
+    called reject(), which hid it without its closeEvent, so the build kept
+    running unwatched and the next command started when it ended."""
+    from PySide6.QtCore import QProcess, Qt, QTimer
+    from PySide6.QtTest import QTest
+
+    marker = tmp_path / "second-ran"
+    dialog, rebuild = _rebuild_window(["sleep 30", f"touch '{marker}'"])
+    dialog.show()
+    assert _pump_until(qapp, lambda: rebuild.running)
+    QTimer.singleShot(100, lambda: QTest.keyClick(dialog, Qt.Key.Key_Escape))
+    took = _exec_bounded(rebuild)  # returns: the run ended and the window is closed
+
+    assert took < 5, f"Escape did not kill the build: exec() took {took:.1f} s"
+    assert rebuild.ended and not rebuild.succeeded
+    assert rebuild._proc.state() == QProcess.ProcessState.NotRunning
+    assert not dialog.isVisible()
+    _pump_until(qapp, lambda: marker.exists(), timeout_ms=800)
+    assert not marker.exists()
+    assert "cancelled" in dialog.output_text()
+
+
+def test_the_close_button_during_a_rebuild_kills_it_too(qapp, tmp_path):
+    from PySide6.QtCore import QTimer
+
+    marker = tmp_path / "second-ran"
+    dialog, rebuild = _rebuild_window(["sleep 30", f"touch '{marker}'"])
+    dialog.show()
+    assert _pump_until(qapp, lambda: rebuild.running)
+    QTimer.singleShot(100, dialog.close)  # the red button
+    took = _exec_bounded(rebuild)
+    assert took < 5, f"closing did not kill the build: exec() took {took:.1f} s"
+    assert rebuild.ended and not rebuild.succeeded and not rebuild.running
+    _pump_until(qapp, lambda: marker.exists(), timeout_ms=800)
+    assert not marker.exists()
+
+
+def _x_rows(command):
+    app = launcher.ExternalApp("x", "X", "x", "main.py", "s")
+    return (launcher.BuildStatus(app, launcher.Version(), "behind", "older.", None, command),)
+
+
+def test_cancel_during_a_rebuild_stops_it_and_leaves_the_window_at_done(qapp, tmp_path):
+    """Review P2-1: Cancel closed the window, so "Cancelled", the row's reason
+    and the output were never seen. Now it stops the build at once and the
+    window stays, its button reading Close; a cancelled build records nothing."""
+    import time as _time
+
+    from lab_hub import durations
+
+    marker = tmp_path / "second-ran"
+    dialog, rebuild = _rebuild_window(["echo 'INFO: PyInstaller: 6'; sleep 30",
+                                       f"touch '{marker}'"],
+                                      _x_rows("echo 'INFO: PyInstaller: 6'; sleep 30"))
+    dialog.show()
+    assert _pump_until(qapp, lambda: rebuild.running and "PyInstaller" in dialog.output_text())
+    start = _time.monotonic()
+    dialog.cancel_button.click()
+    assert _time.monotonic() - start < 5
+    assert rebuild.ended and not rebuild.succeeded and not rebuild.running
+    assert dialog.isVisible() and dialog.cancel_button.text() == "Close"
+    dialog.draw()
+    assert dialog.header.outcome.text() == "Cancelled. Some apps may still be out of date."
+    assert [m.text() for m in dialog.steps._marks] == ["✓"] * 4
+    assert dialog.rows[0].pill.text() == "Cancelled"
+    assert dialog.rows[0].reason.text() == "The build was stopped."
+    assert "cancelled" in dialog.output_text()
+    _pump_until(qapp, lambda: marker.exists(), timeout_ms=800)
+    assert not marker.exists()
+    assert "app:x" not in durations.load()
+    dialog.cancel_button.click()  # now Close
+    assert not dialog.isVisible()
+    assert _exec_bounded(rebuild, 3) < 1
+
+
+def test_cancel_stops_what_the_build_started_not_only_the_shell(qapp, tmp_path):
+    """Review P2-4 / Secure P2-2: kill() reached only `$SHELL -lc`; a tool the
+    script started (here a `sleep`) was left running after "stopped"."""
+    import os
+    import signal
+    import time as _time
+
+    pidfile, after = tmp_path / "child.pid", tmp_path / "after"
+    script = (f"bash -c 'sleep 47 & echo $! > \"{pidfile}\"; wait; touch \"{after}\"'")
+    dialog, rebuild = _rebuild_window([script])
+    dialog.show()
+    assert _pump_until(qapp, lambda: pidfile.exists() and pidfile.read_text().strip())
+    pid = int(pidfile.read_text())
+
+    def alive():
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        return True
+
+    try:
+        assert alive()
+        start = _time.monotonic()
+        dialog.cancel_button.click()
+        assert _time.monotonic() - start < 5
+        assert rebuild.ended and not rebuild.running
+        assert _pump_until(qapp, lambda: not alive(), timeout_ms=3000), \
+            "the build's child process outlived Cancel"
+        assert not after.exists()
+    finally:
+        if alive():
+            os.kill(pid, signal.SIGKILL)
+    dialog.close()
+
+
+def test_a_command_that_cannot_start_ends_the_run_as_failed(qapp, monkeypatch):
+    """Review P1-1: with no shell to start, QProcess sent errorOccurred and never
+    finished; the run never ended, Cancel did nothing and exec() never returned."""
+    monkeypatch.setenv("SHELL", "/nonexistent/shell")
+    dialog, rebuild = _rebuild_window(["echo hi", "echo second"], _x_rows("echo hi"))
+    dialog.show()
+    assert _pump_until(qapp, lambda: rebuild.ended, timeout_ms=5000)
+    assert not rebuild.succeeded and not rebuild.running
+    assert dialog.cancel_button.text() == "Close"
+    dialog.draw()
+    assert dialog.header.outcome.text() == "A rebuild failed — see the live output."
+    assert dialog.rows[0].reason.text() == "It could not start; see the live output."
+    log = dialog.output_text()
+    assert "could not start" in log and "$ echo second" not in log
+    from PySide6.QtCore import QTimer
+
+    QTimer.singleShot(200, dialog.cancel_button.click)  # Close
+    assert _exec_bounded(rebuild, 5) < 3
+    assert not dialog.isVisible()
+
+
+def test_escape_after_a_command_could_not_start_returns(qapp, monkeypatch):
+    from PySide6.QtCore import Qt, QTimer
+    from PySide6.QtTest import QTest
+
+    monkeypatch.setenv("SHELL", "/nonexistent/shell")
+    dialog, rebuild = _rebuild_window(["echo hi"])
+    dialog.show()
+    QTimer.singleShot(400, lambda: QTest.keyClick(dialog, Qt.Key.Key_Escape))
+    assert _exec_bounded(rebuild, 5) < 3
+    assert rebuild.ended and not rebuild.succeeded and not dialog.isVisible()
+
+
+def test_escape_before_the_first_command_starts_runs_nothing(qapp, tmp_path):
+    """Review P1-1 / Secure P3-1: closing the window before the first command
+    started hid it, and then every command ran with nothing watching."""
+    first, second = tmp_path / "first", tmp_path / "second"
+    dialog, rebuild = _rebuild_window([f"touch '{first}'", f"touch '{second}'"])
+    dialog.show()
+    dialog.reject()  # before the event loop has turned once
+    assert rebuild.ended and not rebuild.succeeded and not dialog.isVisible()
+    assert _exec_bounded(rebuild, 3) < 1
+    _pump_until(qapp, lambda: first.exists(), timeout_ms=800)
+    assert not first.exists() and not second.exists()
+
+
+def test_done_stops_a_running_rebuild(qapp, tmp_path):
+    """Review P3-1: done() closed the window without going through reject()."""
+    marker = tmp_path / "second-ran"
+    dialog, rebuild = _rebuild_window(["sleep 30", f"touch '{marker}'"])
+    dialog.show()
+    assert _pump_until(qapp, lambda: rebuild.running)
+    dialog.done(0)
+    assert rebuild.ended and not rebuild.running and not rebuild.succeeded
+    assert _exec_bounded(rebuild, 3) < 1
+    _pump_until(qapp, lambda: marker.exists(), timeout_ms=800)
+    assert not marker.exists()
+
+
+def test_a_failed_build_records_no_durations(qapp, tmp_path):
+    from lab_hub import durations
+
+    command = "echo 'INFO: PyInstaller: 6'; echo 'Built: x'; false"
+    dialog, rebuild = _rebuild_window([command], _x_rows(command), lab_root=tmp_path)
+    dialog.show()
+    assert _pump_until(qapp, lambda: rebuild.ended)
+    assert not rebuild.succeeded
+    assert "app:x" not in durations.load()
+    dialog.close()
+
+
+def test_a_version_read_that_raises_does_not_end_the_run(qapp, tmp_path):
+    from lab_hub import progress
+    from ui.progress_window import BuildCheckWindow
+    from ui.rebuild import Rebuild
+
+    def broken(_app, _root):
+        raise RuntimeError("no plist")
+
+    window = BuildCheckWindow(progress.build_check_view(_x_rows("echo one"), scoped=True),
+                              tmp_path)
+    rebuild = Rebuild(["echo one", "echo two"], window, verify=broken)
+    window.show()
+    assert _pump_until(qapp, lambda: rebuild.ended)
+    assert rebuild.succeeded and "two" in window.output_text()
+    assert window.model.snapshot().rows[0].reason == "Installed; no version could be read."
+    window.close()
+
+
+def test_one_long_line_with_no_newline_is_shown_in_pieces_without_freezing(qapp):
+    """Secure P3-3: 2 MB with no newline took a minute to reach the pane."""
+    import time as _time
+
+    from lab_hub import progress
+
+    dialog, rebuild = _rebuild_window(["head -c 2000000 /dev/zero | tr '\\0' x"])
+    dialog.show()
+    dialog.output.toggle.setChecked(True)
+    start = _time.monotonic()
+    assert _pump_until(qapp, lambda: rebuild.ended)
+    dialog.draw()
+    lines = [line for line in dialog.output_text().splitlines() if line.startswith("x")]
+    took = _time.monotonic() - start
+    assert took < 10, f"{took:.1f} s"
+    assert sum(len(line) for line in lines) == 2_000_000
+    assert max(len(line) for line in lines) <= progress.LINE_MAX
+    dialog.close()
+
+
+def test_stage_chips_advance_on_the_lab_hub_markers_and_verify_shows_the_version(
+    qapp, tmp_path, monkeypatch
+):
+    """A fake build printing Lab Hub's own build_app.sh lines walks the four
+    stages; after exit 0 the installed version Lab Hub reads is on the row, and
+    the durations are recorded for the next estimate."""
+    from lab_hub import config, durations
+
+    app = launcher.ExternalApp("labhub", "Lab Hub", "lab_hub", "main.py", "s")
+    script = ("echo '12 INFO: PyInstaller: 6.11'; sleep 0.3; "
+              "echo 'Self-testing the build…'; sleep 0.3; "
+              "echo 'Installed: /Applications/Lab Hub.app'")
+    rows = (launcher.BuildStatus(app, launcher.Version(), "behind", "older.", None, script),)
+    monkeypatch.setattr(launcher, "version", lambda a, root: launcher.Version("v9.9"))
+    dialog, rebuild = _rebuild_window([script], rows, lab_root=tmp_path)
+    dialog.show()
+    seen = []
+
+    def stages():
+        snap = dialog.model.snapshot()
+        seen.append(tuple(s.state for s in snap.rows[0].stages))
+        return dialog.cancel_button.text() == "Close"
+
+    assert _pump_until(qapp, stages)
+    assert rebuild.succeeded
+    assert ("done", "running", "waiting", "waiting") in seen
+    final = dialog.model.snapshot().rows[0]
+    assert [s.state for s in final.stages] == ["done"] * 4
+    assert final.reason == "Installed: v9.9"
+    assert (final.stages[0].label, final.stages[0].state) == ("Build", "done")
+    assert len(dialog.rows[0].chips) == 4
+    history = durations.load(path=config.SUPPORT_DIR / "durations.json")
+    assert set(history["app:labhub"]) == {"build", "package", "install", "verify", "rebuild"}
+    dialog.close()
+
+
+def test_a_build_with_no_marker_shows_one_rebuilding_stage(qapp, tmp_path, monkeypatch):
+    app = launcher.ExternalApp("x", "X", "x", "main.py", "s")
+    rows = (launcher.BuildStatus(app, launcher.Version(), "behind", "older.", None,
+                                 "echo compiling"),)
+    monkeypatch.setattr(launcher, "version", lambda a, root: launcher.Version())
+    dialog, rebuild = _rebuild_window(["echo compiling"], rows, lab_root=tmp_path)
+    dialog.show()
+    assert _pump_until(qapp, lambda: dialog.cancel_button.text() == "Close")
+    row = dialog.model.snapshot().rows[0]
+    assert [(s.label, s.state) for s in row.stages] == [("Rebuilding", "done")]
+    assert len(dialog.rows[0].chips) == 1
+    dialog.close()
+
+
+def test_build_output_is_shown_as_typed(qapp, tmp_path):
+    dialog, rebuild = _rebuild_window(["printf '\\033[31m<b>x</b>\\033[0m\\n'"])
+    dialog.show()
+    assert _pump_until(qapp, lambda: dialog.cancel_button.text() == "Close")
+    assert "<b>x</b>" in dialog.output_text()
+    assert "\x1b" not in dialog.output_text()
+    dialog.close()
+
+
+def test_update_now_hands_its_open_window_to_the_rebuild(qapp, monkeypatch):
+    """Update now keeps the window open and hands that same window to the
+    rebuild for its Update step. (Copy commands closing it on Review is
+    `test_progress_window.py::test_review_button_answers_and_copy_closes_update_stays`.)"""
+    from ui import apps_tab
+    from ui.progress_window import BuildCheckWindow
+
+    _FakeRebuild.ok, _FakeRebuild.asked = True, []
+    tab, seen = _by_hand_tab(qapp, monkeypatch, _mixed_rows)
+    windows, closed_before = [], []
+    closes = []
+    real_done = BuildCheckWindow.done
+    monkeypatch.setattr(BuildCheckWindow, "done",
+                        lambda self, code: closes.append(code) or real_done(self, code))
+
+    class Spy(_FakeRebuild):
+        def __init__(self, commands, window=None):
+            super().__init__(commands, window)
+            windows.append(window)
+            closed_before.append(len(closes))
+
+    monkeypatch.setattr(apps_tab, "Rebuild", Spy)
+    monkeypatch.setattr(launcher, "run_in_terminal", lambda *a, **k: [])
+    monkeypatch.setattr(tab, "recheck", lambda: None)
+    seen["press"] = "Update now"
+    tab.show_build_report()
+    assert windows and windows[0].choice == "Update now"
+    assert isinstance(windows[0], BuildCheckWindow)
+    assert closed_before == [0]  # Update now did not close the window it handed over
+    assert _FakeRebuild.asked == [["cd /q && ./build_app.sh"]]
+    _drop(tab)
+
+
+def test_update_now_without_a_window_deletes_the_one_it_made(qapp, monkeypatch):
+    """Review P3-2: run_updates(window=None) made a window and never freed it."""
+    import shiboken6
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    from ui import apps_tab
+
+    tab, _seen = _by_hand_tab(qapp, monkeypatch, _mixed_rows)
+    made = []
+
+    class Spy(_FakeRebuild):
+        def __init__(self, commands, window=None):
+            super().__init__(commands, window)
+            made.append(window)
+
+    monkeypatch.setattr(apps_tab, "Rebuild", Spy)
+    monkeypatch.setattr(tab, "recheck", lambda: None)
+    tab.run_updates(["echo x"])
+    assert len(made) == 1
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert not shiboken6.isValid(made[0])
+    _drop(tab)
 
 
 # ----------------------------------------------------------------------

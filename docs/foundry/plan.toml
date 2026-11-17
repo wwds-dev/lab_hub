@@ -1,9 +1,15 @@
 # Foundry plan: estimates and milestones. Written by docs/foundry/tooling/plan.py.
 # Read by the Foundry workspace. A missing key is shown as 'not recorded'.
-estimate_hours = 1.5
-updated = "2026-11-15"
+estimate_hours = 2.5
+updated = "2026-11-17"
 
 [[milestone]]
 name = "Check repos: Clean up and Review branches"
 due = "2026-11-16"
 spec = "repo-tidy"
+
+[[milestone]]
+name = "Progress windows for Land and Check builds"
+due = "2026-11-18"
+start = "2026-11-17"
+spec = "progress-windows"

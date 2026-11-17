@@ -792,6 +792,43 @@ def stylesheet(p: Palette) -> str:
     }}
     QProgressBar::chunk {{ background: {p.accent}; border-radius: 5px; }}
 
+    /* --- progress windows (Land, Check builds) ---------------------- */
+    QWidget#runWindow {{ background: {p.window}; }}
+    QFrame#runHeader {{ border: none; border-bottom: 1px solid {p.border}; }}
+    QFrame#runSteps {{ border: none; }}
+    QFrame#runFooter {{ border: none; border-top: 1px solid {p.border}; }}
+    QFrame#runRow {{ border: none; border-top: 1px solid {p.border}; }}
+    QLabel#runPercent {{ font-size: 20px; font-weight: 600; }}
+    QLabel#runTitle {{ font-weight: 600; }}
+    QLabel#runStrong {{ font-weight: 600; }}
+    QLabel#stateRun {{ color: {p.accent if p.dark else p.text}; font-size: {FONT_SMALL}px;
+                      font-weight: 600; }}
+    QLabel#runPill {{ border-radius: 9px; padding: 2px 9px; font-size: 11px;
+                     font-weight: 600; }}
+    QLabel#runPill[tone="ok"] {{ color: {p.ok}; background: {_rgba(p.ok, 0.14)}; }}
+    QLabel#runPill[tone="run"] {{ color: {p.accent if p.dark else p.text};
+                                 background: {_rgba(p.accent, 0.14)}; }}
+    QLabel#runPill[tone="warn"] {{ color: {p.warn}; background: {_rgba(p.warn, 0.16)}; }}
+    QLabel#runPill[tone="bad"] {{ color: {p.bad}; background: {_rgba(p.bad, 0.14)}; }}
+    QLabel#runPill[tone="wait"], QLabel#runPill[tone="muted"] {{
+        color: {p.muted}; background: {p.field}; }}
+    QFrame#stageChip {{ border: none; border-radius: 3px; background: {p.field_border};
+                       min-height: 6px; max-height: 6px; }}
+    QFrame#stageChip[state="none"] {{ background: transparent;
+                                     border: 1px dashed {p.border}; }}
+    QFrame#stageChip[state="done"] {{ background: {p.ok}; }}
+    QFrame#stageChip[state="failed"] {{ background: {p.bad}; }}
+    QFrame#stageChip[state="skipped"] {{ background: {p.idle}; }}
+    QFrame#stageChip[state="running"] {{ background: {p.accent}; }}
+    QFrame#stageChip[state="pulse"] {{ background: {_rgba(p.accent, 0.45)}; }}
+    QFrame#stageChip[state="partial"] {{ background: {_rgba(p.accent, 0.45)}; }}
+    QFrame#stepList {{ background: {p.field}; border: none; border-radius: 8px; }}
+    QPushButton#danger {{ color: {p.bad}; }}
+    QPushButton#disclosure {{ background: transparent; border: none; color: {p.muted};
+                             padding: 2px 0; font-size: {FONT_SMALL}px; text-align: left; }}
+    QPlainTextEdit#runLog {{ font-family: Menlo, monospace; font-size: 11px;
+                            color: {p.muted}; }}
+
     QSplitter::handle {{ background: transparent; }}
     QStatusBar {{ background: {p.window}; color: {p.muted}; font-size: {FONT_SMALL}px; }}
     QStatusBar::item {{ border: none; }}

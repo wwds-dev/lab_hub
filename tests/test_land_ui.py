@@ -451,3 +451,165 @@ def test_land_on_a_tile_with_nothing_to_land_does_nothing(qapp, tmp_path, lab, m
     tab.land_card(card)
     assert not tab.lander.busy and card.outcome.isHidden()
     _drop(tab)
+
+
+# ---------------------------------------------------------------- the Land window
+# Spec `progress-windows` §2.1, §8.3, §8.12.
+def test_the_land_window_opens_after_the_confirmation_and_follows_a_two_repo_land(
+        qapp, tmp_path, lab, monkeypatch):
+    from lab_hub import durations
+
+    make_branch(lab, "feat", "f.txt")
+    other = second_repo(tmp_path, "other")
+    make_branch(other, "feat2", "g.txt")
+    _write(tmp_path, [_row(tmp_path, "repo", ["1 branch not merged into main"]),
+                      _row(tmp_path, "other", ["1 branch not merged into main"])])
+    tab = tab_for(qapp, tmp_path, ["repo", "other"], monkeypatch, check_builds=True)
+    tab.refresh()
+    opened_at_confirm = []
+    tab.confirm_land = lambda plans: opened_at_confirm.append(tab.land_window) or True
+    summary = []
+    real_summary = tab.show_land_summary
+    tab.show_land_summary = lambda results: summary.append(results) or real_summary(results)
+    tab.land_all_button.click()
+    assert pump(lambda: tab.land_window is not None)
+    assert opened_at_confirm == [None]  # nothing opened before the owner said yes
+    window = tab.land_window
+    assert window.isVisible()
+    assert [r.name.text() for r in window.rows] == ["repo", "other"]
+    assert pump(lambda: bool(summary))
+    window.draw()
+    snap = window.model.snapshot()
+    # Both clones push to one origin, so the second push may be refused: the
+    # window says whatever the results say.
+    results = summary[0]
+    landed = sum(r.state == "landed" for r in results)
+    assert snap.percent == 100 and not snap.live
+    assert snap.outcome == f"Landed {landed} of 2 repos."
+    assert window.header.outcome.text() == snap.outcome
+    assert [r.pill.text().startswith("Landed") for r in window.rows] == [
+        r.state == "landed" and not r.remaining for r in results]
+    assert window.stop_button.isHidden() and window.hide_button.text() == "Close"
+    history = durations.load()
+    assert "repo:repo" in history and "repo:other" in history
+    assert "merge" in history["repo:repo"]
+    _drop(tab)
+
+
+def test_land_all_with_a_failure_says_so_in_the_window_not_a_box(qapp, tmp_path, lab, monkeypatch):
+    make_branch(lab, "feat", "f.txt")
+    other = second_repo(tmp_path, "other")
+    make_branch(other, "feat2", "g.txt")
+    _write(tmp_path, [_row(tmp_path, "repo", ["1 branch not merged into main"]),
+                      _row(tmp_path, "other", ["1 branch not merged into main"])])
+    real = repo_tidy.apply
+    monkeypatch.setattr(repo_tidy, "apply", lambda action, *a, **k: (
+        (False, "failed — remote said <b>no</b>") if action.repo_name == "repo"
+        else real(action, *a, **k)))
+    boxes = []
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: boxes.append(self.text()))
+    tab = tab_for(qapp, tmp_path, ["repo", "other"], monkeypatch, check_builds=True)
+    tab.refresh()
+    tab.confirm_land = lambda plans: True
+    tab.land_all_button.click()
+    assert pump(lambda: tab.land_window is not None and not tab.land_window.model.live)
+    window = tab.land_window
+    window.draw()
+    assert boxes == []  # the window's end state replaced the Land all box
+    assert window.header.outcome.text() == "Landed 1 of 2 repos."
+    assert "repo: Not landed: remote said <b>no</b>" in window.header.details.text()
+    assert window.rows[0].pill.text() == "Needs you"
+    assert window.rows[0].reason.text() == "remote said <b>no</b>"
+    from PySide6.QtCore import Qt
+
+    assert window.rows[0].reason.textFormat() == Qt.TextFormat.PlainText
+    assert "repo: → not done: failed — remote said <b>no</b>" in window.output.text()
+    _drop(tab)
+
+
+def test_hide_keeps_landing_show_progress_brings_it_back_and_its_stop_stops(
+        qapp, tmp_path, lab, monkeypatch):
+    has_work(tmp_path, lab)
+    gate = _gated(monkeypatch)
+    tab = tab_for(qapp, tmp_path, ["repo"], monkeypatch)
+    tab.refresh()
+    tab.confirm_land = lambda plans: True
+    tab.cards[0].land_button.click()
+    assert pump(lambda: tab.lander.running and tab.land_window is not None)
+    window = tab.land_window
+    assert not tab.show_land_button.isHidden()
+    window.hide_button.click()
+    assert not window.isVisible() and tab.lander.running  # hiding is not stopping
+    tab.show_land_button.click()
+    assert window.isVisible()
+    window.close()  # the red button: also only hides
+    assert not window.isVisible() and tab.lander.running
+    tab.show_land_button.click()
+    window.stop_button.click()
+    assert tab.lander._stopper.stopped
+    assert not window.stop_button.isEnabled()
+    gate.set()
+    assert pump(lambda: not tab.lander.busy)
+    assert tab.show_land_button.isHidden()
+    assert tab.cards[0].outcome.text().startswith("Not landed: ")
+    _drop(tab)
+
+
+def test_a_single_land_ends_with_its_tile_line_in_the_window(qapp, tmp_path, lab, monkeypatch):
+    has_work(tmp_path, lab)
+    tab = tab_for(qapp, tmp_path, ["repo"], monkeypatch)
+    tab.refresh()
+    tab.confirm_land = lambda plans: True
+    tab.cards[0].land_button.click()
+    assert pump(lambda: tab.cards[0].outcome.text() == "Landed")
+    window = tab.land_window
+    window.draw()
+    assert window.header.outcome.text() == "repo: Landed"
+    assert window.header.title.text() == "Landing repo"
+    _drop(tab)
+
+
+def test_cancelling_the_confirmation_opens_no_window(qapp, tmp_path, lab, monkeypatch):
+    has_work(tmp_path, lab)
+    tab = tab_for(qapp, tmp_path, ["repo"], monkeypatch)
+    tab.refresh()
+    tab.confirm_land = lambda plans: False
+    tab.cards[0].land_button.click()
+    assert pump(lambda: not tab.lander.busy)
+    assert tab.land_window is None and tab.show_land_button.isHidden()
+    _drop(tab)
+
+
+def test_a_later_land_that_opens_no_window_leaves_the_finished_one_alone(
+        qapp, tmp_path, lab, monkeypatch):
+    """Review P2-2: a single-tile Land with nothing to do opens no window, but
+    used to feed the previous run's finished window (its row turned "Nothing
+    to land", its outcome was overwritten) and Show progress showed it."""
+    has_work(tmp_path, lab)
+    tab = tab_for(qapp, tmp_path, ["repo"], monkeypatch)
+    tab.refresh()
+    tab.confirm_land = lambda plans: True
+    tab.cards[0].land_button.click()
+    assert pump(lambda: tab.cards[0].outcome.text() == "Landed")
+    window = tab.land_window
+    window.draw()
+
+    def state():
+        return (window.header.outcome.text(), [r.pill.text() for r in window.rows],
+                window.output.text())
+
+    before = state()
+    assert before[0] == "repo: Landed"
+    # The report still says the repo needs attention; there is nothing left to land.
+    assert pump(lambda: tab._hygiene_proc is None)
+    _write(tmp_path, [_row(tmp_path, "repo", ["1 branch not merged into main"])])
+    tab.refresh()
+    tab.cards[0].land_button.click()
+    assert pump(lambda: tab.lander.running)
+    show_hidden_while_running = tab.show_land_button.isHidden()
+    assert pump(lambda: not tab.lander.busy)
+    window.draw()
+    assert tab.land_window is window
+    assert state() == before
+    assert show_hidden_while_running
+    _drop(tab)

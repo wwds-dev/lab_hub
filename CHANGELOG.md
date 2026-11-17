@@ -1,0 +1,56 @@
+# Changelog
+
+What changed in Lab Hub, for the person using it. The format follows
+[Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/), adapted to the
+lab's version scheme.
+
+Lab Hub does not use semantic versioning. A version reads `v<MAJOR>.<BUILD>`,
+for example `v2.170`: MAJOR is the product arc in the `VERSION` file, and BUILD
+is the number of commits (`git rev-list --count HEAD`), so it moves by itself
+with every commit (README, "Version"). Released versions are listed newest
+first as `## v<MAJOR>.<BUILD> - YYYY-MM-DD`.
+
+This file was started at v2.170; earlier changes are not listed here. The
+README and the specs in `docs/specs/` describe them.
+
+## Unreleased
+
+### Added
+- A **Land window** for Land and Land all: a progress bar and percent, time
+  elapsed, time left and "done around HH:MM", counts, one row per repo with a
+  Commit / Merge and test / Push / Tidy track, the running repo's steps with
+  their own timer, the reason under any repo that did not land, and the live
+  output. It is not modal: closing it only hides it and landing goes on;
+  **Show progress** on the page brings it back while the Land runs.
+- A working signal in both progress windows: moving dots, a spinner on the
+  running row, and "Last activity Ns ago", which turns amber after 60 s with
+  no output ("No output for 1:00. Still running.").
+- Time-left estimates from how long the same steps took before. Until every
+  step still to come has a recorded time, the window shows "Estimating…"
+  instead of a guess; a step past its usual time says "Taking longer than
+  usual".
+- `~/Library/Application Support/Lab Hub/durations.json`: the last five
+  durations of each successful step, per repo and per app, used only for the
+  estimates. Deleting it only resets them; a broken or oversized file is
+  ignored and replaced by the next good save.
+
+### Changed
+- **Check builds** opens one window instead of a message box and a separate
+  rebuild dialog. It steps through Check, Review, Update and Done; Review shows
+  one row per app with its verdict in words and the up-to-date apps on one
+  line, with the same buttons as before under the same conditions. During
+  **Update now** the app being rebuilt shows its stages (Build, Package,
+  Install, Verify, or one "Rebuilding" when its output has no known markers),
+  and Verify shows the version now installed.
+- The **Land all** summary ("Landed N of M repos.", and why each other repo
+  did not land) is now the end state of the Land window instead of a separate
+  box.
+
+### Fixed
+- Escape during a rebuild hid the window but left the build running unwatched,
+  and the next rebuild then started. Escape, the red button, Close and Cancel
+  now all stop the running build, and no later rebuild starts.
+- Cancel now stops everything the build script started (such as PyInstaller or
+  the copy into `/Applications`), not only the shell that ran it.
+- A rebuild command that cannot start at all now ends the run as failed
+  instead of leaving the window waiting.

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -231,11 +232,53 @@ def _remaining(plan: LandPlan) -> int:
         return 0
 
 
+@dataclass(frozen=True)
+class StepEvent:
+    """One step starting or ending, in structured form, for a progress window.
+
+    Spec `progress-windows` §8.3. Sent beside the text lines (which stay exactly
+    as they are) at the start and end of every planned action. Plain values
+    only, so it crosses the worker boundary as it is.
+    """
+
+    repo: str  # LandPlan.name: display data, never used as a path
+    index: int  # 0-based position in plan.actions
+    count: int  # len(plan.actions)
+    kind: str  # Action.kind as planned
+    phase: str  # "start" | "end"
+    at: float  # clock() when sent, seconds, monotonic
+    started: float = 0.0  # end only: the matching start's `at`
+    outcome: str = ""  # end only: "done" | "failed" | "skipped"
+    label: str = ""  # Action.label, the same text as the progress line
+
+
+def step_outcome(ok: bool, message: str) -> str:
+    """done, skipped (a guard re-checked, or Stop) or failed. Stop during a
+    Claude Code merge says "not landed — stopped" (`repo_tidy.apply`): skipped,
+    not a failure."""
+    if ok:
+        return "done"
+    text = (message or "").strip().lower()
+    if text.startswith("skipped") or text == "not landed — stopped":
+        return "skipped"
+    return "failed"
+
+
 def land(plan: LandPlan, *, progress=None, stop=None, log: Path | None = None,
-         busy="fresh", now: float | None = None) -> LandResult:
+         busy="fresh", now: float | None = None, events=None,
+         clock=time.monotonic) -> LandResult:
     """Run the plan. Never raises; a failed step does not stop the ones after it
-    (each re-checks its own guard), and the result says why in one sentence."""
+    (each re-checks its own guard), and the result says why in one sentence.
+    `events`, if given, gets a `StepEvent` at the start and end of each step."""
     say = progress or (lambda _line: None)
+
+    def tell(event: StepEvent) -> None:
+        if events is None:
+            return
+        try:
+            events(event)
+        except Exception:  # noqa: BLE001 - a window must never stop a Land
+            pass
     if not claim(plan.path):
         return LandResult(plan.name, "not_landed", "it is already being landed")
     try:
@@ -247,13 +290,19 @@ def land(plan: LandPlan, *, progress=None, stop=None, log: Path | None = None,
             return LandResult(plan.name, "nothing")
         done = failed = 0
         first_failure = ""
-        for action in plan.actions:
+        count = len(plan.actions)
+        for index, action in enumerate(plan.actions):
             say(action.label)
+            started = clock()
+            tell(StepEvent(plan.name, index, count, action.kind, "start", started,
+                           label=action.label))
             try:
                 ok, message = repo_tidy.apply(
                     action, log, busy, now, claude=plan.claude, progress=say, stop=stop)
             except Exception as exc:  # noqa: BLE001 - one failure must not hide the rest
                 ok, message = False, f"failed — {type(exc).__name__}: {exc}"
+            tell(StepEvent(plan.name, index, count, action.kind, "end", clock(), started,
+                           step_outcome(ok, message), action.label))
             if ok:
                 done += 1
                 say(f"  → done: {message}")

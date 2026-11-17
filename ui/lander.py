@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
@@ -25,11 +26,13 @@ Repos = list[tuple[str, Path]]
 class Lander(QObject):
     planned = Signal(object)  # list[land.LandPlan]
     progress = Signal(str, str)  # repo name, one line
+    step = Signal(object)  # land.StepEvent, start and end of each step
     repo_done = Signal(str, object)  # repo name, land.LandResult
     finished = Signal(object)  # list[land.LandResult]
 
-    def __init__(self, parent: QObject | None = None) -> None:
+    def __init__(self, parent: QObject | None = None, *, clock=time.monotonic) -> None:
         super().__init__(parent)
+        self._clock = clock
         self._events: queue.SimpleQueue = queue.SimpleQueue()
         self._timer = QTimer(self)
         self._timer.setInterval(100)
@@ -100,7 +103,8 @@ class Lander(QObject):
                 result = land.LandResult(name, "not_landed", "it was stopped")
             else:
                 result = land.land(plan, progress=lambda line, n=name: self._events.put(
-                    ("progress", n, line)), stop=self._stopper)
+                    ("progress", n, line)), stop=self._stopper,
+                    events=lambda e: self._events.put(("step", e)), clock=self._clock)
             results.append(result)
             self._events.put(("repo_done", name, result))
         self._events.put(("finished", results))
@@ -116,6 +120,8 @@ class Lander(QObject):
             kind = event[0]
             if kind == "progress":
                 self.progress.emit(event[1], event[2])
+            elif kind == "step":
+                self.step.emit(event[1])
             elif kind == "repo_done":
                 self.repo_done.emit(event[1], event[2])
             elif kind in ("planned", "finished"):

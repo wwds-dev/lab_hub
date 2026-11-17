@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Progress windows mockup</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<style>
+:root{--surface-0:#f5f4ef;--surface-1:#f0efe9;--surface-2:#fff;--border:rgba(0,0,0,.1);--border-strong:rgba(0,0,0,.18);--text-primary:#1f1f1d;--text-secondary:#5f5e5a;--text-muted:#888780;--text-success:#3b6d11;--text-accent:#185fa5;--text-warning:#854f0b;--text-danger:#a32d2d;--bg-success:#eaf3de;--bg-accent:#e6f1fb;--bg-warning:#faeeda;--bg-accent-muted:rgba(55,138,221,.1);--border-success:#97c459;--border-accent:#85b7eb;--fill-accent:#378add;--fill-success:#639922;--fill-danger:#e24b4a;--radius:8px;--font-mono:ui-monospace,Menlo,monospace}
+@media (prefers-color-scheme:dark){:root{--surface-0:#1a1a19;--surface-1:#262624;--surface-2:#30302e;--border:rgba(255,255,255,.1);--border-strong:rgba(255,255,255,.18);--text-primary:#f1efe8;--text-secondary:#b4b2a9;--text-muted:#888780;--text-success:#97c459;--text-accent:#85b7eb;--text-warning:#ef9f27;--text-danger:#f09595;--bg-success:#27500a;--bg-accent:#0c447c;--bg-warning:#633806;--border-success:#3b6d11;--border-accent:#185fa5}}
+body{margin:0;padding:24px 16px;background:var(--surface-0);color:var(--text-primary);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:720px;margin:0 auto}
+button{font:inherit;font-size:13px;padding:5px 12px;border-radius:var(--radius);border:.5px solid var(--border-strong);background:transparent;color:var(--text-primary);cursor:pointer}
+code{font-family:var(--font-mono);font-size:12px}
+.win{background:var(--surface-2);border:.5px solid var(--border-strong);border-radius:12px;overflow:hidden;font-size:13px}
+.bar{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:.5px solid var(--border);background:var(--surface-1)}
+.d3{width:10px;height:10px;border-radius:50%;background:var(--border-strong)}
+.lbl{font-size:12px;color:var(--text-secondary);margin:0 0 6px}
+.pill{font-size:11px;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.ok{background:var(--bg-success);color:var(--text-success)}.run{background:var(--bg-accent);color:var(--text-accent)}.warn{background:var(--bg-warning);color:var(--text-warning)}.wait{background:var(--surface-1);color:var(--text-secondary)}
+.log{font-family:var(--font-mono);font-size:11px;line-height:1.6;background:var(--surface-1);border-radius:var(--radius);padding:8px 10px;color:var(--text-secondary)}
+.dots span{display:inline-block;width:5px;height:5px;margin:0 1.5px;border-radius:50%;background:var(--fill-accent);animation:b 1.2s infinite ease-in-out}
+.dots span:nth-child(2){animation-delay:.15s}.dots span:nth-child(3){animation-delay:.3s}
+@keyframes b{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:1;transform:translateY(-3px)}}
+.prog{position:relative;height:8px;border-radius:4px;background:var(--surface-1);overflow:hidden}
+.prog>.f{height:100%;background:var(--fill-accent);border-radius:4px;transition:width .6s}
+.prog>.s{position:absolute;top:0;bottom:0;width:60px;background:rgba(255,255,255,.35);animation:sh 1.6s infinite linear}
+@keyframes sh{from{left:-60px}to{left:100%}}
+.spin{display:inline-block;animation:r 1s linear infinite}@keyframes r{to{transform:rotate(360deg)}}
+.seg{height:6px;border-radius:3px;background:var(--surface-1)}.seg.g{background:var(--fill-success)}.seg.r{background:var(--fill-danger)}.seg.a{background:var(--fill-accent);animation:p 1.2s infinite ease-in-out}
+@keyframes p{50%{opacity:.45}}
+.grid{display:grid;grid-template-columns:22px 104px repeat(4,minmax(0,1fr)) 100px;gap:6px;align-items:center}
+.step{display:flex;gap:10px;align-items:center;padding:5px 0;font-size:12px}.step i{font-size:15px}
+.ck{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px;color:var(--text-muted)}
+.ck i{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-style:normal;border:.5px solid var(--border-strong)}
+.hd{padding:12px 14px 10px;border-bottom:.5px solid var(--border)}
+@media (max-width:600px){.grid{grid-template-columns:22px 80px repeat(4,minmax(0,1fr)) 80px}}
+</style>
+</head>
+<body>
+<main>
+<p class="lbl">Landing window. Spec: progress-windows.md, section 2.1</p>
+<div class="win">
+  <div class="bar"><span class="d3"></span><span class="d3"></span><span class="d3"></span><span style="margin-left:8px;font-weight:500">Landing 4 repos</span><span class="dots" style="margin-left:4px"><span></span><span></span><span></span></span><span style="margin-left:auto;font-size:12px;color:var(--text-muted)">Last activity <span class="ago">1s</span> ago</span></div>
+  <div class="hd">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;margin-bottom:6px"><span style="font-size:20px;font-weight:500" class="pct">38%</span><span style="color:var(--text-secondary)">Working on SONAR · 10 of 26 steps</span><span style="margin-left:auto;color:var(--text-secondary)"><span class="el">2:14</span> elapsed · <span style="color:var(--text-primary);font-weight:500">~<span class="left">4 min</span> left</span> · done around <span class="eta">14:32</span></span></div>
+    <div class="prog"><div class="f gf" style="width:38%"></div><div class="s"></div></div>
+    <div style="display:flex;flex-wrap:wrap;gap:14px;margin-top:8px;font-size:12px"><span style="color:var(--text-success)">1 landed</span><span style="color:var(--text-accent)">1 running</span><span style="color:var(--text-secondary)">1 waiting</span><span style="color:var(--text-warning)">1 needs you</span></div>
+  </div>
+  <div style="padding:8px 14px 4px">
+    <div class="grid" style="font-size:11px;color:var(--text-muted);padding-bottom:4px"><span></span><span>Repo</span><span>Commit</span><span>Merge and test</span><span>Push</span><span>Tidy</span><span style="text-align:right">Status</span></div>
+    <div class="grid" style="padding:8px 0;border-top:.5px solid var(--border)"><i class="ti ti-circle-check" style="color:var(--text-success);font-size:16px"></i><span style="font-weight:500">Sentinel</span><span class="seg g"></span><span class="seg g"></span><span class="seg g"></span><span class="seg g"></span><span style="text-align:right"><span class="pill ok">Landed · 0:42</span></span></div>
+    <div style="border-top:.5px solid var(--border);padding:8px 0">
+      <div class="grid"><i class="ti ti-loader-2 spin" style="color:var(--text-accent);font-size:16px"></i><span style="font-weight:500">SONAR</span><span class="seg g"></span><span class="seg a"></span><span class="seg"></span><span class="seg"></span><span style="text-align:right"><span class="pill run">~2 min left</span></span></div>
+      <div style="margin:8px 0 0 28px;padding:8px 12px;background:var(--surface-1);border-radius:var(--radius)">
+        <div class="step"><i class="ti ti-circle-check" style="color:var(--text-success)"></i><span style="flex:1">Commit open changes in 1 worktree</span><span style="color:var(--text-muted)">4s</span></div>
+        <div class="step"><i class="ti ti-circle-check" style="color:var(--text-success)"></i><span style="flex:1">Merge <code>claude/live-feed</code> into main</span><span style="color:var(--text-muted)">2s</span></div>
+        <div class="step"><i class="ti ti-loader-2 spin" style="color:var(--text-accent)"></i><div style="flex:1"><div>Merge <code>claude/odds-model</code>: Claude Code is resolving 2 conflicts, then tests run</div><div class="prog" style="height:4px;margin-top:5px"><div class="f" style="width:60%"></div><div class="s"></div></div></div><span style="color:var(--text-accent)"><span class="st">1:32</span> / ~2:30</span></div>
+        <div class="step" style="color:var(--text-secondary)"><i class="ti ti-circle" style="color:var(--text-muted)"></i><span>Then: merge <code>claude/paper-fills</code>, push main, remove 2 worktrees</span></div>
+        <details style="margin-top:4px"><summary style="cursor:pointer;color:var(--text-secondary);font-size:12px">Live output</summary><div class="log" style="margin-top:6px;background:var(--surface-2)">claude: keeping both strategies, renaming helper<br>pytest: 212 passed so far…</div></details>
+      </div>
+    </div>
+    <div class="grid" style="padding:8px 0;border-top:.5px solid var(--border)"><i class="ti ti-clock" style="color:var(--text-muted);font-size:16px"></i><span>SYNDUSTRYX</span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span style="text-align:right"><span class="pill wait">Next · ~1 min</span></span></div>
+    <div style="border-top:.5px solid var(--border);padding:8px 0">
+      <div class="grid"><i class="ti ti-alert-triangle" style="color:var(--text-warning);font-size:16px"></i><span>Backstage</span><span class="seg g"></span><span class="seg r"></span><span class="seg g"></span><span class="seg"></span><span style="text-align:right"><span class="pill warn">Needs you</span></span></div>
+      <div style="margin:6px 0 0 28px;font-size:12px;color:var(--text-warning)"><code>claude/pricing-tests</code> failed its tests and was left as it was. The other steps went on.</div>
+    </div>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 14px;border-top:.5px solid var(--border)"><span style="color:var(--text-secondary);font-size:12px">Closing this window doesn't stop landing.</span><button style="margin-left:auto">Hide</button><button style="color:var(--text-danger)">Stop landing</button></div>
+</div>
+
+<p class="lbl" style="margin-top:2rem">Check builds window. Spec: progress-windows.md, section 2.2</p>
+<div class="win">
+  <div class="bar"><span class="d3"></span><span class="d3"></span><span class="d3"></span><span style="margin-left:8px;font-weight:500">Check builds</span><span class="dots" style="margin-left:4px"><span></span><span></span><span></span></span><span style="margin-left:auto;font-size:12px;color:var(--text-muted)">Last output <span class="ago">1s</span> ago</span></div>
+  <div style="display:flex;align-items:flex-start;gap:6px;padding:12px 40px 10px;border-bottom:.5px solid var(--border)">
+    <div class="ck" style="color:var(--text-success)"><i style="background:var(--bg-success);color:var(--text-success);border-color:var(--border-success)" class="ti ti-check"></i>Check</div><div style="flex:1;height:1px;background:var(--border-success);margin-top:12px"></div>
+    <div class="ck" style="color:var(--text-success)"><i style="background:var(--bg-success);color:var(--text-success);border-color:var(--border-success)" class="ti ti-check"></i>Review</div><div style="flex:1;height:1px;background:var(--border-strong);margin-top:12px"></div>
+    <div class="ck" style="color:var(--text-accent)"><i style="background:var(--bg-accent);color:var(--text-accent);border-color:var(--border-accent)">3</i>Update</div><div style="flex:1;height:1px;background:var(--border-strong);margin-top:12px"></div>
+    <div class="ck"><i>4</i>Done</div>
+  </div>
+  <div class="hd">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;margin-bottom:6px"><span style="font-size:20px;font-weight:500" class="pct2">31%</span><span style="color:var(--text-secondary)">Updating 2 of 6 apps</span><span style="margin-left:auto;color:var(--text-secondary)"><span class="el2">1:48</span> elapsed · <span style="color:var(--text-primary);font-weight:500">~<span class="left2">3 min</span> left</span> · done around <span class="eta2">14:31</span></span></div>
+    <div class="prog"><div class="f gf2" style="width:31%"></div><div class="s"></div></div>
+    <div style="display:flex;flex-wrap:wrap;gap:14px;margin-top:8px;font-size:12px"><span style="color:var(--text-success)">3 up to date</span><span style="color:var(--text-accent)">2 rebuilding</span><span style="color:var(--text-warning)">1 needs Terminal</span><span style="color:var(--text-muted)">Checked in 3s</span></div>
+  </div>
+  <div style="padding:8px 14px 4px">
+    <div style="border-bottom:.5px solid var(--border);padding:4px 0 10px">
+      <div class="grid"><i class="ti ti-loader-2 spin" style="color:var(--text-accent);font-size:16px"></i><span style="font-weight:500">Backstage</span><span class="seg g"></span><span class="seg a"></span><span class="seg"></span><span class="seg"></span><span style="text-align:right"><span class="pill run"><span class="lft">0:58</span> left</span></span></div>
+      <div class="grid" style="font-size:11px;color:var(--text-muted);margin-top:3px"><span></span><span></span><span style="color:var(--text-success)">Build · 0:41</span><span style="color:var(--text-accent)">Package · <span class="st2">0:22</span></span><span>Install</span><span>Verify</span><span></span></div>
+      <div style="margin:8px 0 0 28px;color:var(--text-secondary);font-size:12px">40 uncommitted edits weren't in the old build. Now packaging and signing the app.</div>
+      <details style="margin:6px 0 0 28px"><summary style="cursor:pointer;color:var(--text-secondary);font-size:12px">Live output</summary><div class="log" style="margin-top:6px">$ ./build_app.sh<br>codesign: signing 128 / 214 files…</div></details>
+    </div>
+    <div class="grid" style="padding:8px 0;border-bottom:.5px solid var(--border)"><i class="ti ti-clock" style="color:var(--text-muted);font-size:16px"></i><span style="font-weight:500">Sentinel</span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span style="text-align:right"><span class="pill wait">Next · ~2 min</span></span></div>
+    <div style="padding:8px 0;border-bottom:.5px solid var(--border)">
+      <div class="grid"><i class="ti ti-terminal-2" style="color:var(--text-warning);font-size:16px"></i><span style="font-weight:500">Provisio</span><span style="grid-column:span 4;color:var(--text-secondary);font-size:12px">4 commits behind</span><span style="text-align:right"><span class="pill warn">Your turn after</span></span></div>
+      <div style="margin:6px 0 0 28px;font-size:12px;color:var(--text-warning)">Its installer opens in Terminal after the rebuilds; type install there.</div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:16px;padding:10px 0 6px;font-size:12px;color:var(--text-secondary)"><i class="ti ti-circle-check" style="color:var(--text-success);font-size:15px"></i><span>Imprint v2.326</span><span>SONAR v2.397</span><span>SYNDUSTRYX v0.6.53</span><span style="margin-left:auto;color:var(--text-muted)">Newest builds</span></div>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 14px;border-top:.5px solid var(--border)"><button>Copy commands</button><button style="margin-left:auto">Show full log</button><button style="color:var(--text-danger)">Cancel update</button></div>
+</div>
+</main>
+<script>
+let t=134,s=92,l=240,t2=108,s2=22,l2=180,lf=58,a=1;const f=n=>Math.floor(n/60)+':'+String(n%60).padStart(2,'0');const m=n=>n>60?Math.ceil(n/60)+' min':n+' s';
+const q=(c,v)=>document.querySelectorAll(c).forEach(e=>e.textContent=v);
+setInterval(()=>{t++;s++;l=Math.max(0,l-1);t2++;s2++;l2=Math.max(0,l2-1);lf=Math.max(0,lf-1);a=a>=3?1:a+1;
+q('.el',f(t));q('.st',f(s));q('.left',m(l));q('.el2',f(t2));q('.st2',f(s2));q('.left2',m(l2));q('.lft',f(lf));q('.ago',a+'s');
+q('.eta',new Date(Date.now()+l*1000).toTimeString().slice(0,5));q('.eta2',new Date(Date.now()+l2*1000).toTimeString().slice(0,5));
+const p=Math.min(99,Math.round(38+(t-134)*0.15)),p2=Math.min(99,Math.round(31+(t2-108)*0.35));
+q('.pct',p+'%');q('.pct2',p2+'%');
+document.querySelectorAll('.gf').forEach(e=>e.style.width=p+'%');document.querySelectorAll('.gf2').forEach(e=>e.style.width=p2+'%');},1000);
+</script>
+</body>
+</html>
