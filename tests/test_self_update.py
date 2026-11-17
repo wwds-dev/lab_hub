@@ -806,6 +806,11 @@ def test_a_page_is_busy_while_land_plans_or_runs(qapp, isolated_config):
 class _FakeRun:
     succeeded = True
     skipped: list = []
+    failed: list = []
+
+    @property
+    def ran_to_end(self):
+        return self.succeeded
 
     def __init__(self, commands, window, **hooks):
         self.hooks = hooks
@@ -995,3 +1000,97 @@ def test_the_first_start_after_an_update_says_how_it_went(window, fake_tray, mon
     window.show_update_outcome()
     assert "Lab Hub updated to" in window.statusBar().currentMessage()
     assert any("Lab Hub updated to" in message for _title, message in fake_tray.notices)
+
+
+# ------------------------------------------------------------ spec land-update-gaps §3.2
+def test_lab_hub_still_builds_and_restarts_after_another_app_failed(qapp, tmp_path):
+    from ui.rebuild import Rebuild
+
+    window = _restart_window(tmp_path, "echo built-lab-hub", others=("false",))
+    run = Rebuild(["false", "echo built-lab-hub"], window)
+    window.show()
+    assert _pump_until(lambda: run.ended)
+    assert "built-lab-hub" in window.output_text()
+    assert run.failed == ["false"] and run.ran_to_end and not run.succeeded
+    window.draw()
+    outcome = window.header.outcome.text()
+    assert outcome.startswith("1 of 2 rebuilds failed:")
+    assert "Lab Hub's own build passed: it restarts" in outcome
+    assert window.cancel_button.text() == "Close and restart"
+
+
+def test_a_failed_lab_hub_build_asks_for_no_restart(qapp, tmp_path):
+    from ui.rebuild import Rebuild
+
+    window = _restart_window(tmp_path, "false", others=("echo other",))
+    run = Rebuild(["echo other", "false"], window)
+    window.show()
+    assert _pump_until(lambda: run.ended)
+    window.draw()
+    assert "restarts" not in window.header.outcome.text()
+    assert window.cancel_button.text() == "Close"
+
+
+def test_update_now_restarts_when_only_another_app_failed(
+        qapp, isolated_config, monkeypatch, tmp_path):
+    from ui import apps_tab as apps_tab_module
+
+    run = type("Run", (_FakeRun,), {"succeeded": False, "ran_to_end": True,
+                                     "failed": ["echo x"]})
+    monkeypatch.setattr(apps_tab_module, "Rebuild", run)
+    monkeypatch.setattr(launcher, "source_dir", lambda app, root: tmp_path)
+    staged = self_update.Staged(tmp_path, "v2.180", "abc")
+    monkeypatch.setattr(self_update, "stage_build", lambda project: staged)
+    window = _restart_window(tmp_path, "build lab hub", others=("echo x",))
+    tab = _tab(check_builds=True)
+    asked, said = [], []
+    tab.restart_requested.connect(asked.append)
+    tab.launched.connect(said.append)
+    try:
+        tab.run_updates(["echo x", "build lab hub"], window=window)
+    finally:
+        tab._poll.stop()
+        window.close()
+    assert asked == [staged]
+    assert said and "1 failed (" in said[0] and "Lab Hub itself was not rebuilt" not in said[0]
+
+
+def test_update_now_does_not_restart_when_lab_hubs_own_build_failed(
+        qapp, isolated_config, monkeypatch, tmp_path):
+    from ui import apps_tab as apps_tab_module
+
+    run = type("Run", (_FakeRun,), {"succeeded": False, "ran_to_end": True,
+                                     "failed": ["build lab hub"]})
+    monkeypatch.setattr(apps_tab_module, "Rebuild", run)
+    window = _restart_window(tmp_path, "build lab hub", others=("echo x",))
+    tab = _tab(check_builds=True)
+    asked, said = [], []
+    tab.restart_requested.connect(asked.append)
+    tab.launched.connect(said.append)
+    try:
+        tab.run_updates(["echo x", "build lab hub"], window=window)
+    finally:
+        tab._poll.stop()
+        window.close()
+    assert asked == []
+    assert "Rebuilt and reinstalled 1 app." in said[0] and "Lab Hub itself was not rebuilt" in said[0]
+
+
+def test_a_skipped_lab_hub_is_not_counted_and_is_named_after_another_failure(qapp, tmp_path):
+    # Review P3-3.
+    from ui.rebuild import Rebuild, Skipped
+
+    def hold(command):
+        if command == "echo lab-hub":
+            raise Skipped("the checkout has uncommitted changes")
+        return None
+
+    window = _restart_window(tmp_path, "echo lab-hub", others=("false",))
+    run = Rebuild(["false", "echo lab-hub"], window, hold=hold)
+    window.show()
+    assert _pump_until(lambda: run.ended)
+    window.draw()
+    assert window.header.outcome.text() == (
+        "1 of 1 rebuild failed: X. See the live output. "
+        "Lab Hub itself was not rebuilt; its row says why.")
+    assert window.cancel_button.text() == "Close"

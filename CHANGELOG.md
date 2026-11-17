@@ -82,5 +82,19 @@ README and the specs in `docs/specs/` describe them.
   now all stop the running build, and no later rebuild starts.
 - Cancel now stops everything the build script started (such as PyInstaller or
   the copy into `/Applications`), not only the shell that ran it.
-- A rebuild command that cannot start at all now ends the run as failed
-  instead of leaving the window waiting.
+- A rebuild command that cannot start at all is now marked failed instead of
+  leaving the window waiting.
+- **Land committed a symlink to a folder.** An agent worktree's `.venv` link
+  to the checkout's virtualenv was committed because `.gitignore` had only
+  `.venv/`, which does not match a link. Merged into `main`, it replaced the
+  real virtualenv with a link to itself. Land now never commits a symlink to a
+  folder, or one whose name is ignored as a folder. It leaves the link in place
+  and ignores its exact path. A link already committed on a branch is not
+  checked yet.
+- **Update now stopped at the first failed rebuild,** so the apps after it,
+  and Lab Hub's own update (always last), were never built. A failed or
+  unstartable rebuild is now marked failed and the run goes on. The window and
+  the page name the apps that failed. Lab Hub still restarts into its new
+  build when only another app failed. Terminal installers still open only when
+  nothing failed.
+- Check builds said "1 commits further on"; it now says "1 commit".

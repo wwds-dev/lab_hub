@@ -28,6 +28,11 @@ from .registry import ExternalApp
 APPLICATIONS = Path("/Applications")
 
 
+def commits_further(count: int) -> str:
+    """"1 commit further on", "3 commits further on" (spec land-update-gaps §3.3)."""
+    return f"{count} commit{'' if count == 1 else 's'} further on"
+
+
 def bundle_path(app: ExternalApp, lab_root: Path | None = None) -> Path | None:
     """The installed .app, if it is there.
 
@@ -1263,8 +1268,8 @@ def _build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
     if found.stale:
         return BuildStatus(
             app, found, "behind",
-            f"built at {found.text}, but the source is {found.behind} commits "
-            "further on.", script, command,
+            f"built at {found.text}, but the source is {commits_further(found.behind)}.",
+            script, command,
         )
     if found.root:
         return BuildStatus(

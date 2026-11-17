@@ -20,3 +20,5 @@
 {"ts": "2026-11-17T15:25:30", "gate": "define", "by": "owner", "words": "Approve as recommended", "recorded_by": "agent", "spec": "self-update"}
 {"ts": "2026-11-17T15:28:26", "gate": "architect", "by": "owner", "words": "Approve architecture", "recorded_by": "agent", "spec": "self-update"}
 {"ts": "2026-11-17T17:18:22", "gate": "define", "by": "owner", "words": "Approve as recommended", "recorded_by": "agent", "spec": "land-fast"}
+{"ts": "2026-11-17T18:46:51", "gate": "define", "by": "owner", "words": "Approve as recommended", "recorded_by": "agent", "spec": "land-update-gaps"}
+{"ts": "2026-11-17T19:39:04", "gate": "release", "by": "owner", "words": "release", "recorded_by": "agent"}

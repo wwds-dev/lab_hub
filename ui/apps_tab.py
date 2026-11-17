@@ -292,7 +292,7 @@ class AppCard(Tile):
                 else ""
             )
             + (
-                f" The working checkout is {found.behind} commits further on, so Launch "
+                f" The working checkout is {launcher.state.commits_further(found.behind)}, so Launch "
                 "opens the older build until it is rebuilt and reinstalled."
                 if found.stale
                 else ""
@@ -811,8 +811,9 @@ class AppsTab(TilePage):
         Whatever the outcome, re-check versions afterwards so the tiles stop
         saying "behind" the moment a rebuild lands — a cancelled or partial run
         simply leaves the ones it did not reach still saying so, which is true.
-        A run that failed or was cancelled opens no Terminal window: like the
-        rebuilds themselves, it stops rather than going on. The windows are not
+        A run in which any rebuild failed, or that was cancelled, opens no
+        Terminal window; a failed rebuild no longer ends the run itself (spec
+        land-update-gaps §3.2). The windows are not
         watched; Refresh shows the result once the owner has answered there.
         The Terminal commands are checked before the first rebuild starts, and a
         Terminal step that fails is shown to the owner rather than lost.
@@ -838,24 +839,35 @@ class AppsTab(TilePage):
             try:
                 dialog = Rebuild(commands, window, hold=self._hold_for(restarts))
                 dialog.exec()
+                failed = list(dialog.failed)
+                names = ", ".join(window.name_for(c) for c in failed)
             finally:
                 if created:  # show_build_report deletes the window it passed in
                     window.deleteLater()
             self.recheck()
-            if not dialog.succeeded:
+            # A failed rebuild no longer ends the run (spec land-update-gaps
+            # §3.2): only a cancel or a broken hold check stops it early.
+            if not dialog.ran_to_end:
                 if by_hand:
                     self.launched.emit(
                         "No Terminal windows opened because the rebuild did "
                         "not finish."
                     )
                 return
-            built_self = bool(restarts) and restarts not in getattr(dialog, "skipped", ())
-            others = len([c for c in commands if c != restarts])
-            if others:
-                said.append(f"Rebuilt and reinstalled {others} app"
-                            f"{'' if others == 1 else 's'}.")
+            built_self = (bool(restarts) and restarts not in getattr(dialog, "skipped", ())
+                          and restarts not in failed)
+            others = [c for c in commands if c != restarts]
+            rebuilt = len([c for c in others if c not in failed])
+            if rebuilt:
+                said.append(f"Rebuilt and reinstalled {rebuilt} app"
+                            f"{'' if rebuilt == 1 else 's'}.")
+            if failed:
+                said.append(f"{len(failed)} failed ({names}): see Check builds.")
             if restarts and not built_self:
                 said.append("Lab Hub itself was not rebuilt.")
+            if failed and by_hand:
+                said.append("No Terminal windows opened because a rebuild failed.")
+                by_hand = []
         elif window is not None and window.isVisible():
             window.done(0)  # nothing to watch here: the installers run in Terminal
         if by_hand:

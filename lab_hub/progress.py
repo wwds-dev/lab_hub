@@ -755,7 +755,8 @@ class BuildModel(RunModel):
 
     def refuse(self, key: str, reason: str) -> None:
         """A held command will not start at all (spec self-update §5.3): the row
-        says why and the run ends, as after a failed rebuild."""
+        says why; the run goes on (Skipped) or, when the check itself broke,
+        ends."""
         row = self._row(key)
         if row is not None and row.state == WAITING:
             if row.units:

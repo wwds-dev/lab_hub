@@ -154,6 +154,7 @@ class Sorted:
     ignore: tuple[str, ...] = ()  # nested repos: their own repo, ignored here
     error: str = ""
     blobs: tuple[tuple[str, str], ...] = ()  # (path, git blob id of the bytes scanned)
+    links: tuple[str, ...] = ()  # links to folders: ignored in place, never committed
 
 
 def gitleaks_exe() -> str | None:
@@ -279,10 +280,12 @@ def sort_untracked(worktree: Path) -> Sorted:
     paths = untracked(worktree)
     if paths is None:
         return Sorted(error="git cannot list its untracked files")
-    commit, quarantine, ignore, to_scan = [], [], [], []
+    commit, quarantine, ignore, to_scan, links = [], [], [], [], []
     for rel in paths:
         if rel.endswith("/"):
             ignore.append(rel)
+        elif folder_link(worktree, rel):
+            links.append(rel)
         elif secret_by_name(rel):
             quarantine.append((rel, "a secret by its name"))
         elif _size(worktree / rel) > MAX_BYTES:
@@ -300,7 +303,60 @@ def sort_untracked(worktree: Path) -> Sorted:
         else:
             commit.append(rel)
     return Sorted(tuple(commit), tuple(quarantine), tuple(ignore),
-                  blobs=tuple((r, blobs[r]) for r in commit))
+                  blobs=tuple((r, blobs[r]) for r in commit), links=tuple(links))
+
+
+def folder_link(worktree: Path, rel: str) -> bool:
+    """A symlink Land must never commit: it points at a folder, or the ignore
+    rules would ignore its name if it were one. `.venv/` does not match a link,
+    so SONAR's agent worktree committed its `.venv` link, and the main checkout
+    that took it lost its virtualenv (spec land-update-gaps §3.1)."""
+    path = worktree / rel
+    if not path.is_symlink():
+        return False
+    try:
+        if path.is_dir() or os.readlink(path).endswith("/"):
+            return True
+    except OSError:
+        return True  # cannot tell: never commit it
+    return ignored_as_folder(worktree, rel)
+
+
+def ignored_as_folder(worktree: Path, rel: str) -> bool:
+    """Would `rel` be ignored if it were a folder? git will not check a path
+    behind a symlink, so ask about it in an empty copy of the folders that
+    holds only their `.gitignore` files (the git dir still adds
+    `info/exclude` and `core.excludesFile`). True when git cannot tell."""
+    rc, git_dir, _ = rt.git(worktree, "rev-parse", "--absolute-git-dir")
+    if rc != 0 or not git_dir:
+        return True
+    parts = Path(rel).parts
+    try:
+        root = worktree.resolve()
+    except OSError:
+        return True
+    with tempfile.TemporaryDirectory(prefix="lab-hub-ignore-") as tmp:
+        mirror = Path(tmp)
+        try:
+            for depth in range(len(parts)):
+                src = worktree.joinpath(*parts[:depth], ".gitignore")
+                # git does not follow a .gitignore that is a link either, and a
+                # folder swapped for a link since the listing is not followed
+                # out of the worktree (security P3-3).
+                if (src.is_file() and not src.is_symlink()
+                        and src.resolve().is_relative_to(root)):
+                    dest = mirror.joinpath(*parts[:depth], ".gitignore")
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(src, dest)
+        except OSError:
+            return True
+        # "./": a name starting with ":" is not read as pathspec magic (review
+        # P3-1, security P3-1).
+        rc, _, err = rt.git(mirror, f"--git-dir={git_dir}", f"--work-tree={mirror}",
+                            "check-ignore", "--no-index", "-q", "--", f"./{rel}/")
+    # 0: ignored; 1 with nothing said: not ignored. A git that could not run or
+    # timed out also comes back as 1, with the error: cannot tell (review P3-2).
+    return not (rc == 1 and not err)
 
 
 def _size(path: Path) -> int:
@@ -370,6 +426,7 @@ class Step:
     files: tuple[str, ...] = ()  # untracked, switch: the files that may be committed
     quarantine: tuple[tuple[str, str], ...] = ()
     ignored: tuple[str, ...] = ()  # nested repos, only added to .gitignore
+    links: tuple[str, ...] = ()  # links to folders, only added to .gitignore
 
     @property
     def label(self) -> str:
@@ -389,6 +446,8 @@ class Step:
                 f"{p} ({why})" for p, why in self.quarantine))
         if self.ignored:
             parts.append("ignore nested repos: " + ", ".join(self.ignored))
+        if self.links:
+            parts.append("ignore links to folders (never committed): " + ", ".join(self.links))
         return f"{self.repo_name}: In {self.target}, " + "; ".join(parts or ["nothing"])
 
 
@@ -506,9 +565,10 @@ def prep(name: str, repo: Path, busy) -> tuple[list[Step], list[Stop]]:
         if sort.error:
             stops.append(Stop(name, str(wt.path), sort.error))
             continue
-        if sort.commit or sort.quarantine or sort.ignore:
+        if sort.commit or sort.quarantine or sort.ignore or sort.links:
             steps.append(Step(name, repo, "untracked", str(wt.path), files=sort.commit,
-                              quarantine=sort.quarantine, ignored=sort.ignore))
+                              quarantine=sort.quarantine, ignored=sort.ignore,
+                              links=sort.links))
         if wt.main and rt.current_branch(wt.path) != default:
             steps.append(Step(name, repo, "switch", str(wt.path),
                               rt.current_branch(wt.path) or "a detached HEAD",
@@ -559,9 +619,10 @@ def apply_step(step: Step, log: Path | None = None, busy="fresh",
         sort = sort_untracked(path)
         if sort.error:
             return False, f"skipped — {sort.error}"
-        if sort.commit or sort.quarantine:
+        if sort.commit or sort.quarantine or sort.links:
             ok, msg = _apply_untracked(Step(step.repo_name, step.repo, "untracked", step.target,
-                                            files=step.files, quarantine=sort.quarantine),
+                                            files=step.files, quarantine=sort.quarantine,
+                                            links=sort.links),
                                        path, log, quarantine_root, stamp)
             if not ok:
                 return ok, msg
@@ -620,6 +681,12 @@ def _apply_untracked(step: Step, path: Path, log: Path | None,
             return False, "skipped — a nested repo has a line break in its name: rename it"
         lines.append(ignore_line(rel.rstrip("/")) + "/")
         rt._log(f"IGNORED nested repo {path / rel}", log)
+    for rel in sort.links:
+        if "\n" in rel or "\r" in rel:
+            return False, "skipped — a link to a folder has a line break in its name: rename it"
+        # No trailing "/": a folder pattern does not match a link (spec land-update-gaps §3.1).
+        lines.append(ignore_line(rel))
+        rt._log(f"IGNORED link to a folder {path / rel}", log)
     add = list(commit)
     if lines:
         gi = path / ".gitignore"
@@ -630,7 +697,7 @@ def _apply_untracked(step: Step, path: Path, log: Path | None,
             with gi.open("a") as fh:
                 if before and not before.endswith("\n"):
                     fh.write("\n")
-                fh.write("# Lab Hub: moved to quarantine or a nested repo, "
+                fh.write("# Lab Hub: moved to quarantine, a nested repo or a link to a folder, "
                          f"{stamp}\n" + "\n".join(lines) + "\n")
         except OSError as exc:
             return False, f"failed — could not update .gitignore: {exc}"
@@ -653,6 +720,9 @@ def _apply_untracked(step: Step, path: Path, log: Path | None,
     done = f"{len(commit)} committed"
     if sort.quarantine:
         done += f", {len(sort.quarantine)} moved to {dest_dir}"
+    if sort.links:
+        done += (f", {len(sort.links)} link{'s' if len(sort.links) != 1 else ''} to a folder "
+                 f"ignored ({', '.join(sort.links)})")
     return True, done
 
 

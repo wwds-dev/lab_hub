@@ -332,7 +332,14 @@ Before that set runs, Land prepares the repo (`lab_hub/land_resolve.py`, ADR
   `.env.example`, keys, `*credentials*`), files over 10 MB and files with a
   finding are moved to `~/Documents/lab/.quarantine/<repo>/<date>/` (owner-only)
   and their exact paths added to `.gitignore`. Nothing is deleted and the
-  secret is never logged.
+  secret is never logged. **A symlink to a folder** (an agent worktree's
+  `.venv` linked to the checkout's) is never committed. The same goes for any
+  symlink whose name the repo ignores as a folder: `.venv/` matches a folder,
+  not a link. Land leaves the link where it is and adds its exact path
+  (`/.venv`) to `.gitignore`. A folder link you do want in the repo (like
+  `shopfront/website`) has to be committed by hand, after you remove that
+  line. This covers only files Land commits itself. A link an agent already
+  committed on its branch still merges as it is. Spec `land-update-gaps.md`.
 - **A checkout on a side branch** has its open work committed and is switched
   back to the default branch; the side branch then lands like any other.
 - **A detached HEAD** holding work no branch has is put on a branch
@@ -463,7 +470,10 @@ shows one "Rebuilding" stage instead. Verify is Lab Hub reading the installed
 version afterwards, and the row says which version that is; it is for
 information and never turns a successful rebuild into a failure. **Live
 output** holds the build log and opens by itself when a rebuild fails. A failed
-rebuild stops the run. On this step Copy commands copies without closing the
+rebuild no longer stops the run: its row is marked failed, the output says
+"going on with the next", and the other apps, Lab Hub's own build included,
+are still built. The window ends with "N of M rebuilds failed: <apps>". If Lab
+Hub's own build passed, it still restarts into it. On this step Copy commands copies without closing the
 window. **Cancel** stops the whole run: the running build and everything its
 script started (PyInstaller, the copy into `/Applications`) are stopped, no
 later rebuild starts, and the window stays open at Done with the rows readable

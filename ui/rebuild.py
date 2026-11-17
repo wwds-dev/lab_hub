@@ -9,8 +9,10 @@ rebuild takes minutes and you want somewhere to watch it and stop it. This keeps
 both of those — live output and a Cancel that kills the running build — without
 leaving Lab Hub, which is the whole point of a button that says "Update now".
 
-Each command is its own `cd … && ./build_app.sh`, so they are independent; one
-that fails stops the run rather than rebuilding on top of a broken build. They
+Each command is its own `cd … && ./build_app.sh`, so they are independent: one
+that fails or cannot start is marked failed and the next one runs, so one broken
+app never keeps the others, or Lab Hub's own update, from being built (spec
+`docs/specs/land-update-gaps.md` §3.2). They
 run through a login shell (`$SHELL -lc`) because that is the environment the
 Terminal handoff always assumed — the build scripts reach for `pyinstaller`,
 `uv` and friends that a bundle's bare PATH would miss — and with `child_env()`
@@ -68,7 +70,8 @@ class Rebuild(QObject):
     `exec()` returns once the run has ended and the window is closed. Closing
     the window by any route before the run has ended ends it: a running build
     is killed with everything it started, and no further command starts. A
-    command that cannot start at all ends the run as failed.
+    command that fails or cannot start is listed in `failed` and the run goes
+    on; `succeeded` is True only when every command passed.
     """
 
     def __init__(self, commands: list[str], window, *, verify=None, hold=None) -> None:
@@ -87,6 +90,8 @@ class Rebuild(QObject):
         self._hold = hold
         self._holding: str | None = None
         self.skipped: list[str] = []
+        # Commands that exited non-zero or could not start; the run went on.
+        self.failed: list[str] = []
         self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         self._partial = ""
 
@@ -111,10 +116,16 @@ class Rebuild(QObject):
         QTimer.singleShot(0, self._start_next)
 
     @property
-    def succeeded(self) -> bool:
+    def ran_to_end(self) -> bool:
+        """Every command had its turn: not cancelled, and no hold check broke off
+        the run. Some may still have failed (`failed`)."""
         return not self._cancelled and not self._failed and self._index >= len(
             self._commands
         )
+
+    @property
+    def succeeded(self) -> bool:
+        return self.ran_to_end and not self.failed
 
     @property
     def running(self) -> bool:
@@ -245,10 +256,7 @@ class Rebuild(QObject):
             self._all_done()
             return
         if code != 0:
-            self._failed = True
-            self._window.command_finished(command, ok=False, code=code)
-            self._window.say(f"[stopped — a rebuild exited with code {code}]")
-            self._all_done()
+            self._failed_one(command, code, f"exited with code {code}")
             return
         self._window.command_finished(command, ok=True)
         samples = self._window.verified(command, self._read_version(command))
@@ -267,11 +275,20 @@ class Rebuild(QObject):
             return
         if self._index >= len(self._commands):
             return
-        command = self._command
-        self._failed = True
-        self._window.command_finished(command, ok=False, code=None)
-        self._window.say(f"[stopped — a rebuild could not start: {self._proc.errorString()}]")
-        self._all_done()
+        self._failed_one(self._command, None,
+                         f"could not start: {self._proc.errorString()}")
+
+    def _failed_one(self, command: str, code: int | None, why: str) -> None:
+        """Mark this command failed and go on with the next (§3.2)."""
+        self.failed.append(command)
+        self._window.command_finished(command, ok=False, code=code)
+        more = self._index + 1 < len(self._commands)
+        self._window.say(f"[{self._window.name_for(command)}: the rebuild {why}"
+                         f"{' — going on with the next' if more else ''}]")
+        self._index += 1
+        # Next turn of the event loop: never start a process from inside the
+        # signal of the one that just ended.
+        QTimer.singleShot(0, self._start_next)
 
     def _read_version(self, command: str) -> str:
         """Verify: what Lab Hub now reads as installed. Never decides success."""
@@ -289,8 +306,11 @@ class Rebuild(QObject):
         if self._ended:
             return
         self._ended = True
-        how = "cancelled" if self._cancelled else "failed" if self._failed else "done"
-        self._window.update_ended(how)
+        how = ("cancelled" if self._cancelled
+               else "failed" if self._failed or self.failed else "done")
+        # A skipped command (Lab Hub's own, held back) was never a rebuild.
+        self._window.update_ended(how, failed=tuple(self.failed),
+                                  total=len(self._commands) - len(self.skipped))
         self._maybe_quit()
 
     def _maybe_quit(self) -> None:
