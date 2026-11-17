@@ -28,6 +28,8 @@ from .progress_window import _label, _plain_tip
 WIDTH = 640
 SCREEN_SHARE = 0.7  # the cards scroll when taller than this share of the screen
 WINDOW_SHARE = 0.9  # and the whole window stays within this share
+DETAILS_MIN = 80  # with Details open, it and the cards share the room left,
+CARDS_MIN_WITH_DETAILS = 70  # so a short screen still fits (review P2-2)
 FOOTNOTE = ("Each step is checked again just before it runs. Nothing is forced. "
             "Cancel leaves everything as it is.")
 
@@ -48,6 +50,8 @@ def _pill(text: str, tone: str) -> QLabel:
 
 def headline(todo: list[land.LandPlan]) -> tuple[str, str]:
     """The title and the one sentence under it."""
+    if not todo:
+        return "Land", "Nothing to land."
     title = f"Land {todo[0].name}" if len(todo) == 1 else f"Land {len(todo)} repos"
     stops = sum(len(p.stops) for p in todo)
     if not stops:
@@ -191,7 +195,7 @@ class LandConfirmDialog(QDialog):
         self.details = QPlainTextEdit(details_text(todo))
         self.details.setObjectName("runLog")
         self.details.setReadOnly(True)
-        self.details.setMinimumHeight(180)
+        self.details.setMinimumHeight(DETAILS_MIN)
         self.details.hide()
         outer.addWidget(self.details)
 
@@ -219,21 +223,26 @@ class LandConfirmDialog(QDialog):
         self.details.setVisible(show)
         self.toggle.setText("Hide details" if show else "Show details")
         # Details takes room from the cards, and the window grows as far as the screen allows.
-        self.scroll.setMinimumHeight(min(self._cards_height, 160) if show else self._cards_height)
-        screen = self.screen().availableGeometry().height() if self.screen() else 900
-        self.resize(self.width(), min(self.sizeHint().height() + (220 if show else 0),
-                                      int(screen * WINDOW_SHARE)))
+        self.scroll.setMinimumHeight(min(self._cards_height, CARDS_MIN_WITH_DETAILS) if show
+                                     else self._cards_height)
+        self.resize(self.width(), min(self.sizeHint().height(),
+                                      int(self._screen_height() * WINDOW_SHARE)))
+
+    def _screen_height(self) -> int:
+        screen = self.screen()
+        return screen.availableGeometry().height() if screen is not None else 900
 
     def _fit(self) -> None:
         """640 wide; as tall as the cards need, up to a share of the screen."""
         self.setMinimumWidth(WIDTH)
         holder = self.scroll.widget()
-        holder.setFixedWidth(WIDTH - 36 - 2)
-        holder.adjustSize()
-        need = holder.sizeHint().height()
-        holder.setMinimumWidth(0)
-        holder.setMaximumWidth(16777215)
-        screen = self.screen().availableGeometry().height() if self.screen() else 900
+        # Word-wrapped labels: ask the layout for its height at the real width
+        # (sizeHint ignores height-for-width; review P2-3).
+        width = WIDTH - 36 - self.scroll.verticalScrollBar().sizeHint().width()
+        layout = holder.layout()
+        need = (layout.totalHeightForWidth(width) if layout.hasHeightForWidth()
+                else holder.sizeHint().height())
+        screen = self._screen_height()
         rest = self.sizeHint().height() - self.scroll.sizeHint().height()
         room = min(int(screen * SCREEN_SHARE), int(screen * WINDOW_SHARE) - rest)
         self._cards_height = min(need, max(160, room))

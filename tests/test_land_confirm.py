@@ -132,12 +132,88 @@ def test_no_claude_no_panel_and_exact_counts_without_up_to():
     assert panel.total == "at most $3 in total" and "Review branches" not in panel.body
 
 
+def _golden_plan():
+    act = (lambda kind, target, detail="": _act(LAB, "lab_hub", kind, target, detail))
+    return land.LandPlan(
+        "lab_hub", LAB,
+        (act("commit", str(LAB)), act("delete_branch", "old"),
+         act("claude_merge", "feat", "pytest -q"), act("push", "main")),
+        claude="/bin/claude", unlanded=2,
+        stops=(land_resolve.Stop("lab_hub", str(LAB / "w"),
+                                 "it has unresolved conflicts: resolve them in Terminal"),))
+
+
+def test_sentence_and_notice_are_byte_identical_to_before():
+    """Golden texts from the parent of 4072f72 (review P3-6)."""
+    plan = _golden_plan()
+    assert plan.sentence == (
+        "lab_hub: commit open changes in 1 worktree, merge 1 branch into main (1 with Claude "
+        "Code resolving conflicts), push main to origin, delete 1 landed branch, then merge "
+        "the 2 other branches not landed yet where they can; Claude Code decides for any that "
+        "still cannot land: land it or archive it as a tag, stop at 1 thing only you can "
+        "clear: lab_hub: /lab/lab_hub/w — it has unresolved conflicts: resolve them in "
+        "Terminal.")
+    assert plan.claude_notice == (
+        "up to 3 branches may be sent (1 known to conflict now) to Claude Code (model "
+        f"{claude_resolve.MODEL}, at most $3 each, $9 in total). Code from this repo goes to "
+        "Anthropic, as in any Claude Code session. Lab Hub runs the repo's tests itself "
+        "(pytest -q); a merge that passes them lands and is pushed without review. A branch "
+        "that fails is archived as a tag, never lost.\n\nA branch that still does not land is "
+        "sent to Claude Code read-only (its log and diff, at most $0.50 each, $1.00 for 2 "
+        "branches at most). An archived branch is kept as a local tag archive/<branch>/<date>, "
+        "never pushed, and can be restored from Review branches.")
+
+
+@pytest.mark.parametrize("claude,merges,unlanded", [
+    (None, 0, 3),            # no Claude Code: triage disclosed, nothing merged by it
+    ("/bin/claude", 2, 0),   # known conflicts only
+    ("/bin/claude", 0, 2),   # only possible merges, plus triage
+    ("/bin/claude", 1, 2),   # both
+    (None, 0, 0),            # nothing for Claude Code: no panel
+])
+def test_the_panel_total_is_the_old_notices_amounts(claude, merges, unlanded):
+    """Review P2-1: the one total is the old merge total plus the old triage amount."""
+    acts = tuple(_act(LAB, "r", "claude_merge", f"b{i}", detail="pytest -q")
+                 for i in range(merges)) + (_act(LAB, "r", "push", "main"),)
+    plan = land.LandPlan("r", LAB, acts, claude=claude, unlanded=unlanded)
+    old = plan.claude_notice
+    panel = land.claude_panel([plan, plan])  # two repos alike: amounts add up
+    if not old:
+        assert panel is None
+        return
+    later = unlanded if claude else 0
+    n = merges + later
+    expected = 2 * (n * claude_resolve.BUDGET_USD + unlanded * land_resolve.TRIAGE_BUDGET_USD)
+    assert panel.total == f"at most {land._usd(expected)} in total"
+    if n:
+        assert f"${n * claude_resolve.BUDGET_USD:.0f} in total" in old
+        assert ("up to" in panel.lines[0][0]) == bool(later) == ("up to" in old)
+        assert f"({2 * merges} known to conflict now)" in panel.lines[0][0] or not later
+        for fact in ("goes to Anthropic", "pushed without review",
+                     "archived as a tag, never lost"):
+            assert fact in old and fact in panel.body
+    if unlanded:
+        assert "read-only" in old and "read-only" in panel.lines[-1][0]
+        for fact in ("archive/<branch>/<date>", "never pushed", "restored from Review branches"):
+            assert fact in old and fact in panel.body
+
+
+def test_the_main_checkout_through_a_link_is_still_the_main_checkout(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    (tmp_path / "link").symlink_to(real)
+    stop = land_resolve.Stop("r", str(tmp_path / "link"), "it has unresolved conflicts: "
+                             "resolve them in Terminal")
+    assert land.stop_view(stop, real).place == "Main checkout"
+
+
 def test_headline_counts_the_stops():
     plans = screenshot_plans()
     title, line = headline(plans[:3])
     assert title == "Land 3 repos" and "stops at 4 things only you can clear" in line
     plain = land.LandPlan("Imprint", LAB, (_act(LAB, "Imprint", "push", "main"),))
     assert headline([plain]) == ("Land Imprint", "Land does all of it; nothing needs you.")
+    assert headline([]) == ("Land", "Nothing to land.")
 
 
 def test_details_keep_todays_texts_and_every_pid():
@@ -186,3 +262,48 @@ def test_land_accepts_and_details_toggle(dialog):
     assert not dialog.details.isHidden() and dialog.toggle.text() == "Hide details"
     dialog.land.click()
     assert dialog.result() == QDialog.DialogCode.Accepted
+
+
+def test_a_tooltip_shows_markup_as_text(qapp):
+    plan = land.LandPlan("r", LAB, (_act(LAB, "r", "push", "main"),), stops=(
+        land_resolve.Stop("r", str(LAB / "w"), "<b>bold</b> branch: resolve them in Terminal"),))
+    box = LandConfirmDialog([plan])
+    tip = box.cards[0].stop_rows[0].toolTip()
+    assert tip.startswith("<qt>") and "&lt;b&gt;bold&lt;/b&gt;" in tip and "<b>" not in tip
+    box.deleteLater()
+
+
+def test_details_round_trip_stays_on_the_screen(qapp):
+    """Review P2-2: opening Details grows the window but keeps it on the screen; the
+    cards give up their room. (90% is the aim; on a short screen the disclosure text,
+    which must stay visible, can need a little more.)"""
+    plans = screenshot_plans() * 4  # many cards: the cards scroll
+    box = LandConfirmDialog(plans)
+    box.show()
+    screen = box._screen_height()
+    closed = box.height()
+    assert closed <= screen * 0.9 + 1 and box.scroll.minimumHeight() <= screen * 0.7
+    box.toggle.click()
+    assert not box.details.isHidden() and box.height() <= screen
+    assert box.scroll.minimumHeight() <= 70
+    box.toggle.click()
+    assert box.details.isHidden() and box.scroll.minimumHeight() == box._cards_height
+    box.close()
+    box.deleteLater()
+
+
+def test_the_cards_area_fits_wrapped_text_at_its_real_width(qapp):
+    """Review P2-3: the height asked for matches the cards laid out at that width."""
+    long = "a process is running in it: close that terminal or session, then Land again"
+    stops = tuple(land_resolve.Stop("r", str(LAB / f"w{i}" / ("deep-folder-" * 6)), long,
+                                    tuple(f"proc{j} (pid {j})" for j in range(9)))
+                  for i in range(3))
+    plan = land.LandPlan("r", LAB, (_act(LAB, "r", "push", "main"),), stops=stops)
+    box = LandConfirmDialog([plan])
+    box.show()
+    qapp.processEvents()
+    holder = box.scroll.widget()
+    laid_out = holder.layout().totalHeightForWidth(box.scroll.viewport().width())
+    assert abs(box._cards_height - laid_out) <= 24
+    box.close()
+    box.deleteLater()

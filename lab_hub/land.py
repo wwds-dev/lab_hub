@@ -295,13 +295,21 @@ class StopView:
     full: str  # the stop's label, plus every process with its pid
 
 
+def _same(a: Path, b: Path) -> bool:
+    """Same folder through links (/var and /private/var, a relinked app)."""
+    try:
+        return a.resolve() == b.resolve()
+    except OSError:
+        return False
+
+
 def _place(stop: land_resolve.Stop, repo: Path) -> str:
     if stop.reason.startswith("not a git checkout"):
         return stop.target
     target = Path(stop.target)
     if not target.is_absolute():
         return stop.target  # a branch name
-    if target == repo:
+    if target == repo or _same(target, repo):
         return "Main checkout"
     return f"Worktree {target.name}"
 
