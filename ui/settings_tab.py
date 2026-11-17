@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from lab_hub import APP_NAME, config, launcher, login_item, version
+from lab_hub import APP_NAME, config, launcher, licence_paths, login_item, version
 
 from . import theme
 from .tiles import Refreshable
@@ -129,6 +129,18 @@ class SettingsTab(QWidget, Refreshable):
         build.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         about_layout.addWidget(build)
         about_layout.addWidget(theme.hint(version.tooltip()))
+        about_layout.addWidget(
+            theme.hint(
+                f"{APP_NAME} is free software under the GNU AGPL-3.0-or-later. "
+                "The licence texts and third-party notices ship inside the app."
+            )
+        )
+        licences = QPushButton("Show licences")
+        licences.clicked.connect(self._reveal_licences)
+        licences_row = QHBoxLayout()
+        licences_row.addWidget(licences)
+        licences_row.addStretch(1)
+        about_layout.addLayout(licences_row)
         column.addWidget(about_frame)
 
         paths_layout.addWidget(theme.section_title("Files"))
@@ -213,6 +225,10 @@ class SettingsTab(QWidget, Refreshable):
         if not config.CONFIG_PATH.exists():
             config.save(self.settings)
         launcher.reveal(config.CONFIG_PATH)
+
+    def _reveal_licences(self) -> None:
+        # In the .app, Frameworks/ holds only a link; show the real folder.
+        launcher.reveal(licence_paths()[0].resolve())
 
     def set_appearance(self, value: str) -> None:
         """Switch the theme now and remember it — no Save needed."""

@@ -141,6 +141,47 @@ def _probe_tls() -> tuple[bool, str]:
     return ok, detail
 
 
+def _probe_web_render(timeout_ms: int = 20000) -> tuple[bool, str]:
+    """Load a page in a real, unshown QWebEngineView, as the Dashboards tab does.
+
+    An import proves only that the Python module is there. Rendering needs the
+    QtWebEngineProcess helper, its resources and every Qt framework it links,
+    which is what a build that prunes frameworks could break.
+    """
+    try:
+        from PySide6.QtCore import QCoreApplication, QEvent, QEventLoop, QTimer
+        from PySide6.QtWebEngineWidgets import QWebEngineView
+        from PySide6.QtWidgets import QApplication
+    except ImportError as error:
+        return False, f"unavailable ({error})"
+
+    app = QApplication.instance() or QApplication([])  # noqa: F841
+    view = QWebEngineView()
+    loop = QEventLoop()
+    result: dict[str, object] = {}
+
+    def loaded(ok: bool) -> None:
+        result["ok"] = ok
+        view.page().runJavaScript("document.title", 0, title_read)
+
+    def title_read(title) -> None:
+        result["title"] = title
+        loop.quit()
+
+    view.loadFinished.connect(loaded)
+    QTimer.singleShot(timeout_ms, loop.quit)
+    view.setHtml("<title>selftest-ok</title><p>Lab Hub</p>")
+    loop.exec()
+    # Delete the page before the profile goes at exit, or Qt warns about it.
+    view.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    if result.get("ok") and result.get("title") == "selftest-ok":
+        return True, "renders a page"
+    if "ok" not in result:
+        return False, f"no page loaded within {timeout_ms // 1000} s"
+    return False, f"page load failed (ok={result.get('ok')}, title={result.get('title')!r})"
+
+
 def _probe_dock_policy() -> str:
     """Read the live activation policy, and whether it can be switched."""
     try:
@@ -204,6 +245,16 @@ def selftest() -> int:
     stripped = sorted(set(os.environ) - set(launcher.child_env()))
     print(f"  child env strips: {', '.join(stripped) if stripped else 'nothing'}")
 
+    from lab_hub import licence_paths
+
+    missing_licences = [path.name for path in licence_paths() if not path.is_file()]
+    print(f"  licence files:   {'all found' if not missing_licences else 'MISSING ' + ', '.join(missing_licences)}")
+    if missing_licences:
+        problems.append(
+            f"licence texts missing from the bundle ({', '.join(missing_licences)}); "
+            "AGPL-3.0 and LGPL-3.0 require them to ship with the app"
+        )
+
     if not icon.exists():
         problems.append("icon asset missing from the bundle")
     if not tray_icon.exists():
@@ -236,6 +287,13 @@ def selftest() -> int:
         from PySide6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
 
         print("  QtWebEngine:     importable")
+        web_ok, web_detail = _probe_web_render()
+        print(f"  web render:      {web_detail}")
+        if not web_ok:
+            problems.append(
+                f"QtWebEngine imports but cannot show a page ({web_detail}): the "
+                "Dashboards page would stay blank"
+            )
     except ImportError as error:
         print("  QtWebEngine:     MISSING")
         problems.append(

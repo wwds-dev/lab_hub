@@ -311,3 +311,9 @@ All of these need the owner, through §6 (updated above):
 - the recovery from a `broken` outcome (§6 D2, by reading only: do not force it).
 
 The sync companions surviving the restart is also unverified.
+
+## Owner's manual check, run 2026-11-17 (sections A–D)
+
+Run by Claude Code in the owner's session, at the owner's request; E was skipped.
+Before: installed Lab Hub v2.177 (`5e5a19f`); this commit moves `main` ahead of it.
+
