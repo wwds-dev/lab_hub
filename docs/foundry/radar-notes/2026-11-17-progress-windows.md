@@ -27,6 +27,14 @@ are still placeholders**), `requirements.txt` (all unpinned), `requirements-dev.
 - No better-fitting tool or library for the progress windows: the work is plain Qt plus the
   standard library, and no connector or plugin would help.
 
+## Status (2026-11-17)
+
+- Finding 1: **open.** PyPI still has no PySide6 6.12.1 (latest 6.12.0, rechecked four times). Closes
+  when 6.12.1 ships and the floor in `requirements.txt` moves to `>=6.12.1`.
+- Finding 2: **resolved in part.** `requirements.txt` now pins `PySide6>=6.12.0,<6.13` (owner's yes),
+  so Qt cannot fall below 6.12. The 6.12.1 floor is the remaining step.
+- Finding 3: skipped, as recommended.
+
 ## Gaps
 
 - `app-context.md` Stack and Security surface are unfilled, so this check inferred the stack from

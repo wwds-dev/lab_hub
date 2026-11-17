@@ -45,6 +45,11 @@ README and the specs in `docs/specs/` describe them.
 - The **Land all** summary ("Landed N of M repos.", and why each other repo
   did not land) is now the end state of the Land window instead of a separate
   box.
+- `requirements.txt` now limits PySide6 to `>=6.12.0,<6.13` instead of taking
+  whatever is newest, so a rebuild cannot pick up a Qt older than the one the
+  progress windows need. The floor moves to 6.12.1 once Qt ships it, which also
+  fixes CVE-2026-116337 (a crafted HTTP response can exhaust resources in Qt
+  Network; Lab Hub reaches it through the Links tab).
 
 ### Fixed
 - Escape during a rebuild hid the window but left the build running unwatched,
