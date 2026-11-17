@@ -317,3 +317,8 @@ The sync companions surviving the restart is also unverified.
 Run by Claude Code in the owner's session, at the owner's request; E was skipped.
 Before: installed Lab Hub v2.177 (`5e5a19f`); this commit moves `main` ahead of it.
 
+
+First attempt (20:58–21:10): stopped before the restart. While Update now was running, the
+owner's Lab Hub release in another session installed v2.199 (`a7bcc34`) directly with
+`build_app.sh --install`, so the self-update path never ran (no `update/` folder was made).
+Rerun from installed v2.199; this commit moves `main` ahead of it.
