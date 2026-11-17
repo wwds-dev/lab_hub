@@ -62,6 +62,11 @@ README and the specs in `docs/specs/` describe them.
 - The **Land all** summary ("Landed N of M repos.", and why each other repo
   did not land) is now the end state of the Land window instead of a separate
   box.
+- `requirements.txt` now limits PySide6 to `>=6.12.0,<6.13` instead of taking
+  whatever is newest, so a rebuild cannot pick up a Qt older than the one the
+  progress windows need. The floor moves to 6.12.1 once Qt ships it, which also
+  fixes CVE-2026-116337 (a crafted HTTP response can exhaust resources in Qt
+  Network; Lab Hub reaches it through the Links tab).
 - **Land runs each test suite less often.** After a conflicting branch lands,
   Land no longer re-runs the default branch's tests on the commit it has just
   tested. A chain of N branches that need Claude Code now takes N + 1 test runs
