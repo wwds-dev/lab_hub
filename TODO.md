@@ -385,7 +385,7 @@ copies be one.
   old records/credentials through explicit migration readers and path compatibility.
 - [ ] `P2` `bug` `@me` **bookadatewithme.com answers 404.** Netlify serves the domain with
   no site deployed behind it (checked 2026-10-07); the Websites tile reports it as *Error
-  404*. Redeploy from `~/Documents/Websites/bookadatewithme` or point the domain elsewhere.
+  404*. Redeploy from `~/Documents/lab/websites/bookadatewithme` or point the domain elsewhere.
 
 - [x] `P2` `feature` `@ai` **Trackpad swipes change tab** (`ui/swipe.py`). macOS sends a
   two-finger page swipe as a horizontal scroll (`QEvent.Wheel`) and a three-finger one as

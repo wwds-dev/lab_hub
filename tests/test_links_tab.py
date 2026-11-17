@@ -62,14 +62,16 @@ def test_recheck_always_asks(qapp, tmp_path, no_site_checks):
     assert len(no_site_checks) == asked + len(sites.SITES)
 
 
-def test_a_site_with_its_files_here_can_show_them(qapp, tmp_path):
-    (tmp_path / "altmerch_store").mkdir()
+def test_a_site_with_its_files_here_can_show_them(qapp, tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    store = tmp_path / "Documents" / "lab" / "websites" / "altmerch.store"
+    store.mkdir(parents=True)
     tab = SitesTab(_settings(tmp_path))
 
     card = tab.by_key["altmerch"]
     assert card.reveal_button.isEnabled()
-    assert card.detail.text().endswith("altmerch_store")
-    assert card.detail.toolTip() == str(tmp_path / "altmerch_store")
+    assert card.detail.text().endswith("altmerch.store")
+    assert card.detail.toolTip() == str(store)
 
 
 def test_a_deep_path_is_shortened_to_fit_a_tile():

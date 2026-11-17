@@ -437,11 +437,11 @@ a state on every tile that is re-read rather than remembered, and a
 poll that runs only while the tab is on screen — but a site's state is **whether
 it answers right now**: *Online*, *Error 404* (or whichever code), *Unreachable*,
 with the detail in the tooltip. **Open site** opens it; **Show files** shows its
-local folder (`active/altmerch_store`, `~/Documents/Websites/bookadatewithme`,
-`~/Documents/Websites/webwealth`).
+local folder (`~/Documents/lab/websites/altmerch.store`, `…/bookadatewithme`,
+`…/webwealth`; the sites moved into the lab 2026-11-17).
 
 The WWDS site is not deployed yet, so its address is a local file
-(`file:///Users/as/Documents/Websites/webwealth/index.html`, host *Local files*). A
+(`file:///Users/as/Documents/lab/websites/webwealth/index.html`, host *Local files*). A
 `file://` reply carries no HTTP status, and `classify()` reads a missing status as
 *Unreachable*, so that tile is expected to say *Unreachable* even when the file is
 there (not verified on screen; see TODO). Open site still opens the page.

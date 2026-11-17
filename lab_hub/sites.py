@@ -30,8 +30,7 @@ SITES: tuple[Website, ...] = (
         url="https://altmerch.store/",
         summary="Shopify print-on-demand store for the streetwear sub-brands. "
         "Artwork and redesign docs live in its folder.",
-        # The lab's symlink to ~/Documents/Websites/altmerch.store.
-        source="altmerch_store",
+        source="~/Documents/lab/websites/altmerch.store",
         host="Shopify",
     ),
     Website(
@@ -40,16 +39,16 @@ SITES: tuple[Website, ...] = (
         url="https://bookadatewithme.com/",
         summary="One-page site with a booking form, sent through a Netlify "
         "function.",
-        source="~/Documents/Websites/bookadatewithme",
+        source="~/Documents/lab/websites/bookadatewithme",
         host="Netlify",
     ),
     Website(
         key="wwds",
         name="WebWealth Digital Services",
-        url="file:///Users/as/Documents/Websites/webwealth/index.html",
+        url="file:///Users/as/Documents/lab/websites/webwealth/index.html",
         summary="WWDS company site: the apps, how each is proven, documentation "
         "and brands. Local only until it is deployed.",
-        source="~/Documents/Websites/webwealth",
+        source="~/Documents/lab/websites/webwealth",
         host="Local files",
     ),
 )
