@@ -26,13 +26,15 @@ Lab Hub is not affiliated with or endorsed by The Qt Company.
   - Qt 6.12.0 (including Qt WebEngine): https://download.qt.io/official_releases/qt/6.12/6.12.0/single/
   - Lab Hub's maintainer will also attach copies of these archives to the GitHub release of any binary he publishes (to do).
 - Texts: GNU LGPL-3.0 https://www.gnu.org/licenses/lgpl-3.0.html and GNU GPL-3.0 https://www.gnu.org/licenses/gpl-3.0.html
-  (to be shipped with the app as `LICENSES/LGPL-3.0.txt` and `LICENSES/GPL-3.0.txt`, to do).
+  (shipped with the app as `LICENSES/LGPL-3.0.txt` and `LICENSES/GPL-3.0.txt`, with `LICENSE` and this file, in
+  `Lab Hub.app/Contents/Resources/`; Settings → This build → Show licences opens them).
 - About Qt licensing: https://www.qt.io/licensing/ and https://doc.qt.io/qt-6/licensing.html.
 - **Qt WebEngine** also contains Chromium and its third-party components, whose licences are listed at
   https://doc.qt.io/qt-6/qtwebengine-licensing.html (the most restrictive is the LGPL 2.1).
-- **Known issue, being corrected:** the build on 2026-11-17 contained Qt modules that Qt offers only under GPL-3.0 (Qt Graphs,
-  Qt Quick 3D and Quick 3D Physics, Qt Quick Timeline, Qt Virtual Keyboard). Lab Hub does not use them. They are to be removed
-  from the shipped bundle, or Lab Hub is offered under the GNU AGPL-3.0 (see `LICENSE`), which permits them.
+- **Unused GPL-only Qt modules removed:** builds up to 2026-11-17 contained Qt modules that Qt offers only under GPL-3.0
+  (Qt Graphs, Qt Quick 3D and Quick 3D Physics, Qt Quick Timeline, Qt Virtual Keyboard), and Qt Charts and Qt Data
+  Visualization. Lab Hub uses none of them. `build_app.sh` (through `scripts/prune_gpl_qt.sh`) now removes them from the
+  bundle and fails the build if any remain or are still linked.
 
 ## EbookLib (GNU AGPL-3.0-or-later)
 

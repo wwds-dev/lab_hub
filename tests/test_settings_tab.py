@@ -71,3 +71,34 @@ def test_the_box_is_disabled_when_there_is_no_app_to_start(qapp, tmp_path, monke
 
     assert not tab.at_login.isEnabled()
     assert "not installed" in tab.login_detail.text()
+
+
+def test_every_licence_file_the_app_points_to_exists():
+    """build_app.sh bundles these; the self-test and Settings tab look them up."""
+    from lab_hub import LICENCE_FILES, licence_paths
+
+    missing = [name for name, path in zip(LICENCE_FILES, licence_paths()) if not path.is_file()]
+    assert missing == []
+
+
+def test_show_licences_reveals_the_notices(qapp, monkeypatch):
+    from lab_hub import launcher
+
+    shown = []
+    monkeypatch.setattr(launcher, "reveal", shown.append)
+    tab = SettingsTab(config.Settings())
+
+    tab._reveal_licences()
+
+    assert [path.name for path in shown] == ["THIRD_PARTY_NOTICES.md"]
+
+
+def test_build_script_bundles_every_licence_file():
+    from pathlib import Path
+
+    from lab_hub import LICENCE_FILES
+
+    script = (Path(__file__).resolve().parents[1] / "build_app.sh").read_text()
+    for name in LICENCE_FILES:
+        folder = name.rpartition("/")[0] or "."
+        assert f'--add-data "{name}:{folder}"' in script, name

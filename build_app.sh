@@ -36,6 +36,10 @@ pyinstaller --noconfirm --clean --windowed \
   --add-data "lab_hub/apps.toml:lab_hub" \
   --add-data "assets/tray.png:assets" \
   --add-data "assets/tray@2x.png:assets" \
+  --add-data "LICENSE:." \
+  --add-data "THIRD_PARTY_NOTICES.md:." \
+  --add-data "LICENSES/LGPL-3.0.txt:LICENSES" \
+  --add-data "LICENSES/GPL-3.0.txt:LICENSES" \
   --hidden-import lab_hub.tools.narrator.converter \
   --exclude-module PySide6.Qt3DCore \
   --exclude-module PySide6.QtCharts \
@@ -44,6 +48,10 @@ pyinstaller --noconfirm --clean --windowed \
   --exclude-module PySide6.QtQuick3D \
   --exclude-module tkinter \
   main.py
+
+# Remove the unused Qt modules that Qt offers only under the GPL (the
+# --exclude-module lines above drop their Python bindings, not their frameworks).
+scripts/prune_gpl_qt.sh "$DIST/$APP_NAME.app"
 
 # Start life as a menu bar accessory: no Dock icon until a window is shown.
 # LaunchServices pins a bundled app's type from Info.plist at launch, so the
@@ -54,7 +62,9 @@ pyinstaller --noconfirm --clean --windowed \
      "$DIST/$APP_NAME.app/Contents/Info.plist"
 
 # Re-sign: editing Info.plist invalidates PyInstaller's ad-hoc signature.
-codesign --force --deep -s - "$DIST/$APP_NAME.app" 2>/dev/null || true
+# Pruning frameworks invalidates it too. Fail here rather than at launch.
+codesign --force --deep -s - "$DIST/$APP_NAME.app"
+codesign --verify --deep --strict "$DIST/$APP_NAME.app"
 
 # Confirm the bundle actually works before it is installed: Pillow ships a
 # binary extension, and a missing icon or a config path inside the bundle are

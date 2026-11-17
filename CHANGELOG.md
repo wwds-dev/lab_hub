@@ -71,6 +71,16 @@ README and the specs in `docs/specs/` describe them.
   the file.
 
 ### Fixed
+- **The app now carries its licences.** `Lab Hub.app` ships `LICENSE` (GNU
+  AGPL-3.0), `THIRD_PARTY_NOTICES.md` and the GNU LGPL-3.0 and GPL-3.0 texts
+  that Qt's licence requires. **Settings → This build → Show licences** opens
+  them. The self-test fails a build that lacks them.
+- **Qt modules offered only under GPL-3.0 are no longer shipped.** These were
+  Qt Graphs, Qt Quick 3D (with Physics), Qt Quick Timeline and Qt Virtual
+  Keyboard. Qt Charts and Qt Data Visualization are removed as well. Lab Hub
+  used none of them. The build removes them and fails if
+  any remain. The self-test now loads a page in QtWebEngine, so a build whose
+  Dashboards page would stay blank fails too.
 - A branch whose plain merge became a conflict after an earlier merge in the
   same Land never got a Claude Code merge and was archived. It now gets one in
   the next round.
