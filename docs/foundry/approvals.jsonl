@@ -22,3 +22,4 @@
 {"ts": "2026-11-17T17:18:22", "gate": "define", "by": "owner", "words": "Approve as recommended", "recorded_by": "agent", "spec": "land-fast"}
 {"ts": "2026-11-17T18:46:51", "gate": "define", "by": "owner", "words": "Approve as recommended", "recorded_by": "agent", "spec": "land-update-gaps"}
 {"ts": "2026-11-17T19:39:04", "gate": "release", "by": "owner", "words": "release", "recorded_by": "agent"}
+{"ts": "2026-11-17T19:52:04", "gate": "define", "by": "owner", "words": "Approve as recommended", "recorded_by": "agent", "spec": "land-confirm-dialog"}

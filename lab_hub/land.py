@@ -129,10 +129,20 @@ class LandPlan:
 
     @property
     def sentence(self) -> str:
-        """What Land will do, for the one confirmation."""
+        """What Land will do, in one sentence (Details, the Land window, logs)."""
         if self.nothing:
             why = self.skipped[0].reason if self.skipped else "nothing is waiting"
             return f"{self.name}: nothing Land can do on its own ({why})."
+        parts = list(self.items)
+        if self.stops:
+            parts.append(f"stop at {_n(len(self.stops), 'thing')} only you can clear: "
+                         + "; ".join(s.label for s in self.stops))
+        return f"{self.name}: " + ", ".join(parts) + "."
+
+    @property
+    def items(self) -> tuple[str, ...]:
+        """What Land will do, one short clause per kind of step, in run order.
+        The stops are not here: `stop_views` has them."""
         by: dict[str, list[repo_tidy.Action]] = {}
         for action in self.actions:
             by.setdefault(action.kind, []).append(action)
@@ -176,10 +186,18 @@ class LandPlan:
             parts.append(f"then merge the {_n(self.unlanded, 'other branch', 'other branches')} "
                          "not landed yet where they can; Claude Code decides for any that "
                          "still cannot land: land it or archive it as a tag")
-        if self.stops:
-            parts.append(f"stop at {_n(len(self.stops), 'thing')} only you can clear: "
-                         + "; ".join(s.label for s in self.stops))
-        return f"{self.name}: " + ", ".join(parts) + "."
+        return tuple(parts)
+
+    @property
+    def cost(self) -> "ClaudeCost":
+        """What Claude Code may be sent for this repo, at today's caps."""
+        later = self.unlanded if self.claude else 0
+        tests = sorted({a.detail for a in self.actions if a.kind == "claude_merge" and a.detail})
+        return ClaudeCost(self.with_claude + later, self.with_claude, self.unlanded, tuple(tests))
+
+    @property
+    def stop_views(self) -> tuple["StopView", ...]:
+        return tuple(stop_view(s, self.path) for s in self.stops)
 
     @property
     def claude_notice(self) -> str:
@@ -227,6 +245,130 @@ class LandPlan:
         if self.skipped:
             lines += ["", "Left alone:"] + [s.label for s in self.skipped]
         return "\n".join(lines)
+
+
+def _usd(amount: float) -> str:
+    return f"${amount:.0f}" if amount == int(amount) else f"${amount:.2f}"
+
+
+def _and(names: list[str]) -> str:
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+@dataclass(frozen=True)
+class ClaudeCost:
+    """Branches one repo (or a whole Land all) may send to Claude Code."""
+    merge: int = 0  # branches that may be merged by Claude Code
+    known: int = 0  # of those, known to conflict now
+    triage: int = 0  # branches that may be sent read-only for a land-or-archive decision
+    tests: tuple[str, ...] = ()
+
+    @property
+    def merge_usd(self) -> float:
+        from . import claude_resolve
+
+        return self.merge * claude_resolve.BUDGET_USD
+
+    @property
+    def triage_usd(self) -> float:
+        return self.triage * land_resolve.TRIAGE_BUDGET_USD
+
+    @property
+    def total_usd(self) -> float:
+        return self.merge_usd + self.triage_usd
+
+    @property
+    def any(self) -> bool:
+        return bool(self.merge or self.triage)
+
+    def __add__(self, other: "ClaudeCost") -> "ClaudeCost":
+        return ClaudeCost(self.merge + other.merge, self.known + other.known,
+                          self.triage + other.triage, self.tests + other.tests)
+
+
+@dataclass(frozen=True)
+class StopView:
+    """One hard stop, for the confirmation: where, what, and the one thing to do."""
+    place: str
+    problem: str
+    action: str
+    full: str  # the stop's label, plus every process with its pid
+
+
+def _place(stop: land_resolve.Stop, repo: Path) -> str:
+    if stop.reason.startswith("not a git checkout"):
+        return stop.target
+    target = Path(stop.target)
+    if not target.is_absolute():
+        return stop.target  # a branch name
+    if target == repo:
+        return "Main checkout"
+    return f"Worktree {target.name}"
+
+
+def _who(processes: tuple[str, ...]) -> str:
+    names = list(dict.fromkeys(p.rpartition(" (pid ")[0] or p for p in processes))
+    if len(processes) <= 3:
+        return f"{_and(names)} running in it"
+    return f"{len(processes)} processes running in it, including {_and(names[:3])}"
+
+
+def stop_view(stop: land_resolve.Stop, repo: Path) -> StopView:
+    """Split a stop for display; a reason with no known action stays whole."""
+    problem, action = stop.reason, ""
+    for known in land_resolve.STOP_ACTIONS:
+        if stop.reason.endswith(": " + known):
+            problem, action = stop.reason[: -len(known) - 2], known
+            break
+    if stop.processes and problem.startswith("a process is running in it"):
+        problem = _who(stop.processes)
+        action = action.replace("that terminal or session", "those terminals or sessions") \
+            if len(stop.processes) > 1 else action
+    full = stop.label + ("\nProcesses: " + ", ".join(stop.processes) if stop.processes else "")
+    cap = (lambda s: s[:1].upper() + s[1:])
+    return StopView(_place(stop, repo), problem, cap(action) + "." if action else "", full)
+
+
+@dataclass(frozen=True)
+class ClaudePanel:
+    """The one Claude Code disclosure for a confirmation (spec land-confirm-dialog §2.4)."""
+    title: str
+    total: str
+    lines: tuple[tuple[str, str], ...]  # (what, amount)
+    body: str
+
+
+def claude_panel(plans) -> ClaudePanel | None:
+    """Every fact the per-repo `claude_notice` texts disclose, once, with one total."""
+    from . import claude_resolve
+
+    cost = sum((p.cost for p in plans if not p.nothing), ClaudeCost())
+    if not cost.any:
+        return None
+    lines = []
+    if cost.merge:
+        cap = _usd(claude_resolve.BUDGET_USD)
+        if cost.merge > cost.known:
+            what = (f"Merge with conflicts: up to {_n(cost.merge, 'branch', 'branches')} "
+                    f"({cost.known} known to conflict now), at most {cap} each")
+        else:
+            what = f"Merge with conflicts: {_n(cost.merge, 'branch', 'branches')}, at most {cap} each"
+        lines.append((what, _usd(cost.merge_usd)))
+    if cost.triage:
+        lines.append((f"Decide on branches that still do not land: up to {cost.triage}, "
+                      f"read-only (their log and diff), at most "
+                      f"{_usd(land_resolve.TRIAGE_BUDGET_USD)} each", _usd(cost.triage_usd)))
+    body = ["Code from these repos goes to Anthropic, as in any Claude Code session."]
+    if cost.merge:
+        body.append("Lab Hub runs each repo's tests itself; a merge that passes them lands "
+                    "and is pushed without review. A branch that fails is archived as a tag, "
+                    "never lost.")
+    if cost.triage:
+        body.append("A branch Claude Code archives is kept as a local tag "
+                    "archive/<branch>/<date>, never pushed, and can be restored from Review "
+                    "branches.")
+    return ClaudePanel(f"Claude Code (model {claude_resolve.MODEL})",
+                       f"at most {_usd(cost.total_usd)} in total", tuple(lines), " ".join(body))
 
 
 def make_plan(name: str, path: Path, *, claude: str | None | bool = True,

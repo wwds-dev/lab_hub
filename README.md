@@ -316,8 +316,15 @@ conflicts in Foundry's own `.claude/commands/` and `.claude/agents/` files take
 the default branch's copy without Claude Code. A merge commit that passed its
 tests is not tested again as the base for the next branch.
 **Land all (N)** on the launchpad does the same for every flagged repo, with one
-confirmation listing one sentence per repo; a repo that fails is reported and
-the rest carry on. **Stop landing** ends a running
+confirmation; a repo that fails is reported and the rest carry on. The
+confirmation shows one card per repo: what Land will do, as short items, and
+an **Only you can clear** section with each stop's place ("Main checkout",
+"Worktree <folder>"), the problem (a busy folder counts its processes and names
+a few) and the one thing to do. Repos with nothing to land share one line. One
+**Claude Code** panel gives the model, what may be sent, each cap and one
+total. **Show details** holds the full text, with every path and process id.
+Return presses nothing; Escape cancels (spec `docs/specs/land-confirm-dialog.md`,
+`ui/land_confirm.py`). **Stop landing** ends a running
 Claude Code or test step and skips the rest; work already landed stays landed.
 Only one Land runs at a time per page, and a repo is claimed while it lands, so
 the same repo can never be landed twice at once. `lab_hub/land.py`,

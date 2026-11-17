@@ -457,10 +457,23 @@ class Stop:
     repo_name: str
     target: str
     reason: str
+    processes: tuple[str, ...] = ()  # every "cmd (pid N)" in the worktree, for Details
 
     @property
     def label(self) -> str:
         return f"{self.repo_name}: {self.target} — {self.reason}"
+
+
+# The one action each known stop asks for: the reason ends with ": <action>".
+# Only these are split off for the confirmation (spec land-confirm-dialog §8);
+# any other reason is shown whole, never cut at a colon inside a path or error.
+STOP_ACTIONS = (
+    "close that terminal or session, then Land again",
+    "finish or abort it in Terminal",
+    "resolve them in Terminal",
+    "set origin/HEAD",
+    "fix the app's path",
+)
 
 
 def in_own_tree(wt: rt.Worktree, trees: list[rt.Worktree], busy) -> bool:
@@ -486,31 +499,48 @@ def in_own_tree(wt: rt.Worktree, trees: list[rt.Worktree], busy) -> bool:
 
 
 def _worktree_stop(repo: Path, wt: rt.Worktree, busy) -> str:
+    return _worktree_stop_full(repo, wt, busy)[0]
+
+
+def _worktree_stop_full(repo: Path, wt: rt.Worktree, busy) -> tuple[str, tuple[str, ...]]:
+    """The stop's reason ("" when none) and, for a busy worktree, every process in it."""
     paused = rt.paused_operation(wt.path)
     if paused:
-        return f"{paused} is in progress: finish or abort it in Terminal"
+        return f"{paused} is in progress: finish or abort it in Terminal", ()
     if rt.has_conflicts(wt.path):
-        return "it has unresolved conflicts: resolve them in Terminal"
+        return "it has unresolved conflicts: resolve them in Terminal", ()
     if busy is None:
-        return "could not check whether a process is running in it (lsof failed)"
+        return "could not check whether a process is running in it (lsof failed)", ()
     if in_own_tree(wt, rt.worktrees(repo), busy):
-        who = who_is_in(wt, rt.worktrees(repo))
+        found = processes_in(wt, rt.worktrees(repo))
+        who = _first(found)
         return (f"a process is running in it{f' ({who})' if who else ''}: close that "
-                "terminal or session, then Land again")
-    return ""
+                "terminal or session, then Land again"), tuple(found)
+    return "", ()
+
+
+def _first(found: list[str], limit: int = 3) -> str:
+    more = f" and {len(found) - limit} more" if len(found) > limit else ""
+    return ", ".join(found[:limit]) + more
 
 
 def who_is_in(wt: rt.Worktree, trees: list[rt.Worktree], limit: int = 3) -> str:
     """"claude (pid 4712), zsh (pid 15934)" for processes whose current folder
     is this worktree (not one nested in it); "" when lsof cannot tell."""
+    return _first(processes_in(wt, trees), limit)
+
+
+def processes_in(wt: rt.Worktree, trees: list[rt.Worktree]) -> list[str]:
+    """Every "cmd (pid N)" whose current folder is this worktree (not one
+    nested in it), in lsof's order; [] when lsof cannot tell."""
     lsof = shutil.which("lsof", path=rt._SEARCH_PATH)
     if lsof is None:
-        return ""
+        return []
     try:
         r = subprocess.run([lsof, "-n", "-P", "-d", "cwd", "-F", "pcn"], capture_output=True,
                            text=True, timeout=rt.GIT_TIMEOUT)
     except (OSError, subprocess.SubprocessError):
-        return ""
+        return []
     found, pid, cmd = [], "", ""
     for line in r.stdout.splitlines():
         tag, value = line[:1], line[1:]
@@ -521,9 +551,7 @@ def who_is_in(wt: rt.Worktree, trees: list[rt.Worktree], limit: int = 3) -> str:
         elif tag == "n" and value.startswith("/"):
             if in_own_tree(wt, trees, (Path(value),)):
                 found.append(f"{cmd} (pid {pid})")
-    found = list(dict.fromkeys(found))
-    more = f" and {len(found) - limit} more" if len(found) > limit else ""
-    return ", ".join(found[:limit]) + more
+    return list(dict.fromkeys(found))
 
 
 def _rescue_needed(repo: Path, wt: rt.Worktree) -> bool:
@@ -554,9 +582,9 @@ def prep(name: str, repo: Path, busy) -> tuple[list[Step], list[Stop]]:
             wt.main and rt.current_branch(wt.path) != default)
         if not open_work:
             continue
-        stop = _worktree_stop(repo, wt, busy)
+        stop, who = _worktree_stop_full(repo, wt, busy)
         if stop:
-            stops.append(Stop(name, str(wt.path), stop))
+            stops.append(Stop(name, str(wt.path), stop, who))
             continue
         if _rescue_needed(repo, wt):
             steps.append(Step(name, repo, "rescue", str(wt.path),

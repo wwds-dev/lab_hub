@@ -45,6 +45,13 @@ README and the specs in `docs/specs/` describe them.
   ignored and replaced by the next good save.
 
 ### Changed
+- The **Land confirmation** is readable at a glance: one card per repo with
+  what Land will do and a separate **Only you can clear** section (place,
+  problem, the one action; busy folders count their processes instead of
+  listing process ids), one Claude Code panel with a single total instead of
+  one paragraph per repo, a line for repos with nothing to land, and the full
+  text under **Show details**. Return no longer does anything there; Escape
+  cancels.
 - **Check builds** opens one window instead of a message box and a separate
   rebuild dialog. It steps through Check, Review, Update and Done; Review shows
   one row per app with its verdict in words and the up-to-date apps on one

@@ -12,6 +12,7 @@ from pathlib import Path
 from PySide6.QtCore import QProcess, QProcessEnvironment, Qt, Signal
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -1060,23 +1061,10 @@ class AppsTab(TilePage):
             self._update_land_controls()
 
     def confirm_land(self, plans: list[land.LandPlan]) -> bool:
-        """The one confirmation: what will happen, in words (tests replace this)."""
-        todo = [p for p in plans if not p.nothing]
-        box = QMessageBox(self)
-        box.setWindowTitle("Land")
-        box.setTextFormat(Qt.TextFormat.PlainText)  # names and reasons come from files and git
-        box.setIcon(QMessageBox.Icon.Question)
-        box.setText("\n".join(p.sentence for p in todo))
-        notices = [p.claude_notice for p in todo if p.claude_notice]
-        box.setInformativeText("\n\n".join(notices) or "Each step is checked again just "
-                               "before it runs. Nothing is forced.")
-        box.setDetailedText("\n\n".join(p.detail for p in todo))
-        go = box.addButton("Land", QMessageBox.ButtonRole.AcceptRole)
-        cancel = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(cancel)
-        box.setEscapeButton(cancel)
-        box.exec()
-        return box.clickedButton() is go
+        """The one confirmation: what will happen, per repo (tests replace this)."""
+        from .land_confirm import LandConfirmDialog
+
+        return LandConfirmDialog(plans, self).exec() == QDialog.DialogCode.Accepted
 
     def _land_planned(self, plans) -> None:
         try:
