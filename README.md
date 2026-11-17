@@ -1074,6 +1074,26 @@ It does not replace any of the projects it launches. Each keeps its own repo,
 README, venv and build script; Lab Hub only points at them. Changing what
 Sentinel does still mean changing Sentinel.
 
+## Licence
+
+Lab Hub is free software, licensed under the GNU Affero General Public License, version 3 or (at your option) any later version (AGPL-3.0-or-later); see [LICENSE](LICENSE). It comes with no warranty. Third-party components keep their own licences: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## Privacy, disclaimer and third-party notices
+
+**Privacy.** Lab Hub has no server, account, analytics or telemetry. Its settings and logs stay in
+`~/Library/Application Support/Lab Hub/` on your Mac. What leaves your Mac: **Narrator** sends the text of the ebook you
+pick, in pieces, to the speech provider you choose (OpenAI, ElevenLabs or Google Gemini) with your own API key; **Land** can run
+your own Claude Code CLI, which sends a branch's diff or conflicted files to Anthropic under your own login; **Websites**
+sends an HTTP HEAD request to altmerch.store and bookadatewithme.com, which see your IP address like any visitor.
+**Dashboards** only load pages from your own Mac (127.0.0.1:8765), and updating Lab Hub builds it from your local checkout and
+downloads nothing. Those providers' own terms and privacy policies apply to what they receive.
+
+**Provided as is**, without warranty, to the extent the law allows; it starts programs, writes files and can merge and archive
+git branches, so keep backups. Narrator's audio is synthetic speech: say so where you publish it. Lab Hub is not affiliated with
+or endorsed by The Qt Company, OpenAI, Google, ElevenLabs or Anthropic; their names are their owners' trademarks.
+
+**Third-party software** and the Qt (LGPL-3.0) notice, source offer and replacement instructions: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ## Version
 
 `v<MAJOR>.<BUILD>` — e.g. `v2.025`. **MAJOR** is the product arc, the only
