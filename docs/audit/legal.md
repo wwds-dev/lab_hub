@@ -11,13 +11,17 @@ None.
 
 ## P1 (fix or owner-defer before Release)
 
-1. **GPL-3.0-only Qt modules ship in the installed bundle.** `Contents/Frameworks/PySide6/Qt/lib` holds Qt Graphs, 14 Qt Quick 3D
+**Update 2026-11-17 (Comply for `legal-bundle-fix`, PR #10, merge `ee2ae17`): items 1 and 2 are fixed in the build script and in a built
+bundle as inspected by the security report. Full result: `docs/audit/legal-bundle-fix-legal-compliance.md`. Open before Release: build
+and list the bundle that will ship; the installed build 175 is still the old one.**
+
+1. **FIXED (`scripts/prune_gpl_qt.sh`).** Was: **GPL-3.0-only Qt modules ship in the installed bundle.** `Contents/Frameworks/PySide6/Qt/lib` holds Qt Graphs, 14 Qt Quick 3D
    frameworks (incl. Physics), Qt Quick Timeline and Qt Virtual Keyboard, which Qt offers only under GPL-3.0 (doc.qt.io/qt-6/licensing.html,
    Qt 6.12, 2026-11-17). Lab Hub imports none (`from PySide6.Qt{Core,Gui,Network,WebEngineCore,WebEngineWidgets,Widgets}`). `build_app.sh:41-47`
    `--exclude-module` removes Python bindings only; frameworks are still collected. Who is exposed: the owner, as distributor, if Lab Hub is
    anything other than AGPL/GPL-3 compatible as a whole. Fix: prune frameworks after the build, re-sign, rerun `--selftest` and the Dashboards tab;
    or accept option A (AGPL-3.0-or-later) where it is permitted.
-2. **No licence texts or notices in the bundle.** `LICENSE` (AGPL-3.0, owner's choice 2026-11-17) is now in the repo, but the built `.app` has no LGPL/GPL
+2. **FIXED (`build_app.sh:41-45`, `--add-data`).** Was: **No licence texts or notices in the bundle.** `LICENSE` (AGPL-3.0, owner's choice 2026-11-17) is now in the repo, but the built `.app` has no LGPL/GPL
    text, no Qt notice, no notice for MIT/BSD/Apache/MPL components (only pydantic, httpcore2, httpx2 ship theirs). EbookLib is AGPL-3.0+ and ships
    (`converter.py:18`), so the binary as a whole must be offered under AGPL-3.0 and its source offered. Fix: add `LICENSE`, `THIRD_PARTY_NOTICES.md`, `LICENSES/LGPL-3.0.txt`, `LICENSES/GPL-3.0.txt` to the bundle via `--add-data`;
    attach the Qt source archives to the release. Suggested cleanup: add an About line pointing to the notices.
@@ -35,8 +39,14 @@ None.
 - Origin of `assets/tray.png` and `tray@2x.png` unrecorded.
 - `regex` (tiktoken dependency) is Apache-2.0 AND CNRI-Python; GPL-compatibility of the CNRI part not verified (folded into the licence lawyer trigger).
 
+## P2 (added from the Land session's audit, 2026-11-17)
+
+- **Retention of code sent to Anthropic is unknown.** Land sends diffs and conflicted files to Anthropic under the owner's Claude login. On a consumer plan with model improvement on, that data is used for training and kept for 5 years; otherwise 30 days (code.claude.com/docs/en/data-usage, read 2026-11-17). Which plan applies is not verified; the owner should check it and the README says only that the data goes to Anthropic.
+- **The claude.ai route** (Dashboards open claude.ai in QtWebEngine with a persistent sign-in, `ui/dashboard_view.py:48-57`) was missing from `## Models used`; now added to `docs/foundry/app-context.md`.
+
 ## P3
 
+- The Land triage diff (cut at 200 KB) goes to Anthropic without a secret scan (same as security P3-4). Not fixed here: a code change, so it needs its own spec.
 - DPF appeal C-703/25 P pending; PLD Irish transposition not yet found; CRA outside scope only while Lab Hub stays non-commercial.
 - `/docs/legal` is git-ignored (`.gitignore:44-45`), so `privacy.md` and `terms.md` are not public: the README section and `THIRD_PARTY_NOTICES.md` are
   the public texts. Copy changes there, not only in the pack.
@@ -56,13 +66,13 @@ the app is monetised, a server or telemetry is added, or a paid build ships. Bun
 ## Not verified
 
 EUIPO/TMview/IPOI/CRO/PyPI/npm/domain results; the DPF certification of OpenAI, ElevenLabs, Google and Anthropic; provider terms and their effective dates; per-library
-licence texts in Pillow's wheel; Chromium third-party list inside the bundle; the individual licences of Qt modules not on Qt's GPL-only list; whether Qt frameworks can be swapped and
+licence texts in Pillow's wheel; Chromium third-party list inside the bundle; the individual licences of Qt modules not on Qt's GPL-only list (only the absence from that list is checked, 2026-11-17); whether `LICENSES/*.txt` match gnu.org byte for byte (gnu.org unreachable 2026-11-17); whether Qt frameworks can be swapped and
 re-signed on another Mac (Gatekeeper behaviour); AI Act consolidated text; whether Land and the file tools ask before destructive steps; whether the CNRI-Python licence is compatible
 with AGPL-3.0; secrets filtering end to end before diffs reach Anthropic.
 
 ## What changed since the last sign-off
 
-No earlier sign-off exists (no `docs/legal/signoff.jsonl`).
+No earlier sign-off exists (no `docs/legal/signoff.jsonl`). Pack edited 2026-11-17 for `legal-bundle-fix`: `licences.md` §1, §4.2 row 1, §4.3; `register.md` row 11.
 
 ## Command for the owner (not run by the agent), after deciding the P1 items
 
