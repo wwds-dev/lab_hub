@@ -159,3 +159,5 @@
 {"ts": "2026-11-17T20:23:55", "phase": "document", "state": "done", "spec": "land-update-gaps"}
 {"ts": "2026-11-17T20:31:10", "phase": "review", "state": "done", "spec": "land-confirm-dialog"}
 {"ts": "2026-11-17T20:45:15", "phase": "build", "state": "done", "spec": "land-update-gaps"}
+{"ts": "2026-11-17T21:00:35", "phase": "release", "state": "start", "spec": "land-confirm-dialog"}
+{"ts": "2026-11-17T21:10:14", "phase": "release", "state": "done", "spec": "land-confirm-dialog"}
