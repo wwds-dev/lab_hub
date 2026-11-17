@@ -88,21 +88,24 @@ def test_nothing_to_land_says_so(lab, tmp_path):
     assert result.state == "nothing" and result.line == "Nothing to land"
 
 
-def test_a_conflict_land_cannot_take_is_reported_and_counted_for_the_owner(lab, tmp_path):
+def test_a_conflict_without_claude_code_is_a_hard_stop_naming_the_fix(lab, tmp_path):
+    # Spec land-resolve-all 4.7: a branch that cannot land needs Claude's verdict;
+    # with no Claude Code that is a hard stop, and the branch is left untouched.
     make_branch(lab, "feat", "a.txt", "theirs")
     commit(lab, "a.txt", "ours")
     sh(lab, "push", "-q", "origin", "main")
     result = run(plan_for(lab, claude=None), tmp_path)
     assert result.state == "not_landed" and result.remaining == 1
-    assert "conflict" in result.reason.lower()
+    assert "Claude Code not found" in result.reason and "sign in" in result.reason
     assert result.line.startswith("Not landed: ")
     assert "feat" in repo_tidy.local_branches(lab)  # nothing was forced
 
 
-def test_landed_with_a_branch_left_for_the_owner_says_so():
-    result = land.LandResult("repo", "landed", remaining=2)
-    assert result.line == "Landed · 2 branches need your decision"
-    assert land.LandResult("repo", "landed", remaining=1).line == "Landed · 1 branch needs your decision"
+def test_landed_names_what_was_archived_or_quarantined_and_never_asks_for_a_decision():
+    assert land.LandResult("repo", "landed", archived=2, quarantined=1).line == \
+        "Landed · 2 branches archived · 1 file quarantined"
+    assert land.LandResult("repo", "landed").line == "Landed"
+    assert "decision" not in land.LandResult("repo", "landed", remaining=2).line
 
 
 # ---------------------------------------------------------------- failure
@@ -227,16 +230,22 @@ def test_step_events_come_in_start_end_pairs_in_plan_order(lab, tmp_path, monkey
     run(plan, tmp_path, events=events.append, clock=_counter())
 
     kinds = [a.kind for a in plan.actions]
-    assert [e.phase for e in events] == ["start", "end"] * len(kinds)
-    assert [e.kind for e in events[::2]] == kinds
-    assert [e.index for e in events[::2]] == list(range(len(kinds)))
+    assert not plan.prep
+    assert [e.phase for e in events] == ["start", "end"] * (len(events) // 2)
+    first = events[:2 * len(kinds)]
+    assert [e.kind for e in first[::2]] == kinds
+    assert [e.index for e in first[::2]] == list(range(len(kinds)))
+    # Later rounds re-plan (land-resolve-all): a step not in the plan gets the
+    # next index past it, so a progress window can add it.
+    later = events[2 * len(kinds):][::2]
+    assert [e.index for e in later] == list(range(len(kinds), len(kinds) + len(later)))
     assert {e.count for e in events} == {len(kinds)}
     assert {e.repo for e in events} == {"repo"}
     for start, end in zip(events[::2], events[1::2]):
         assert end.started == start.at and end.at == start.at + 10
         assert start.label == end.label != ""
         assert start.outcome == ""
-    outcomes = {e.kind: e.outcome for e in events[1::2]}
+    outcomes = {e.kind: e.outcome for e in first[1::2]}  # the planned round
     assert outcomes["merge"] == "failed"
     assert outcomes["delete_branch"] == "skipped"
     assert outcomes["push"] == "done"

@@ -87,9 +87,17 @@
 {"ts": "2026-11-17T09:53:31", "phase": "architect", "state": "start", "spec": "progress-windows"}
 {"ts": "2026-11-17T09:59:02", "phase": "architect", "state": "start", "spec": "progress-windows"}
 {"ts": "2026-11-17T10:01:40", "phase": "architect", "state": "done", "spec": "progress-windows"}
+{"ts": "2026-11-17T10:06:41", "phase": "define", "state": "start", "spec": "land-resolve-all"}
 {"ts": "2026-11-17T10:07:29", "phase": "plan", "state": "start", "spec": "progress-windows"}
 {"ts": "2026-11-17T10:07:29", "phase": "plan", "state": "done", "spec": "progress-windows"}
 {"ts": "2026-11-17T10:07:56", "phase": "build", "state": "start", "spec": "progress-windows"}
+{"ts": "2026-11-17T10:08:10", "phase": "define", "state": "done", "spec": "land-resolve-all"}
+{"ts": "2026-11-17T10:17:35", "phase": "architect", "state": "start", "spec": "land-resolve-all"}
+{"ts": "2026-11-17T10:17:55", "phase": "architect", "state": "done", "spec": "land-resolve-all"}
+{"ts": "2026-11-17T10:42:43", "phase": "build", "state": "done", "spec": "land-resolve-all"}
+{"ts": "2026-11-17T10:42:43", "phase": "review", "state": "start", "spec": "land-resolve-all"}
+{"ts": "2026-11-17T10:42:43", "phase": "verify", "state": "start", "spec": "land-resolve-all"}
+{"ts": "2026-11-17T10:42:43", "phase": "secure", "state": "start", "spec": "land-resolve-all"}
 {"ts": "2026-11-17T10:48:34", "phase": "build", "state": "done", "spec": "progress-windows"}
 {"ts": "2026-11-17T10:49:03", "phase": "review", "state": "start", "spec": "progress-windows"}
 {"ts": "2026-11-17T10:49:03", "phase": "verify", "state": "start", "spec": "progress-windows"}
@@ -97,5 +105,9 @@
 {"ts": "2026-11-17T11:00:02", "phase": "secure", "state": "done", "spec": "progress-windows"}
 {"ts": "2026-11-17T11:02:29", "phase": "review", "state": "done", "spec": "progress-windows"}
 {"ts": "2026-11-17T11:28:14", "phase": "document", "state": "start", "spec": "progress-windows"}
+{"ts": "2026-11-17T11:31:34", "phase": "verify", "state": "done", "spec": "land-resolve-all"}
+{"ts": "2026-11-17T11:31:34", "phase": "secure", "state": "done", "spec": "land-resolve-all"}
+{"ts": "2026-11-17T11:31:34", "phase": "review", "state": "done", "spec": "land-resolve-all"}
+{"ts": "2026-11-17T11:31:34", "phase": "document", "state": "done", "spec": "land-resolve-all"}
 {"ts": "2026-11-17T11:44:49", "phase": "verify", "state": "done", "spec": "progress-windows"}
 {"ts": "2026-11-17T11:51:22", "phase": "document", "state": "done", "spec": "progress-windows"}

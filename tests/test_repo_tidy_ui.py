@@ -114,3 +114,29 @@ def test_review_fills_the_last_resolve_column(qapp, lab, tmp_path, monkeypatch):
     assert dialog.table.item(0, col - 1).text() == "none"  # the worktree column
     assert "merges nothing" not in dialog._status.text()
     dialog.reject()
+
+
+def test_review_lists_archived_branches_and_restores_one(qapp, lab, tmp_path, monkeypatch):
+    """Spec land-resolve-all 4.6: an archived branch can be brought back."""
+    from lab_hub import land_resolve
+    from ui.repo_tidy_dialogs import ReviewDialog
+
+    monkeypatch.setattr(repo_tidy, "log_path", lambda: tmp_path / "tidy.log")
+    sh(lab, "checkout", "-q", "-b", "claude/old")
+    sha = commit(lab, "c.txt")
+    sh(lab, "checkout", "-q", "main")
+    [info] = repo_tidy.unlanded([("repo", lab)])
+    assert land_resolve.archive(info, "stale idea", tmp_path / "tidy.log", busy=())[0]
+
+    dialog = ReviewDialog([("repo", lab)])
+    assert _pump_until(lambda: dialog.archived_table.rowCount() == 1)
+    assert dialog.table.rowCount() == 0
+    assert dialog.archived_table.item(0, 1).text() == "claude/old"
+    assert dialog.archived_table.item(0, 3).text() == "stale idea"
+    assert not dialog.restore_button.isEnabled()
+    dialog.archived_table.selectRow(0)
+    assert dialog.restore_button.isEnabled()
+    dialog.restore_button.click()
+    assert _pump_until(lambda: dialog.archived_table.rowCount() == 0 and dialog.table.rowCount() == 1)
+    assert repo_tidy.tip(lab, "claude/old") == sha and dialog.changed
+    dialog.reject()

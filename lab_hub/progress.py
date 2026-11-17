@@ -97,7 +97,10 @@ LAND_STAGES = (("commit", "Commit"), ("merge", "Merge and test"), ("push", "Push
                ("tidy", "Tidy"))
 _LAND_STAGE = {"commit": "commit", "merge": "merge", "claude_merge": "merge",
                "push": "push", "pull": "push", "delete_branch": "tidy",
-               "remove_worktree": "tidy"}
+               "remove_worktree": "tidy",
+               # Land's prep and archive steps (spec land-resolve-all)
+               "rescue": "commit", "untracked": "commit", "switch": "commit",
+               "archive": "tidy"}
 
 
 def land_stage(kind: str) -> str | None:
@@ -388,8 +391,10 @@ def _steps_then(units: list[Unit], now: float, name: str = "") -> tuple[tuple[St
 # Land
 # ----------------------------------------------------------------------
 class LandModel(RunModel):
-    """One row per repo, one unit per planned step. The denominator is fixed
-    from the plans before the first step runs."""
+    """One row per repo, one unit per planned step (prep, then actions). The
+    denominator is set from the plans before the first step runs; a step Land
+    adds after planning (a later round, an archive) arrives with the next
+    index past the row's units and is added then."""
 
     def __init__(self, plans, history=None, *, clock=time.monotonic, wall=datetime.now):
         super().__init__(history, clock=clock, wall=wall)
@@ -397,7 +402,7 @@ class LandModel(RunModel):
             subject = durations.subject("repo", plan.name)
             units = [Unit(a.kind, a.label,
                           durations.estimate(self.history, subject, a.kind))
-                     for a in plan.actions]
+                     for a in (*getattr(plan, "prep", ()), *plan.actions)]
             row = Row(plan.name, plain(plan.name), subject, units)
             if not units:  # nothing planned: say so now, not "Waiting · ~0 s"
                 row.state, row.status, row.tone = NOTHING, "Nothing to land", "muted"
@@ -413,6 +418,10 @@ class LandModel(RunModel):
 
     def on_step(self, event) -> None:
         row = self._row(event.repo)
+        if (row is not None and event.phase == "start" and row.ended is None
+                and event.index == len(row.units)):
+            row.units.append(Unit(event.kind, event.label,
+                                  durations.estimate(self.history, row.subject, event.kind)))
         if row is None or not 0 <= event.index < len(row.units):
             self.touch()
             return
@@ -447,7 +456,12 @@ class LandModel(RunModel):
             row.state, row.status, row.tone = NOTHING, "Nothing to land", "muted"
         else:
             row.state, row.status, row.tone = NEEDS, "Needs you", "warn"
-            row.reason = plain(result.line if result.state == "landed" else result.reason)
+            if result.state == "landed":  # landed, yet branches are left for the owner
+                n = result.remaining
+                row.reason = f"{n} branch needs your decision" if n == 1 else \
+                    f"{n} branches need your decision"
+            else:
+                row.reason = plain(result.reason)
         self.touch()
 
     def _stages(self, row: Row) -> tuple[StageView, ...]:

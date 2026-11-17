@@ -1,4 +1,4 @@
-# ADR 0001: Structured progress events and a duration history file
+# ADR 0002: Structured progress events and a duration history file
 
 Status: proposed (architect, 2026-11-17); awaits the owner's Architect gate for spec `progress-windows`.
 Spec: `docs/specs/progress-windows.md` §8.

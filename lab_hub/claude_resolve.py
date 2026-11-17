@@ -149,12 +149,12 @@ def claude_env() -> dict[str, str]:
     return env
 
 
-def claude_argv(exe: str, prompt: str, budget: float) -> list[str]:
+def claude_argv(exe: str, prompt: str, budget: float, tools: str = TOOLS) -> list[str]:
     return [
         exe, "-p", prompt,
         "--output-format", "stream-json", "--verbose",
         "--restricted", "--safe-mode", "--strict-mcp-config",
-        "--tools", TOOLS,
+        "--tools", tools,
         "--permission-mode", "acceptEdits",
         "--permission-prompts", "none",
         "--no-session-persistence",
@@ -341,7 +341,7 @@ def _number(value, kind):
 
 
 def run_claude(exe: str, prompt: str, cwd: Path, budget: float, stop: Stopper,
-               progress: Progress) -> ClaudeResult:
+               progress: Progress, tools: str = TOOLS) -> ClaudeResult:
     final: dict = {}
 
     def on_line(line: str) -> None:
@@ -363,7 +363,7 @@ def run_claude(exe: str, prompt: str, cwd: Path, budget: float, stop: Stopper,
                     progress(f"  Claude: {_flat(part.get('name', '?'), 40)} "
                              f"{_rel(str(target), cwd)}")
 
-    run = _stream(claude_argv(exe, prompt, budget), cwd, claude_env(), CLAUDE_TIMEOUT,
+    run = _stream(claude_argv(exe, prompt, budget, tools), cwd, claude_env(), CLAUDE_TIMEOUT,
                   stop, on_line)
     cost = _number(final.get("total_cost_usd"), float)
     turns = _number(final.get("num_turns"), int)

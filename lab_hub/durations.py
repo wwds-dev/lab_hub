@@ -1,6 +1,6 @@
 """How long each step took last time, so a progress window can say how long is left.
 
-Spec: `docs/specs/progress-windows.md` §8.4; ADR 0001. One small JSON file,
+Spec: `docs/specs/progress-windows.md` §8.4; ADR 0002. One small JSON file,
 `~/Library/Application Support/Lab Hub/durations.json`:
 
     {"version": 1,
