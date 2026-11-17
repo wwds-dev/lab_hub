@@ -217,10 +217,11 @@ def test_the_same_repo_cannot_be_landed_twice(qapp, tmp_path, lab, monkeypatch):
     _drop(tab)
 
 
-def test_the_confirmation_is_one_sentence_per_repo_with_the_claude_disclosure(qapp, tmp_path, monkeypatch):
+def test_the_confirmation_is_one_card_per_repo_with_the_claude_disclosure(qapp, tmp_path, monkeypatch):
     from pathlib import Path
 
     from lab_hub import claude_resolve
+    from ui.land_confirm import LandConfirmDialog
 
     action = repo_tidy.Action("sonar", Path("/x"), "claude_merge", "feat", "conflicts",
                               branch="master", detail="pytest -q")
@@ -231,17 +232,21 @@ def test_the_confirmation_is_one_sentence_per_repo_with_the_claude_disclosure(qa
     seen = {}
 
     def fake_exec(self):
-        seen.update(text=self.text(), info=self.informativeText(), detail=self.detailedText(),
-                    labels=[b.text() for b in self.buttons() if b.text() in ("Land", "Cancel")],
-                    default=self.defaultButton().text())
+        seen.update(title=self.title.text(), cards=len(self.cards),
+                    claude=self.claude is not None, details=self.details.toPlainText(),
+                    land=self.land.text(), default=[b.isDefault() or b.autoDefault()
+                                                    for b in (self.toggle, self.cancel, self.land)])
         return 0
 
-    monkeypatch.setattr(QMessageBox, "exec", fake_exec)
+    monkeypatch.setattr(LandConfirmDialog, "exec", fake_exec)
     assert tab.confirm_land([plan]) is False  # nothing clicked
-    assert seen["text"] == plan.sentence
-    assert "Anthropic" in seen["info"] and claude_resolve.MODEL in seen["info"]
-    assert "Resolve conflicts with Claude" in seen["detail"]
-    assert set(seen["labels"]) == {"Land", "Cancel"} and seen["default"] == "Cancel"
+    assert seen["title"] == "Land sonar" and seen["cards"] == 1 and seen["claude"]
+    assert plan.sentence in seen["details"] and "Anthropic" in seen["details"]
+    assert claude_resolve.MODEL in seen["details"]
+    assert "Resolve conflicts with Claude" in seen["details"]
+    assert seen["land"] == "Land" and seen["default"] == [False, False, False]
+    monkeypatch.setattr(LandConfirmDialog, "exec", lambda self: 1)
+    assert tab.confirm_land([plan]) is True
     _drop(tab)
 
 

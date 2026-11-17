@@ -956,8 +956,82 @@ class _Fail(Exception):
 
 
 # (repo, default tip, test command) whose tests passed in this Lab Hub run:
-# the same tip need not be tested again for the next branch (section 12.2).
+# the same tip need not be tested again for the next branch (section 12.2). A
+# Claude merge that lands adds its own commit: it was just tested (land-fast §3.1).
 _BASE_PASSED: set[tuple[str, str, str]] = set()
+# The same key -> why the tests failed or could not run there. Every later
+# branch onto that tip ends at once with that reason; `land` clears a repo's
+# entries when a Land starts, so each Land tests a failing tip once (§3.2).
+_BASE_FAILED: dict[tuple[str, str, str], str] = {}
+
+_BASE_FAILS = "no Claude run: the tests don't pass on"
+_PROTECTED = "no Claude run: a conflict in .claude/ that Land may not resolve"
+# Foundry's own copies: `install.sh --update` overwrites them, so a conflict in
+# one takes the default branch's copy (spec land-fast §5.1 A).
+FOUNDRY_OWNED = (".claude/commands/", ".claude/agents/")
+
+
+def _repo_keys(repo: Path) -> set[str]:
+    keys = {str(repo)}
+    try:
+        keys.add(str(repo.resolve()))
+    except OSError:
+        pass
+    return keys
+
+
+def forget_base_failures(repo: Path) -> None:
+    """A new Land of `repo` starts: test its failing tips again."""
+    keys = _repo_keys(repo)
+    for key in [k for k in _BASE_FAILED if k[0] in keys]:
+        del _BASE_FAILED[key]
+
+
+def foundry_owned(name: str) -> bool:
+    return name.startswith(FOUNDRY_OWNED)
+
+
+def protected(name: str, foundry_app: bool = True) -> bool:
+    """A file Claude Code will not edit in an unattended run (any `.claude/`
+    folder), unless Lab Hub resolves it itself as Foundry's own. Only an app
+    Foundry installed into has copies; in Foundry itself they are the source."""
+    return "/.claude/" in "/" + name.lower() and not (foundry_app and foundry_owned(name))
+
+
+def foundry_app(repo: Path, rev: str) -> bool:
+    """Foundry installed into this repo (its app-context exists at `rev`)."""
+    return rt.git(repo, "cat-file", "-e", f"{rev}:docs/foundry/app-context.md")[0] == 0
+
+
+_ERROR_LINE = re.compile(r"\b[A-Z]\w*(?:Error|Exception):\s.*")
+
+
+def base_fail_reason(default: str, status: str, output: str) -> str:
+    """Why no branch can land onto `default`: its last error line, when the
+    output has one (the end of the output is cut in the log), else the end."""
+    why = {"fail": "they fail", "timeout": "they time out"}.get(status, "they cannot run")
+    errors = _ERROR_LINE.findall(output or "")
+    detail = errors[-1].strip()[:200] if errors else (output or "")[-300:]
+    return f"{_BASE_FAILS} {default} itself in a temporary copy ({why}): {detail}"
+
+
+def protected_reason(files: list[str]) -> str:
+    names = ", ".join(_flat(f, 120) for f in files[:3]) + (" and more" if len(files) > 3 else "")
+    return (f"{_PROTECTED}: merge it by hand, then Land again ({names}; Claude Code may not "
+            "edit .claude/ files)")
+
+
+def blocker_kind(message: str) -> str:
+    """"base" or "protected" when a merge stopped for a reason only a person
+    can clear (land-fast §3.2, §3.3); "" otherwise."""
+    # Only the start counts: what follows can quote file names and test
+    # output, which a branch controls (review P3-4, security P3).
+    text = re.sub(r"^\s*(?:not landed|skipped)\s*—\s*", "", message or "")
+    if text.startswith(_BASE_FAILS):
+        return "base"
+    if text.startswith(_PROTECTED):
+        return "protected"
+    return ""
 
 
 def resolve(repo: Path, default: str, branch: str, planned_sha: str, cmd: TestCommand,
@@ -970,8 +1044,18 @@ def resolve(repo: Path, default: str, branch: str, planned_sha: str, cmd: TestCo
     b = rt.tip(repo, branch)
     if b != planned_sha:
         return Outcome(False, "the branch has moved since the preview")
-    if not conflicted_files(repo, default, branch):
+    files = conflicted_files(repo, default, branch)
+    if not files:
         return Outcome(False, f"it no longer conflicts with {default}")
+    installed = foundry_app(repo, d)
+    blocked = [f for f in files if protected(f, installed)]
+    known = _BASE_FAILED.get((str(repo), d, cmd.display))
+    if blocked or known:
+        # Nothing to pay for: no worktree, no test run, no Claude (land-fast §3).
+        reason = _flat(protected_reason(blocked)) if blocked else known
+        rt._log(f"CLAUDE start {branch} at {b} into {default} at {d} in {repo}", log)
+        rt._log(f"CLAUDE not landed {branch} in {repo}: {reason} (cost $0.00, 0 turns)", log)
+        return Outcome(False, reason)
     try:
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
     except OSError as exc:
@@ -1007,6 +1091,30 @@ def resolve(repo: Path, default: str, branch: str, planned_sha: str, cmd: TestCo
         return fail(f"internal error: {type(exc).__name__}: {exc}")
     finally:
         _cleanup(repo, path, root, links)
+
+
+def _stages(tmp: _Tmp, name: str) -> set[str]:
+    rc, out, _ = tmp.git("ls-files", "--unmerged", "-z", "--", f":(literal){name}", strip=False)
+    return {e.split("\t", 1)[0].split()[2] for e in _z(out) if "\t" in e} if rc == 0 else set()
+
+
+def _take_default(tmp: _Tmp, names: list[str], d: str, default: str) -> str:
+    """Resolve Foundry's own files to the default branch's copy (or its
+    deletion), decided from the index stages: a rename into `.claude/` or any
+    other shape is a stop, never a guess (review P1)."""
+    for name in names:
+        spec = f":(literal){name}"
+        stages = _stages(tmp, name)
+        at_tip = tmp.git("cat-file", "-e", f"{d}:{name}")[0] == 0
+        if "2" in stages and at_tip:
+            rc, _, err = tmp.git("checkout", "--quiet", d, "--", spec)
+        elif stages == {"1", "3"} and not at_tip:
+            rc, _, err = tmp.git("rm", "--quiet", "--force", "--", spec)
+        else:
+            return protected_reason([name])
+        if rc != 0:
+            return f"could not take {default}'s copy of {_flat(name, 120)}: {_flat(err)}"
+    return ""
 
 
 def _claude_round(tmp: _Tmp, claude: str, prompt: str, budget: float, stop: Stopper,
@@ -1057,9 +1165,9 @@ def _resolve_in(repo, default, branch, d, b, cmd, claude, log, stop, progress,
     if base.status == "pass":
         _BASE_PASSED.add(key)
     else:
-        why = {"fail": "they fail", "timeout": "they time out"}.get(base.status, "they cannot run")
-        return fail(f"no Claude run: the tests don't pass on {default} itself in a temporary "
-                    f"copy ({why}): {base.output[-300:]}")
+        reason = _flat(base_fail_reason(default, base.status, base.output))
+        _BASE_FAILED[key] = reason
+        return fail(reason)
     # Whatever the run left behind goes before the merge.
     if (tmp.git("reset", "--quiet", "--hard", d)[0] != 0
             or tmp.git("clean", "-ffdxq")[0] != 0 or tmp.untracked() or tmp.changed()):
@@ -1076,19 +1184,33 @@ def _resolve_in(repo, default, branch, d, b, cmd, claude, log, stop, progress,
     if outside:
         return fail(f"the merge holds symlinks that point outside the repo: {', '.join(outside[:5])}")
     progress(f"  Conflicts in: {', '.join(_flat(u, 120) for u in unmerged)}")
+    installed = foundry_app(repo, d)
+    blocked = [u for u in unmerged if protected(u, installed)]
+    if blocked:
+        return fail(protected_reason(blocked))
+    owned = [u for u in unmerged if installed and foundry_owned(u)]
+    if owned:
+        problem = _take_default(tmp, owned, d, default)
+        if problem:
+            return fail(problem)
+        names = ", ".join(_flat(n, 120) for n in owned)
+        progress(f"  Took {default}'s copy of Foundry's own files: {names}")
+        rt._log(f"FOUNDRY files taken from {default} for {branch} in {repo}: {names}", log)
+        unmerged = [u for u in unmerged if u not in owned]
     before_untracked = tmp.untracked()
     before_changed = tmp.changed()
 
-    result = _claude_round(tmp, claude, merge_prompt(branch, default, unmerged),
-                           BUDGET_USD, stop, progress, state)
-    if not result.ok:
-        return fail(result.reason)
-    deletions = requested_deletions(result.text)
-    if deletions:
-        problem = _delete(tmp, deletions, unmerged, d, b)
-        if problem:
-            return fail(problem)
-        progress(f"  Deleted as Claude asked: {', '.join(_flat(n, 120) for n in deletions)}")
+    if unmerged:
+        result = _claude_round(tmp, claude, merge_prompt(branch, default, unmerged),
+                               BUDGET_USD, stop, progress, state)
+        if not result.ok:
+            return fail(result.reason)
+        deletions = requested_deletions(result.text)
+        if deletions:
+            problem = _delete(tmp, deletions, unmerged, d, b)
+            if problem:
+                return fail(problem)
+            progress(f"  Deleted as Claude asked: {', '.join(_flat(n, 120) for n in deletions)}")
     extra = tmp.changed() - before_changed - set(unmerged)
     new_files = tmp.untracked() - before_untracked
     if extra or new_files:
@@ -1102,12 +1224,15 @@ def _resolve_in(repo, default, branch, d, b, cmd, claude, log, stop, progress,
     rc, _, err = tmp.git("add", "--update")
     if rc != 0 or tmp.git("ls-files", "--unmerged")[1]:
         return fail(f"could not stage the resolution: {err or 'files are still unmerged'}")
-    message = f"Lab Hub: merge {branch} (conflicts resolved by Claude Code)"
+    how = ["conflicts resolved by Claude Code"] if unmerged else []
+    how += [f"Foundry files from {default}"] if owned else []
+    message = f"Lab Hub: merge {branch} ({'; '.join(how)})"
     rc, _, err = tmp.git("commit", "--quiet", "--no-verify", "-m", message)
     if rc != 0:
         return fail(f"the merge commit failed: {err}")
 
     run = _tests(cmd, tmp, repo, stop, progress, links)
+    fixed_round = run.status == "fail"
     if run.status == "fail":
         remaining = BUDGET_USD - state["cost"]
         if remaining < 0.25:
@@ -1164,6 +1289,8 @@ def _resolve_in(repo, default, branch, d, b, cmd, claude, log, stop, progress,
     rc, _, err = rt.git(main, "merge", "--ff-only", "--quiet", m)
     if rc != 0:
         return fail(f"could not fast-forward {default}: {err}")
+    if not fixed_round:  # tested in a clean copy: the next base (§3.1, review P3-5)
+        _BASE_PASSED.add((str(repo), m, cmd.display))
     rt._log(f"CLAUDE landed {branch} at {b} into {default} as {m} in {repo} "
             f"(tests: {cmd.display}; cost {usd(state['cost'])}, {state['turns']} turns)", log)
     return Outcome(True, f"landed as {m[:10]} — Claude {usd(state['cost'])}, "

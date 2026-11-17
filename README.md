@@ -300,19 +300,31 @@ its tick-boxes). One press looks at that repo, says in one sentence what it will
 do ("sonar: commit open changes in 2 worktrees, merge 3 branches into master,
 push master to origin, delete 3 landed branches."), and asks once; **Details**
 lists every step. Progress shows on the tile, and the outcome is stated there:
-**Landed**, or **Not landed: <the reason in one line>** (for example "no Claude
-run: the tests don't pass on master itself: ImportError: cannot import name
-'macro'"). Land leaves nothing open (spec `docs/specs/land-resolve-all.md`):
+**Landed**, or **Not landed: <the reason in one line>** (for example "fix
+master's own tests, then Land again: they fail in a clean copy (ImportError:
+cannot import name 'macro'); waiting: feat"). Land leaves nothing open (spec `docs/specs/land-resolve-all.md`):
 "Landed" means every worktree is clean, every branch is landed or archived and
 the default branch is level with origin; "Landed · 2 branches archived · 1 file
 quarantined" says what it put aside. "Not landed" is left only for what a
 person must clear, and names the one action: gitleaks or a signed-in Claude
 Code missing, a paused merge or rebase, a process inside a checkout Land must
-commit in or switch, a rejected push, or an app path that is neither a repo nor
-a link to one.
+commit in or switch, a rejected push, an app path that is neither a repo nor
+a link to one, a default branch whose own tests fail (tested once per Land; the
+branches waiting on it stay), or a conflict in a `.claude/` file Claude Code may
+not edit (spec `docs/specs/land-fast.md`). In an app Foundry installed into,
+conflicts in Foundry's own `.claude/commands/` and `.claude/agents/` files take
+the default branch's copy without Claude Code. A merge commit that passed its
+tests is not tested again as the base for the next branch.
 **Land all (N)** on the launchpad does the same for every flagged repo, with one
-confirmation listing one sentence per repo; a repo that fails is reported and
-the rest carry on. **Stop landing** ends a running
+confirmation; a repo that fails is reported and the rest carry on. The
+confirmation shows one card per repo: what Land will do, as short items, and
+an **Only you can clear** section with each stop's place ("Main checkout",
+"Worktree <folder>"), the problem (a busy folder counts its processes and names
+a few) and the one thing to do. Repos with nothing to land share one line. One
+**Claude Code** panel gives the model, what may be sent, each cap and one
+total. **Show details** holds the full text, with every path and process id.
+Return presses nothing; Escape cancels (spec `docs/specs/land-confirm-dialog.md`,
+`ui/land_confirm.py`). **Stop landing** ends a running
 Claude Code or test step and skips the rest; work already landed stays landed.
 Only one Land runs at a time per page, and a repo is claimed while it lands, so
 the same repo can never be landed twice at once. `lab_hub/land.py`,
@@ -327,7 +339,14 @@ Before that set runs, Land prepares the repo (`lab_hub/land_resolve.py`, ADR
   `.env.example`, keys, `*credentials*`), files over 10 MB and files with a
   finding are moved to `~/Documents/lab/.quarantine/<repo>/<date>/` (owner-only)
   and their exact paths added to `.gitignore`. Nothing is deleted and the
-  secret is never logged.
+  secret is never logged. **A symlink to a folder** (an agent worktree's
+  `.venv` linked to the checkout's) is never committed. The same goes for any
+  symlink whose name the repo ignores as a folder: `.venv/` matches a folder,
+  not a link. Land leaves the link where it is and adds its exact path
+  (`/.venv`) to `.gitignore`. A folder link you do want in the repo (like
+  `shopfront/website`) has to be committed by hand, after you remove that
+  line. This covers only files Land commits itself. A link an agent already
+  committed on its branch still merges as it is. Spec `land-update-gaps.md`.
 - **A checkout on a side branch** has its open work committed and is switched
   back to the default branch; the side branch then lands like any other.
 - **A detached HEAD** holding work no branch has is put on a branch
@@ -458,7 +477,10 @@ shows one "Rebuilding" stage instead. Verify is Lab Hub reading the installed
 version afterwards, and the row says which version that is; it is for
 information and never turns a successful rebuild into a failure. **Live
 output** holds the build log and opens by itself when a rebuild fails. A failed
-rebuild stops the run. On this step Copy commands copies without closing the
+rebuild no longer stops the run: its row is marked failed, the output says
+"going on with the next", and the other apps, Lab Hub's own build included,
+are still built. The window ends with "N of M rebuilds failed: <apps>". If Lab
+Hub's own build passed, it still restarts into it. On this step Copy commands copies without closing the
 window. **Cancel** stops the whole run: the running build and everything its
 script started (PyInstaller, the copy into `/Applications`) are stopped, no
 later rebuild starts, and the window stays open at Done with the rows readable
@@ -477,6 +499,57 @@ on the next run) that `open -a Terminal` runs. Lab Hub does not watch the
 window; press Refresh after it finishes. If an in-app rebuild fails, no
 Terminal window opens. Spec `update-now-terminal.md`; `run_in_terminal` in
 `lab_hub/launcher/control.py`.
+
+**Lab Hub updates itself the same way.** The launchpad's Check builds ends with
+a row for **Lab Hub (this app)**, comparing the installed build with its
+checkout like any frozen app. When it is behind, Update now builds it last, with
+`./build_app.sh` (its own self-test included, no `--install`):
+
+- **It waits for running work.** Before the build starts, Update now waits while
+  a Land is planning or running on any page, or a tool (Convert, Images, Video,
+  Narrator) is running. The row reads "Waiting: Land is running", and Cancel
+  still works.
+- **It builds only from a clean checkout on `main`.** Several sessions share
+  this checkout, and their unfinished edits must not end up in the app that runs
+  Land. When that is not the case, the row says why ("the checkout has
+  uncommitted changes…", "the checkout is on claude/x, not main") and Update now
+  leaves Lab Hub alone. The check runs again after the wait.
+- **What gets installed is the build that passed.** As soon as it passes, Lab Hub
+  copies it out of the shared checkout to
+  `~/Library/Application Support/Lab Hub/update/staged/`. It does so only if the
+  checkout is still clean on `main` at the commit stamped into the build. A
+  later commit or build in the checkout cannot change what is installed.
+- **A refused Lab Hub is skipped, not failed.** If the checkout is not clean on
+  `main` when Lab Hub's turn comes, Lab Hub is skipped. The other rebuilds and
+  Terminal installers carry on as usual, and the window ends with "Lab Hub
+  itself was not rebuilt; its row says why".
+- **The restart happens when you close the window.** After the build passes, the
+  window says so and its button reads **Close and restart**. Lab Hub quits
+  only when nothing is running.
+- **A small helper does the swap.** It is a fixed script started in a session
+  of its own, and it:
+  1. waits for the old Lab Hub to exit (60 s at most, else nothing is replaced);
+  2. moves the installed `/Applications/Lab Hub.app` aside as the one kept
+     previous build (`~/Library/Application Support/Lab Hub/update/previous/`);
+  3. copies the new build into place and self-tests the installed copy,
+     putting the previous build back if that fails;
+  4. opens Lab Hub.
+- **Every step of the swap is checked.** A rename only goes onto a free path,
+  and the helper runs with a fixed environment and a lock. If it cannot put
+  things right, it records the update as broken, names where the previous
+  build is, and opens nothing. To recover, copy
+  `update/previous/Lab Hub.app` back to `/Applications`.
+- **The new Lab Hub says how the update went,** once, in the status bar and
+  as a menu bar notice: "Lab Hub updated to v2.180.", or "The update to
+  v2.180 did not install (…); you are on v2.172", with where the log is
+  (`update/update.log`).
+
+Unlike `--install`, an update leaves the checkout's `build/` and
+`dist.noindex/` in place; the next build replaces them.
+
+Apps Lab Hub started keep running across the restart. When Lab Hub runs from
+source, or from a copy other than `/Applications/Lab Hub.app`, its row offers
+no update. Spec `self-update.md`, ADR 0003; `lab_hub/self_update.py`.
 
 An app whose bundle runs a **release clone** (Provisio: `~/Releases/provisio`) that
 is behind its source gets neither an installer nor Update now: the installer
@@ -942,6 +1015,11 @@ that emits Qt signals and raises `Cancelled` when Stop is pressed.
     ./build_app.sh            # -> dist.noindex/Lab Hub.app
     ./build_app.sh --install  # -> /Applications/Lab Hub.app
 
+From inside Lab Hub, Check builds → Update now does the same and restarts
+Lab Hub on the new build (Apps, "Lab Hub updates itself the same way"). Run
+`--install` by hand only while Lab Hub is not running: it replaces the bundle
+under a running copy and keeps no previous build.
+
 `build_app.sh` runs `--selftest` against the built binary before it installs
 anything. That check matters here because Pillow ships a binary extension, and
 because a frozen app that writes its config inside its own bundle breaks its
@@ -1012,6 +1090,31 @@ active hook until `/harden` is run and the owner turns them on.
 It does not replace any of the projects it launches. Each keeps its own repo,
 README, venv and build script; Lab Hub only points at them. Changing what
 Sentinel does still mean changing Sentinel.
+
+## Licence
+
+Lab Hub is free software, licensed under the GNU Affero General Public License, version 3 or (at your option) any later version (AGPL-3.0-or-later); see [LICENSE](LICENSE). It comes with no warranty. Third-party components keep their own licences: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## Privacy, disclaimer and third-party notices
+
+**Privacy.** Lab Hub has no server, account, analytics or telemetry. Its settings and logs stay on your Mac, in
+`~/Library/Application Support/Lab Hub/`; logs of apps launched from a source checkout go to your system temp folder
+(`lab-hub-launch-<app>.log`). What leaves your Mac: **Narrator** sends the text of the ebook you pick, in pieces, to a
+speech provider with your own API key. The Lab Hub window uses OpenAI; ElevenLabs is available only through the converter's
+command line, and the Google Gemini route needs `google-genai`, which the built app does not include. **Land** can run your
+own Claude Code CLI, which sends a branch's diff, conflicted files or, in a fix round, the end of a failed test's output
+(last 6,000 characters) to Anthropic under your own login. **Websites** sends an HTTP HEAD request to altmerch.store and
+bookadatewithme.com, which see your IP address like any visitor. **Dashboards** load the pages in your dashboard catalog:
+local ones (127.0.0.1:8765) stay on your Mac, and an entry with a remote URL contacts that host. Updating Lab Hub builds it
+from your local checkout and does not download Lab Hub; if the checkout's virtualenv lacks PyInstaller, the build runs
+`uv pip install pyinstaller`, which contacts a package index and fails if it is unreachable. Those providers' own terms and
+privacy policies apply to what they receive.
+
+**Provided as is**, without warranty, to the extent the law allows; it starts programs, writes files and can merge and archive
+git branches, so keep backups. Narrator's audio is synthetic speech: say so where you publish it. Lab Hub is not affiliated with
+or endorsed by The Qt Company, OpenAI, Google, ElevenLabs or Anthropic; their names are their owners' trademarks.
+
+**Third-party software** and the Qt (LGPL-3.0) notice, source offer and replacement instructions: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Version
 

@@ -127,7 +127,9 @@ def test_a_failed_step_is_reported_in_one_sentence_and_the_rest_still_run(lab, t
     monkeypatch.setattr(repo_tidy, "apply", apply)
     result = run(plan_for(lab), tmp_path)
     assert result.state == "not_landed" and result.failed >= 1
-    assert result.reason.startswith("no Claude run: the tests don't pass on master itself")
+    # land-fast §3.2 (owner-approved 2026-11-17): a failing default branch is one
+    # stop that leads with the action, then the error.
+    assert result.reason.startswith("fix main's own tests, then Land again")
     assert "cannot import name 'macro'" in result.reason
     assert "not landed" not in result.reason and "\n" not in result.reason
     assert result.line.startswith("Not landed: ")

@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Land confirmation mockup</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<style>
+:root{--surface-0:#f5f4ef;--surface-1:#f0efe9;--surface-2:#fff;--border:rgba(0,0,0,.1);--border-strong:rgba(0,0,0,.18);--text-primary:#1f1f1d;--text-secondary:#5f5e5a;--text-muted:#888780;--text-success:#3b6d11;--text-accent:#185fa5;--text-warning:#854f0b;--bg-success:#eaf3de;--bg-accent:#e6f1fb;--bg-warning:#faeeda;--border-warning:#e8c48a;--fill-accent:#378add;--radius:8px;--font-mono:ui-monospace,Menlo,monospace}
+@media (prefers-color-scheme:dark){:root{--surface-0:#1a1a19;--surface-1:#262624;--surface-2:#30302e;--border:rgba(255,255,255,.1);--border-strong:rgba(255,255,255,.18);--text-primary:#f1efe8;--text-secondary:#b4b2a9;--text-muted:#888780;--text-success:#97c459;--text-accent:#85b7eb;--text-warning:#ef9f27;--bg-success:#27500a;--bg-accent:#0c447c;--bg-warning:#4a2a05;--border-warning:#854f0b}}
+body{margin:0;padding:24px 16px;background:var(--surface-0);color:var(--text-primary);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:640px;margin:0 auto}
+.lbl{font-size:12px;color:var(--text-secondary);margin:0 0 6px}
+.win{background:var(--surface-2);border:.5px solid var(--border-strong);border-radius:12px;overflow:hidden;font-size:13px;line-height:1.45}
+.bar{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:.5px solid var(--border);background:var(--surface-1)}
+.d3{width:10px;height:10px;border-radius:50%;background:var(--border-strong)}
+.hd{padding:14px 16px 10px}
+.hd h1{font-size:17px;font-weight:600;margin:0 0 2px}
+.hd p{margin:0;color:var(--text-secondary)}
+.scroll{max-height:none;padding:0 16px 4px}
+.card{border:.5px solid var(--border-strong);border-radius:10px;margin:0 0 10px;overflow:hidden}
+.ch{display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--surface-1)}
+.ch b{font-size:14px}
+.pill{font-size:11px;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.ok{background:var(--bg-success);color:var(--text-success)}.warn{background:var(--bg-warning);color:var(--text-warning)}.ai{background:var(--bg-accent);color:var(--text-accent)}
+.sec{padding:8px 12px 10px}
+.sec h2{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin:0 0 4px}
+.it{display:flex;gap:8px;align-items:flex-start;padding:2px 0}
+.it i{font-size:15px;margin-top:1px;color:var(--text-success)}
+.stops{border-top:.5px solid var(--border-warning);background:var(--bg-warning)}
+.stops h2{color:var(--text-warning)}
+.stop{display:flex;gap:8px;align-items:flex-start;padding:4px 0}
+.stop>i{font-size:15px;margin-top:1px;color:var(--text-warning)}
+.where{font-weight:600}
+.why{color:var(--text-secondary)}
+.do{font-weight:500}
+.sub{font-size:12px;color:var(--text-muted)}
+code{font-family:var(--font-mono);font-size:12px}
+.claude{margin:4px 16px 12px;border:.5px solid var(--border);border-left:3px solid var(--fill-accent);border-radius:var(--radius);padding:10px 12px;background:var(--surface-1)}
+.claude .t{display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
+.claude .t b{font-size:13px}
+.claude .t .tot{margin-left:auto;font-weight:600}
+.claude table{border-collapse:collapse;width:100%;font-size:12px;margin:4px 0 6px}
+.claude td{padding:2px 0;vertical-align:top}
+.claude td.n{text-align:right;white-space:nowrap;padding-left:12px}
+.claude p{margin:4px 0 0;font-size:12px;color:var(--text-secondary)}
+.ft{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 16px;border-top:.5px solid var(--border)}
+.ft .note{font-size:12px;color:var(--text-muted);flex-basis:100%}
+button{font:inherit;font-size:13px;padding:5px 14px;border-radius:var(--radius);border:.5px solid var(--border-strong);background:var(--surface-2);color:var(--text-primary);cursor:pointer}
+button.primary{background:var(--fill-accent);border-color:var(--fill-accent);color:#fff;font-weight:500}
+.det{margin:0 16px 12px;font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;background:var(--surface-1);border-radius:var(--radius);padding:8px 10px;color:var(--text-secondary);display:none;max-height:220px;overflow:auto}
+.det.on{display:block}
+.idle{padding:0 16px 8px;font-size:12px;color:var(--text-muted)}
+</style>
+</head>
+<body>
+<main>
+<p class="lbl">Land all confirmation. Spec: land-confirm-dialog.md, section 2. Data: the owner's screenshot, 2026-11-17.</p>
+<div class="win" role="dialog" aria-labelledby="t">
+  <div class="bar"><span class="d3"></span><span class="d3"></span><span class="d3"></span><span style="margin-left:8px;font-weight:500">Land</span></div>
+
+  <div class="hd">
+    <h1 id="t">Land 3 repos</h1>
+    <p>Land does everything it can, then stops at <b>4 things only you can clear</b>. You can clear them now and press Land after, or press Land and clear them later.</p>
+  </div>
+
+  <div class="scroll">
+    <div class="card">
+      <div class="ch"><b>lab_hub</b><span class="pill ok">3 steps</span><span class="pill warn">stops at 2</span><span class="pill ai" style="margin-left:auto">Claude Code · up to $14</span></div>
+      <div class="sec">
+        <h2>Will do</h2>
+        <div class="it"><i class="ti ti-check"></i><span>Commit open changes in 1 worktree</span></div>
+        <div class="it"><i class="ti ti-check"></i><span>Delete 1 landed branch</span></div>
+        <div class="it"><i class="ti ti-check"></i><span>Merge the 4 other branches where they can; for any that still cannot land, Claude Code decides: land it or archive it as a tag</span></div>
+      </div>
+      <div class="sec stops">
+        <h2>Only you can clear</h2>
+        <div class="stop"><i class="ti ti-alert-triangle"></i><div><span class="where">Main checkout</span> <span class="why">· 63 processes running in it, including node and gk</span><div class="do">Close those terminals or sessions, then Land again.</div></div></div>
+        <div class="stop"><i class="ti ti-alert-triangle"></i><div><span class="where">Worktree priceless-moore-a19001</span> <span class="why">· disclaimer, claude and zsh running in it</span><div class="do">Close those terminals or sessions, then Land again.</div></div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><b>foundry</b><span class="pill ok">2 steps</span><span class="pill warn">stops at 1</span></div>
+      <div class="sec">
+        <h2>Will do</h2>
+        <div class="it"><i class="ti ti-check"></i><span>Commit open changes in 1 worktree</span></div>
+        <div class="it"><i class="ti ti-check"></i><span>Push master to origin</span></div>
+      </div>
+      <div class="sec stops">
+        <h2>Only you can clear</h2>
+        <div class="stop"><i class="ti ti-alert-triangle"></i><div><span class="where">Main checkout</span> <span class="why">· 19 processes running in it, including zsh and claude</span><div class="do">Close those terminals or sessions, then Land again.</div></div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><b>syndustryx</b><span class="pill ok">2 steps</span><span class="pill warn">stops at 1</span><span class="pill ai" style="margin-left:auto">Claude Code · up to $3</span></div>
+      <div class="sec">
+        <h2>Will do</h2>
+        <div class="it"><i class="ti ti-check"></i><span>Merge 1 branch into main (Claude Code resolves its conflicts; tests: <code>python3 -m unittest discover -s tests</code>)</span></div>
+        <div class="it"><i class="ti ti-check"></i><span>Push main to origin</span></div>
+      </div>
+      <div class="sec stops">
+        <h2>Only you can clear</h2>
+        <div class="stop"><i class="ti ti-alert-triangle"></i><div><span class="where">Worktree policy-none-rootcause-686617</span> <span class="why">· limactl and ssh running in it</span><div class="do">Close those terminals or sessions, then Land again.</div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="idle">Nothing to land in Imprint, SONAR, Sentinel.</div>
+
+  <div class="claude">
+    <div class="t"><i class="ti ti-info-circle" style="color:var(--text-accent)"></i><b>Claude Code (model sonnet)</b><span class="tot">at most $17 in total</span></div>
+    <table>
+      <tr><td>Merge with conflicts: up to 5 branches (1 known to conflict now), at most $3 each</td><td class="n">$15</td></tr>
+      <tr><td>Decide on branches that still do not land: up to 4, read-only (log and diff), at most $0.50 each</td><td class="n">$2</td></tr>
+    </table>
+    <p>Code from these repos goes to Anthropic, as in any Claude Code session. Lab Hub runs each repo's tests itself; a merge that passes them lands and is pushed without review. A branch that fails or is archived is kept as a local tag <code>archive/&lt;branch&gt;/&lt;date&gt;</code>, never pushed, and can be restored from Review branches.</p>
+  </div>
+
+  <pre class="det" id="det">lab_hub: commit open changes in 1 worktree, delete 1 landed branch, then merge the 4 other branches not landed yet where they can; … (every current sentence, Claude Code notice and Details text, unchanged, plus every process with its pid and every full path)</pre>
+
+  <div class="ft">
+    <span class="note">Each step is checked again just before it runs. Nothing is forced. Cancel leaves everything as it is.</span>
+    <button onclick="document.getElementById('det').classList.toggle('on');this.textContent=this.textContent==='Show details'?'Hide details':'Show details'">Show details</button>
+    <span style="margin-left:auto"></span>
+    <button>Cancel</button>
+    <button class="primary">Land 3 repos</button>
+  </div>
+</div>
+
+<p class="lbl" style="margin-top:28px">Land from one tile, nothing for Claude Code, no stops: same window, one card, no Claude Code panel.</p>
+<div class="win">
+  <div class="bar"><span class="d3"></span><span class="d3"></span><span class="d3"></span><span style="margin-left:8px;font-weight:500">Land</span></div>
+  <div class="hd"><h1>Land Imprint</h1><p>Land does all of it; nothing needs you.</p></div>
+  <div class="scroll">
+    <div class="card">
+      <div class="ch"><b>Imprint</b><span class="pill ok">3 steps</span></div>
+      <div class="sec">
+        <h2>Will do</h2>
+        <div class="it"><i class="ti ti-check"></i><span>Merge 2 branches into main</span></div>
+        <div class="it"><i class="ti ti-check"></i><span>Push main to origin</span></div>
+        <div class="it"><i class="ti ti-check"></i><span>Remove 2 clean worktrees</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="ft">
+    <span class="note">Each step is checked again just before it runs. Nothing is forced. Cancel leaves everything as it is.</span>
+    <button>Show details</button><span style="margin-left:auto"></span><button>Cancel</button><button class="primary">Land</button>
+  </div>
+</div>
+</main>
+</body>
+</html>

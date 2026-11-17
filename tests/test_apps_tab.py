@@ -745,10 +745,13 @@ class _FakeRebuild:
     """Stands in for Rebuild: records what it was asked to run."""
     ok = True
     asked: list = []
+    failed_commands: list = []  # failed, but the run went on to the end
 
-    def __init__(self, commands, parent=None):
+    def __init__(self, commands, parent=None, **_hooks):
         type(self).asked.append(list(commands))
-        self.succeeded = type(self).ok
+        self.failed = list(type(self).failed_commands)
+        self.ran_to_end = type(self).ok or bool(self.failed)
+        self.succeeded = self.ran_to_end and not self.failed
 
     def exec(self):
         return 0
@@ -765,7 +768,7 @@ def _mixed_rows(apps):
 def test_update_now_runs_the_in_app_rebuilds_then_opens_terminal(qapp, monkeypatch):
     from ui import apps_tab
 
-    _FakeRebuild.ok, _FakeRebuild.asked = True, []
+    _FakeRebuild.ok, _FakeRebuild.asked, _FakeRebuild.failed_commands = True, [], []
     tab, seen = _by_hand_tab(qapp, monkeypatch, _mixed_rows)
     seen["press"] = "Update now"
     order = []
@@ -788,10 +791,10 @@ def test_update_now_runs_the_in_app_rebuilds_then_opens_terminal(qapp, monkeypat
     _drop(tab)
 
 
-def test_a_failed_in_app_rebuild_opens_no_terminal(qapp, monkeypatch):
+def test_a_cancelled_in_app_rebuild_opens_no_terminal(qapp, monkeypatch):
     from ui import apps_tab
 
-    _FakeRebuild.ok, _FakeRebuild.asked = False, []
+    _FakeRebuild.ok, _FakeRebuild.asked, _FakeRebuild.failed_commands = False, [], []
     tab, seen = _by_hand_tab(qapp, monkeypatch, _mixed_rows)
     seen["press"] = "Update now"
     opened = []
@@ -806,6 +809,56 @@ def test_a_failed_in_app_rebuild_opens_no_terminal(qapp, monkeypatch):
     assert _FakeRebuild.asked and opened == []
     assert said and "No Terminal windows opened" in said[0]
     _drop(tab)
+
+
+def test_a_failed_in_app_rebuild_opens_no_terminal_though_the_run_went_on(qapp, monkeypatch):
+    """Spec land-update-gaps §3.2 (review P2-1): the run now goes on past a
+    failed rebuild, and the Terminal installers still do not open."""
+    from ui import apps_tab
+
+    _FakeRebuild.ok, _FakeRebuild.asked = False, []
+    _FakeRebuild.failed_commands = ["cd /q && ./build_app.sh"]
+    try:
+        tab, seen = _by_hand_tab(qapp, monkeypatch, _mixed_rows)
+        seen["press"] = "Update now"
+        opened = []
+        monkeypatch.setattr(apps_tab, "Rebuild", _FakeRebuild)
+        monkeypatch.setattr(launcher, "run_in_terminal",
+                            lambda commands, *a, **k: opened.append(list(commands)) or [])
+        monkeypatch.setattr(tab, "recheck", lambda: None)
+        said = []
+        tab.launched.connect(said.append)
+        tab.show_build_report()
+    finally:
+        _FakeRebuild.failed_commands = []
+
+    assert _FakeRebuild.asked and opened == []
+    assert said and "1 failed (" in said[0]
+    assert "No Terminal windows opened because a rebuild failed." in said[0]
+    assert "Rebuilt and reinstalled" not in said[0]
+    _drop(tab)
+
+
+def test_cancel_right_after_a_failed_rebuild_starts_nothing_more(qapp):
+    """Review P3-4: Cancel in the moment between a failure and the next start."""
+    dialog, rebuild = _rebuild_window(["false", "echo should-not-run"])
+    seen = dialog.command_finished
+
+    def finished(command, ok, cancelled=False, code=0):
+        seen(command, ok, cancelled, code)
+        if not ok:
+            rebuild.cancel()
+
+    dialog.command_finished = finished
+    dialog.show()
+    assert _pump_until(qapp, lambda: rebuild.ended)
+    for _ in range(20):
+        qapp.processEvents()
+    assert "$ echo should-not-run" not in dialog.output_text()
+    assert not rebuild.ran_to_end and rebuild.failed == ["false"]
+    dialog.draw()
+    assert dialog.header.outcome.text().startswith("Cancelled.")
+    dialog.close()
 
 
 def _forward_row(app):
@@ -1038,16 +1091,23 @@ def test_the_rebuild_dialog_runs_the_commands_in_order(qapp):
     dialog.close()
 
 
-def test_a_failed_rebuild_stops_the_run(qapp):
-    """A command that exits non-zero halts the run rather than rebuilding on top
-    of a broken build — the later command never runs."""
-    dialog, rebuild = _rebuild_window(["false", "echo should-not-run"])
+def test_a_failed_rebuild_does_not_stop_the_others(qapp):
+    """Spec land-update-gaps §3.2 (was: a failure halted the run): one app that
+    fails to build no longer keeps the later ones from being built."""
+    rows = _x_rows("false") + (launcher.BuildStatus(
+        launcher.ExternalApp("y", "Y", "y", "main.py", "s"), launcher.Version(), "behind",
+        "older.", None, "echo third-command"),)
+    dialog, rebuild = _rebuild_window(["false", "echo second-command", "echo third-command"],
+                                      rows)
     dialog.show()
     assert _pump_until(qapp, lambda: dialog.cancel_button.text() == "Close")
     log = dialog.output_text()
-    assert "should-not-run" not in log
-    assert not rebuild.succeeded
-    assert dialog.header.outcome.text() == "A rebuild failed — see the live output."
+    assert "second-command" in log and "third-command" in log
+    assert "[X: the rebuild exited with code 1 — going on with the next]" in log
+    assert rebuild.failed == ["false"] and rebuild.ran_to_end and not rebuild.succeeded
+    dialog.draw()
+    assert dialog.header.outcome.text() == "1 of 3 rebuilds failed: X. See the live output."
+    assert dialog.rows[1].reason.text() != dialog.rows[0].reason.text()  # Y passed
     dialog.close()
 
 
@@ -1195,9 +1255,10 @@ def test_cancel_stops_what_the_build_started_not_only_the_shell(qapp, tmp_path):
     dialog.close()
 
 
-def test_a_command_that_cannot_start_ends_the_run_as_failed(qapp, monkeypatch):
+def test_a_command_that_cannot_start_fails_and_the_run_still_ends(qapp, monkeypatch):
     """Review P1-1: with no shell to start, QProcess sent errorOccurred and never
-    finished; the run never ended, Cancel did nothing and exec() never returned."""
+    finished; the run never ended, Cancel did nothing and exec() never returned.
+    Each command is tried in turn (spec land-update-gaps §3.2)."""
     monkeypatch.setenv("SHELL", "/nonexistent/shell")
     dialog, rebuild = _rebuild_window(["echo hi", "echo second"], _x_rows("echo hi"))
     dialog.show()
@@ -1205,10 +1266,12 @@ def test_a_command_that_cannot_start_ends_the_run_as_failed(qapp, monkeypatch):
     assert not rebuild.succeeded and not rebuild.running
     assert dialog.cancel_button.text() == "Close"
     dialog.draw()
-    assert dialog.header.outcome.text() == "A rebuild failed — see the live output."
+    assert dialog.header.outcome.text() == ("2 of 2 rebuilds failed: X, echo second. "
+                                            "See the live output.")
     assert dialog.rows[0].reason.text() == "It could not start; see the live output."
+    assert rebuild.failed == ["echo hi", "echo second"]
     log = dialog.output_text()
-    assert "could not start" in log and "$ echo second" not in log
+    assert "X: the rebuild could not start" in log and "$ echo second" in log
     from PySide6.QtCore import QTimer
 
     QTimer.singleShot(200, dialog.cancel_button.click)  # Close
@@ -1379,8 +1442,8 @@ def test_update_now_hands_its_open_window_to_the_rebuild(qapp, monkeypatch):
                         lambda self, code: closes.append(code) or real_done(self, code))
 
     class Spy(_FakeRebuild):
-        def __init__(self, commands, window=None):
-            super().__init__(commands, window)
+        def __init__(self, commands, window=None, **hooks):
+            super().__init__(commands, window, **hooks)
             windows.append(window)
             closed_before.append(len(closes))
 
@@ -1407,8 +1470,8 @@ def test_update_now_without_a_window_deletes_the_one_it_made(qapp, monkeypatch):
     made = []
 
     class Spy(_FakeRebuild):
-        def __init__(self, commands, window=None):
-            super().__init__(commands, window)
+        def __init__(self, commands, window=None, **hooks):
+            super().__init__(commands, window, **hooks)
             made.append(window)
 
     monkeypatch.setattr(apps_tab, "Rebuild", Spy)

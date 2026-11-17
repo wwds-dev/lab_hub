@@ -16,6 +16,16 @@ README and the specs in `docs/specs/` describe them.
 ## Unreleased
 
 ### Added
+- **Lab Hub updates itself** from Check builds:
+  - The launchpad's report ends with a **Lab Hub (this app)** row, and Update
+    now builds it last.
+  - Before the build, it waits for any running Land or tool, and it builds only
+    from a clean checkout on `main`.
+  - Lab Hub restarts when you close the window (**Close and restart**). A
+    helper installs the new build after the old copy has quit, self-tests it,
+    puts the previous build back if that fails, and opens Lab Hub.
+  - The next start says how the update went.
+  - No terminal, no `kill`, no menu bar click.
 - A **Land window** for Land and Land all: a progress bar and percent, time
   elapsed, time left and "done around HH:MM", counts, one row per repo with a
   Commit / Merge and test / Push / Tidy track, the running repo's steps with
@@ -35,6 +45,13 @@ README and the specs in `docs/specs/` describe them.
   ignored and replaced by the next good save.
 
 ### Changed
+- The **Land confirmation** is readable at a glance: one card per repo with
+  what Land will do and a separate **Only you can clear** section (place,
+  problem, the one action; busy folders count their processes instead of
+  listing process ids), one Claude Code panel with a single total instead of
+  one paragraph per repo, a line for repos with nothing to land, and the full
+  text under **Show details**. Return no longer does anything there; Escape
+  cancels.
 - **Check builds** opens one window instead of a message box and a separate
   rebuild dialog. It steps through Check, Review, Update and Done; Review shows
   one row per app with its verdict in words and the up-to-date apps on one
@@ -50,12 +67,56 @@ README and the specs in `docs/specs/` describe them.
   progress windows need. The floor moves to 6.12.1 once Qt ships it, which also
   fixes CVE-2026-116337 (a crafted HTTP response can exhaust resources in Qt
   Network; Lab Hub reaches it through the Links tab).
+- **Land runs each test suite less often.** After a conflicting branch lands,
+  Land no longer re-runs the default branch's tests on the commit it has just
+  tested. A chain of N branches that need Claude Code now takes N + 1 test runs
+  instead of 2N. In the fixture benchmark, 11 test runs dropped to 7 and 9
+  Claude Code runs to 5.
+- **A default branch whose own tests fail is tested once per Land**, not once
+  per branch. It is one stop that starts "fix main's own tests, then Land
+  again", names the error and lists the branches waiting on it. Those branches
+  stay as branches and are not archived.
+- **Conflicts in Foundry's own files** (`.claude/commands/`, `.claude/agents/`
+  in an app Foundry installed into) take the default branch's copy without
+  Claude Code. Any other `.claude/` conflict is a stop that says to merge it by
+  hand. Land no longer pays for a test run and a Claude run that cannot edit
+  the file.
 
 ### Fixed
+- **The app now carries its licences.** `Lab Hub.app` ships `LICENSE` (GNU
+  AGPL-3.0), `THIRD_PARTY_NOTICES.md` and the GNU LGPL-3.0 and GPL-3.0 texts
+  that Qt's licence requires. **Settings → This build → Show licences** opens
+  them. The self-test fails a build that lacks them.
+- **Qt modules offered only under GPL-3.0 are no longer shipped.** These were
+  Qt Graphs, Qt Quick 3D (with Physics), Qt Quick Timeline and Qt Virtual
+  Keyboard. Qt Charts and Qt Data Visualization are removed as well. Lab Hub
+  used none of them. The build removes them and fails if
+  any remain. The self-test now loads a page in QtWebEngine, so a build whose
+  Dashboards page would stay blank fails too.
+- A branch whose plain merge became a conflict after an earlier merge in the
+  same Land never got a Claude Code merge and was archived. It now gets one in
+  the next round.
+- A branch Claude Code said to land was archived when its only problem was a
+  `.claude/` conflict or a failing default branch. It now stays as a branch,
+  with the reason a person must clear.
 - Escape during a rebuild hid the window but left the build running unwatched,
   and the next rebuild then started. Escape, the red button, Close and Cancel
   now all stop the running build, and no later rebuild starts.
 - Cancel now stops everything the build script started (such as PyInstaller or
   the copy into `/Applications`), not only the shell that ran it.
-- A rebuild command that cannot start at all now ends the run as failed
-  instead of leaving the window waiting.
+- A rebuild command that cannot start at all is now marked failed instead of
+  leaving the window waiting.
+- **Land committed a symlink to a folder.** An agent worktree's `.venv` link
+  to the checkout's virtualenv was committed because `.gitignore` had only
+  `.venv/`, which does not match a link. Merged into `main`, it replaced the
+  real virtualenv with a link to itself. Land now never commits a symlink to a
+  folder, or one whose name is ignored as a folder. It leaves the link in place
+  and ignores its exact path. A link already committed on a branch is not
+  checked yet.
+- **Update now stopped at the first failed rebuild,** so the apps after it,
+  and Lab Hub's own update (always last), were never built. A failed or
+  unstartable rebuild is now marked failed and the run goes on. The window and
+  the page name the apps that failed. Lab Hub still restarts into its new
+  build when only another app failed. Terminal installers still open only when
+  nothing failed.
+- Check builds said "1 commits further on"; it now says "1 commit".

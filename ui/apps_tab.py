@@ -3,24 +3,27 @@
 from __future__ import annotations
 
 import html
+import subprocess
 import time
+from dataclasses import replace
 from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QProcess, QProcessEnvironment, Qt, Signal
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QLabel,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
 )
 
-from lab_hub import config, hygiene, land, launcher, progress
+from lab_hub import config, hygiene, land, launcher, progress, self_update
 
 from . import theme
 from .progress_window import BuildCheckWindow, LandWindow
-from .rebuild import Rebuild
+from .rebuild import Rebuild, Skipped
 from .tiles import (  # noqa: F401 - the layout constants are re-exported
     GRID_MAX_WIDTH,
     POLL_MS,
@@ -290,7 +293,7 @@ class AppCard(Tile):
                 else ""
             )
             + (
-                f" The working checkout is {found.behind} commits further on, so Launch "
+                f" The working checkout is {launcher.state.commits_further(found.behind)}, so Launch "
                 "opens the older build until it is rebuilt and reinstalled."
                 if found.stale
                 else ""
@@ -583,6 +586,9 @@ class AppsTab(TilePage):
 
     launched = Signal(str)
     start_failed = Signal(str)
+    # Lab Hub's own build passed and was staged (a `self_update.Staged`): quit
+    # and let the helper install it (spec self-update).
+    restart_requested = Signal(object)
 
     def __init__(
         self,
@@ -608,6 +614,9 @@ class AppsTab(TilePage):
         # Cards Land was asked on, by repo name, held from the click: a hygiene
         # refresh or a rebuilt tile mid-Land must not lose the outcome.
         self._landing_cards: dict[str, AppCard] = {}
+        # What is running in this process that a restart would end. The main
+        # window replaces this with one that looks at every page and tool.
+        self.busy_reasons: Callable[[], list[str]] = self._own_busy_reasons
         # The Land window (spec progress-windows): opened after the
         # confirmation, fed from the same signals as the tiles. Closing it
         # only hides it; Show progress brings it back while Land runs.
@@ -753,6 +762,19 @@ class AppsTab(TilePage):
         root = self.settings.resolved_lab_root()
         report = (launcher.build_report(root) if self._build_apps is None
                   else launcher.build_report(root, self._build_apps))
+        if self._build_apps is None:
+            # The launchpad's report speaks for every app, Lab Hub included,
+            # always last (spec self-update §2.1).
+            try:
+                own = self_update.self_status(root)
+                busy = self.busy_reasons()
+                if own.runs_in_app and busy:
+                    # Said at the review step too (spec §5.2).
+                    own = replace(own, note=f"{own.note} Will update after this "
+                                            f"finishes: {'; '.join(busy)}.")
+                report = (*report, own)
+            except Exception as error:  # noqa: BLE001 - its own row must not hide the others
+                self.launched.emit(f"Could not check Lab Hub's own build: {error}")
         # The words and commands are computed as the message box had them
         # (spec progress-windows §8.7); the window shows them as rows and
         # offers exactly the box's buttons, under the same conditions.
@@ -790,8 +812,9 @@ class AppsTab(TilePage):
         Whatever the outcome, re-check versions afterwards so the tiles stop
         saying "behind" the moment a rebuild lands — a cancelled or partial run
         simply leaves the ones it did not reach still saying so, which is true.
-        A run that failed or was cancelled opens no Terminal window: like the
-        rebuilds themselves, it stops rather than going on. The windows are not
+        A run in which any rebuild failed, or that was cancelled, opens no
+        Terminal window; a failed rebuild no longer ends the run itself (spec
+        land-update-gaps §3.2). The windows are not
         watched; Refresh shows the result once the owner has answered there.
         The Terminal commands are checked before the first rebuild starts, and a
         Terminal step that fails is shown to the owner rather than lost.
@@ -805,6 +828,7 @@ class AppsTab(TilePage):
                                 f"Nothing was started: {error}")
             return
         said = []
+        built_self = False
         if commands:
             created = window is None
             if created:
@@ -812,24 +836,39 @@ class AppsTab(TilePage):
                     progress.build_check_view((), scoped=True),
                     self.settings.resolved_lab_root(), self)
                 window.show()
+            restarts = getattr(window.view, "restarts", None)
             try:
-                dialog = Rebuild(commands, window)
+                dialog = Rebuild(commands, window, hold=self._hold_for(restarts))
                 dialog.exec()
+                failed = list(dialog.failed)
+                names = ", ".join(window.name_for(c) for c in failed)
             finally:
                 if created:  # show_build_report deletes the window it passed in
                     window.deleteLater()
             self.recheck()
-            if not dialog.succeeded:
+            # A failed rebuild no longer ends the run (spec land-update-gaps
+            # §3.2): only a cancel or a broken hold check stops it early.
+            if not dialog.ran_to_end:
                 if by_hand:
                     self.launched.emit(
                         "No Terminal windows opened because the rebuild did "
                         "not finish."
                     )
                 return
-            said.append(
-                f"Rebuilt and reinstalled {len(commands)} app"
-                f"{'' if len(commands) == 1 else 's'}."
-            )
+            built_self = (bool(restarts) and restarts not in getattr(dialog, "skipped", ())
+                          and restarts not in failed)
+            others = [c for c in commands if c != restarts]
+            rebuilt = len([c for c in others if c not in failed])
+            if rebuilt:
+                said.append(f"Rebuilt and reinstalled {rebuilt} app"
+                            f"{'' if rebuilt == 1 else 's'}.")
+            if failed:
+                said.append(f"{len(failed)} failed ({names}): see Check builds.")
+            if restarts and not built_self:
+                said.append("Lab Hub itself was not rebuilt.")
+            if failed and by_hand:
+                said.append("No Terminal windows opened because a rebuild failed.")
+                by_hand = []
         elif window is not None and window.isVisible():
             window.done(0)  # nothing to watch here: the installers run in Terminal
         if by_hand:
@@ -846,6 +885,52 @@ class AppsTab(TilePage):
             )
         if said:
             self.launched.emit(" ".join(said))
+        if commands and built_self:
+            self._restart_on(restarts)
+
+    def _restart_on(self, restarts: str) -> None:
+        """Lab Hub's own build passed: copy it out of the shared checkout now,
+        so what is installed is what was tested, then ask for the restart."""
+        project = launcher.source_dir(self_update.SELF, self.settings.resolved_lab_root())
+        try:
+            if project is None:
+                raise ValueError("its checkout is gone")
+            staged = self_update.stage_build(project)
+        except (ValueError, OSError, subprocess.SubprocessError) as error:
+            QMessageBox.warning(self, "Lab Hub was not restarted",
+                                f"The new build was not installed: {error}. "
+                                "This copy keeps running.")
+            return
+        self.restart_requested.emit(staged)
+
+    def _own_busy_reasons(self) -> list[str]:
+        if self.lander.running:
+            return ["Land is running"]
+        if self.lander.busy:
+            return ["Land is reading the repos"]
+        return []
+
+    def _hold_for(self, restarts: str | None):
+        """Lab Hub's own build waits for anything a restart would end, then
+        checks its checkout again: a Land may have changed it (spec §5.2, §5.3)."""
+        if not restarts:
+            return None
+
+        def hold(command: str) -> str | None:
+            if command != restarts:
+                return None
+            reasons = self.busy_reasons()
+            if reasons:
+                return "; ".join(reasons) + ". Lab Hub builds when that finishes"
+            project = launcher.source_dir(self_update.SELF,
+                                          self.settings.resolved_lab_root())
+            blocker = (self_update.checkout_blocker(project) if project is not None
+                       else "its checkout is gone")
+            if blocker:
+                raise Skipped(f"Lab Hub was not rebuilt: {blocker}")
+            return None
+
+        return hold
 
     def copy_commands(self, commands: list[str]) -> None:
         """Put the rebuild commands on the clipboard, one per line."""
@@ -976,23 +1061,10 @@ class AppsTab(TilePage):
             self._update_land_controls()
 
     def confirm_land(self, plans: list[land.LandPlan]) -> bool:
-        """The one confirmation: what will happen, in words (tests replace this)."""
-        todo = [p for p in plans if not p.nothing]
-        box = QMessageBox(self)
-        box.setWindowTitle("Land")
-        box.setTextFormat(Qt.TextFormat.PlainText)  # names and reasons come from files and git
-        box.setIcon(QMessageBox.Icon.Question)
-        box.setText("\n".join(p.sentence for p in todo))
-        notices = [p.claude_notice for p in todo if p.claude_notice]
-        box.setInformativeText("\n\n".join(notices) or "Each step is checked again just "
-                               "before it runs. Nothing is forced.")
-        box.setDetailedText("\n\n".join(p.detail for p in todo))
-        go = box.addButton("Land", QMessageBox.ButtonRole.AcceptRole)
-        cancel = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(cancel)
-        box.setEscapeButton(cancel)
-        box.exec()
-        return box.clickedButton() is go
+        """The one confirmation: what will happen, per repo (tests replace this)."""
+        from .land_confirm import LandConfirmDialog
+
+        return LandConfirmDialog(plans, self).exec() == QDialog.DialogCode.Accepted
 
     def _land_planned(self, plans) -> None:
         try:
