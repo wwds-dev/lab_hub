@@ -307,7 +307,12 @@ What Land is allowed to do is `lab_hub/repo_tidy.py`'s guarded set, unchanged
 without conflicts (not ones still being worked on, nor into a branch behind
 origin), commit tracked changes (never untracked files) and push that commit
 when the branch was otherwise level, delete a branch whose changes are already
-in the default branch (including squash-merged work), remove a clean worktree on
+in the default branch (including squash-merged work, and a branch whose every
+commit is already there as a rebased or cherry-picked copy: `git cherry` shows only
+`-`, no merge commit in it; the preview says the match is by patch, so later edits
+on the default branch are not compared, and gives how many files differ; the tip is
+logged so `git branch <name> <sha>` restores it; spec `docs/specs/land-already-applied.md`),
+remove a clean worktree on
 such a branch or detached at a commit already there, fast-forward a default
 branch that is only behind with no local changes, push one that is only ahead.
 A worktree with uncommitted or untracked files, a process inside it, a lock, or

@@ -610,3 +610,133 @@ def test_a_failed_merge_is_aborted(lab, tmp_path):
     assert not done
     assert tidy.tracked_clean(lab) and not tidy.paused_operation(lab)
     assert not (lab / "f.txt").exists()
+
+
+# ------------------------------------------------- already applied as copies
+def copied_branch(repo: Path, branch: str = "feat", later_edit: bool = True) -> None:
+    """A branch of two commits that reached main as cherry-picked copies, after
+    which main edited the same lines again: a plain merge conflicts, yet every
+    commit is already in main (a rebased pull request)."""
+    (repo / "f.txt").write_text("1\n2\n3\n")
+    sh(repo, "add", "f.txt")
+    sh(repo, "commit", "-qm", "add f")
+    sh(repo, "checkout", "-q", "-b", branch)
+    (repo / "f.txt").write_text("A\n2\n3\n")
+    sh(repo, "commit", "-qam", "c1")
+    (repo / "f.txt").write_text("A\n2\nC\n")
+    sh(repo, "commit", "-qam", "c2")
+    sh(repo, "checkout", "-q", "main")
+    commit(repo, "moved.txt", "main moved on")  # so the copies get other parents
+    sh(repo, "cherry-pick", f"{branch}~1", branch)
+    if later_edit:
+        (repo / "f.txt").write_text("Z\n2\nC\n")
+        sh(repo, "commit", "-qam", "later edit on main")
+
+
+def test_copies_that_conflict_are_landed_not_sent_to_claude(lab):
+    copied_branch(lab)
+    assert not tidy.merges_cleanly(lab, "main", "feat")
+    assert not tidy.is_landed_by_tree(lab, "main", "feat")
+    actions, skips = tidy.plan_repo("repo", lab, (), OLD, claude="/bin/echo")
+    assert ("delete_branch", "feat") in {(a.kind, a.target) for a in actions}
+    assert not any(a.kind in ("merge", "claude_merge") for a in actions)
+    assert not any(s.target == "feat" for s in skips)
+    why = next(a.reason for a in actions if a.kind == "delete_branch").lower()
+    assert "copy" in why and "every commit (2)" in why and "main" in why
+    assert "differ" in why  # main's later edit: the tips' files differ
+
+
+def test_applying_it_deletes_the_branch_and_adds_no_commit(lab, tmp_path):
+    copied_branch(lab)
+    before = sh(lab, "rev-parse", "main")
+    action = next(a for a in run_plan(lab).actions if a.kind == "delete_branch")
+    log = tmp_path / "tidy.log"
+    assert tidy.apply(action, log, busy=(), now=OLD) == (True, "done")
+    assert "feat" not in tidy.local_branches(lab)
+    assert sh(lab, "rev-parse", "main") == before
+    assert f"branch feat {action.sha}" in log.read_text()  # restorable
+
+
+def test_a_commit_not_in_main_keeps_it_unlanded(lab):
+    copied_branch(lab)
+    sh(lab, "checkout", "-q", "feat")
+    commit(lab, "new.txt", "only here")
+    sh(lab, "checkout", "-q", "main")
+    assert not tidy.is_landed(lab, "main", "feat")
+    assert not any(a.kind == "delete_branch" and a.target == "feat"
+                   for a in run_plan(lab).actions)
+
+
+def test_a_merge_commit_in_the_branch_disqualifies_the_copies(lab):
+    copied_branch(lab)
+    sh(lab, "checkout", "-q", "-b", "side", "feat~2")
+    commit(lab, "s.txt", "s")
+    sh(lab, "checkout", "-q", "main")
+    sh(lab, "cherry-pick", "side")
+    sh(lab, "checkout", "-q", "feat")
+    sh(lab, "merge", "-q", "--no-ff", "-m", "merge side", "side")
+    sh(lab, "checkout", "-q", "main")
+    sh(lab, "branch", "-q", "-D", "side")
+    out = sh(lab, "cherry", "main", "feat")
+    assert out and all(line.startswith("-") for line in out.splitlines())
+    assert not tidy.applied_copies(lab, "main", "feat")
+    assert not tidy.is_landed(lab, "main", "feat")
+
+
+def test_the_apply_time_check_refuses_when_a_new_commit_arrives(lab, tmp_path):
+    copied_branch(lab)
+    action = next(a for a in run_plan(lab).actions if a.kind == "delete_branch")
+    sh(lab, "checkout", "-q", "feat")
+    commit(lab, "new.txt", "only here")
+    sh(lab, "checkout", "-q", "main")
+    done, msg = tidy.apply(action, tmp_path / "log", busy=(), now=OLD)
+    assert not done and "feat" in tidy.local_branches(lab)
+
+
+def test_the_worktree_of_a_copied_branch_goes_first_then_the_branch(lab, tmp_path):
+    copied_branch(lab)
+    add_worktree(lab, "feat", tmp_path / "wt")
+    order = [(a.kind, a.target) for a in run_plan(lab).actions]
+    assert order.index(("remove_worktree", str(tmp_path / "wt"))) \
+        < order.index(("delete_branch", "feat"))
+
+
+def test_a_branch_already_in_main_by_history_keeps_its_old_reason(lab):
+    sh(lab, "branch", "old")
+    why = next(a.reason for a in run_plan(lab).actions if a.target == "old")
+    assert "copy" not in why.lower() and "already in main" in why
+
+
+def test_the_differing_file_count_ignores_files_the_branch_never_touched(lab):
+    copied_branch(lab)
+    commit(lab, "unrelated.txt", "main only")
+    why = next(a.reason for a in run_plan(lab).actions if a.kind == "delete_branch")
+    assert "1 file the branch changed differ" in why  # f.txt, not unrelated.txt
+    assert "reverted" in why
+
+
+def test_a_copy_branch_is_not_offered_in_review_branches(lab):
+    copied_branch(lab)
+    assert "feat" not in [r.branch for r in tidy.unlanded([("repo", lab)])]
+
+
+def test_a_merge_action_is_refused_once_the_branch_turns_out_to_be_copies(lab, tmp_path):
+    copied_branch(lab)
+    sha = tidy.tip(lab, "feat")
+    action = tidy.Action("repo", lab, "claude_merge", "feat", "x", sha, branch="main", detail="d")
+    assert "already in main" in tidy.check(action, (), OLD)
+
+
+def test_a_dirty_worktree_of_a_copy_branch_stays(lab, tmp_path):
+    copied_branch(lab)
+    wt = add_worktree(lab, "feat", tmp_path / "wt")
+    (wt / "loose.txt").write_text("mine")
+    plan = run_plan(lab)
+    assert not any(a.kind in ("remove_worktree", "delete_branch") for a in plan.actions
+                   if a.target in ("feat", str(wt)))
+    assert any(s.target == "feat" for s in plan.skipped)
+
+
+def test_odd_refs_are_not_copies(lab):
+    assert tidy.applied_copies(lab, "main", "nope") == 0
+    assert tidy.applied_copies(lab, "nope", "main") == 0

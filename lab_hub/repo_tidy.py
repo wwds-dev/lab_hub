@@ -138,13 +138,10 @@ def local_branches(repo: Path) -> list[str]:
     return out.splitlines() if rc == 0 else []
 
 
-def is_landed(repo: Path, default: str, branch: str) -> bool:
-    """Every change on `branch` is already in `default`.
-
-    Merging the branch into the default branch would give the default branch's
-    own tree: true for an ancestor, and for work that landed another way (a
-    squash-merged or rebased pull request). A conflict or an error is "no".
-    """
+def is_landed_by_tree(repo: Path, default: str, branch: str) -> bool:
+    """Merging `branch` into `default` would give the default branch's own tree:
+    true for an ancestor, and for work that landed another way (a squash-merged
+    pull request). A conflict or an error is "no"."""
     rc, base, _ = git(repo, "rev-parse", "--verify", "--quiet",
                       f"refs/heads/{default}^{{tree}}")
     if rc != 0 or not base:
@@ -152,6 +149,53 @@ def is_landed(repo: Path, default: str, branch: str) -> bool:
     rc, out, _ = git(repo, "merge-tree", "--write-tree",
                      f"refs/heads/{default}", f"refs/heads/{branch}")
     return rc == 0 and out.splitlines()[:1] == [base]
+
+
+def applied_copies(repo: Path, default: str, branch: str) -> int:
+    """How many commits `branch` has that `default` does not, when every one of
+    them is already in `default` as a rebased or cherry-picked copy; else 0.
+
+    `git cherry` matches by patch-id, so this does not prove main still holds
+    that work (a later commit may have changed it): the plan says so. It skips
+    merge commits, so a branch containing one is refused, not guessed at.
+    """
+    rc, merges, _ = git(repo, "rev-list", "--merges", "--count",
+                        f"refs/heads/{default}..refs/heads/{branch}")
+    if rc != 0 or merges != "0":
+        return 0
+    rc, out, _ = git(repo, "cherry", f"refs/heads/{default}", f"refs/heads/{branch}")
+    lines = out.splitlines() if rc == 0 else []
+    if not lines or any(not line.startswith("- ") for line in lines):
+        return 0
+    return len(lines)
+
+
+def is_landed(repo: Path, default: str, branch: str) -> bool:
+    """Every change on `branch` is already in `default`: by tree (see
+    `is_landed_by_tree`) or as copies of its commits (`applied_copies`)."""
+    return (is_landed_by_tree(repo, default, branch)
+            or applied_copies(repo, default, branch) > 0)
+
+
+def landed_reason(repo: Path, default: str, branch: str) -> str:
+    """Why `branch` counts as landed, in words for the preview and the log;
+    "" when it does not count as landed."""
+    if is_landed_by_tree(repo, default, branch):
+        return f"its changes are already in {default}"
+    n = applied_copies(repo, default, branch)
+    if not n:
+        return ""
+    # Files the branch changed since it forked that still differ from the
+    # default branch's tip: main may have changed, reverted or rewritten them.
+    rc1, mine, _ = git(repo, "diff", "--name-only", f"refs/heads/{default}...refs/heads/{branch}")
+    rc2, tips, _ = git(repo, "diff", "--name-only", f"refs/heads/{default}", f"refs/heads/{branch}")
+    k = len(set(mine.splitlines()) & set(tips.splitlines())) if rc1 == 0 and rc2 == 0 else 0
+    text = (f"every commit ({n}) is already in {default} as a copy (matched by "
+            f"patch; later edits on {default} are not compared)")
+    if k:
+        text += (f"; {k} file{'s' if k != 1 else ''} the branch changed differ from "
+                 f"{default} now: {default} may have changed, reverted or rewritten that work")
+    return text
 
 
 def contains(repo: Path, default: str, commit: str) -> bool:
@@ -566,7 +610,10 @@ def plan_repo(name: str, repo: Path, busy: tuple[Path, ...] | None = (),
 
     # Landed branches, and the worktrees that hold them.
     for branch in local_branches(repo):
-        if branch == default or not is_landed(repo, default, branch):
+        if branch == default:
+            continue
+        reason = landed_reason(repo, default, branch)
+        if not reason:
             continue
         sha = tip(repo, branch)
         wt = by_branch.get(branch)
@@ -579,7 +626,7 @@ def plan_repo(name: str, repo: Path, busy: tuple[Path, ...] | None = (),
             actions.append(Action(name, repo, "remove_worktree", str(wt.path),
                                   f"clean, and its branch {branch} is landed"))
         actions.append(Action(name, repo, "delete_branch", branch,
-                              f"its changes are already in {default}", sha))
+                              reason, sha))
 
     # Detached worktrees whose commit is already in the default branch.
     for wt in trees:

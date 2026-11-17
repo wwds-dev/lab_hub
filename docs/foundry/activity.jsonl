@@ -76,3 +76,9 @@
 {"ts": "2026-11-16T23:18:20", "phase": "secure", "state": "done", "spec": "land-from-tiles"}
 {"ts": "2026-11-16T23:18:20", "phase": "verify", "state": "done", "spec": "land-from-tiles"}
 {"ts": "2026-11-16T23:18:20", "phase": "document", "state": "done", "spec": "land-from-tiles"}
+{"ts": "2026-11-17T00:16:13", "phase": "define", "state": "done", "spec": "land-already-applied"}
+{"ts": "2026-11-17T00:17:49", "phase": "build", "state": "start", "spec": "land-already-applied"}
+{"ts": "2026-11-17T00:25:50", "phase": "build", "state": "done", "spec": "land-already-applied"}
+{"ts": "2026-11-17T00:45:36", "phase": "review", "state": "done", "spec": "land-already-applied"}
+{"ts": "2026-11-17T00:45:36", "phase": "verify", "state": "done", "spec": "land-already-applied"}
+{"ts": "2026-11-17T00:45:36", "phase": "document", "state": "done", "spec": "land-already-applied"}
