@@ -1176,7 +1176,7 @@ class AppsTab(TilePage):
 
     def confirm_land(self, plans: list[land.LandPlan]) -> bool:
         """The one confirmation: what will happen, in words (tests replace this)."""
-        todo = [p for p in plans if p.actions]
+        todo = [p for p in plans if not p.nothing]
         box = QMessageBox(self)
         box.setWindowTitle("Land")
         box.setTextFormat(Qt.TextFormat.PlainText)  # names and reasons come from files and git
@@ -1195,7 +1195,7 @@ class AppsTab(TilePage):
 
     def _land_planned(self, plans) -> None:
         try:
-            go = not any(p.actions for p in plans) or self.confirm_land(plans)
+            go = all(p.nothing for p in plans) or self.confirm_land(plans)
         except Exception:  # noqa: BLE001 - never leave the tiles on "Looking…"
             go = False
         if not go:

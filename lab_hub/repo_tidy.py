@@ -270,8 +270,10 @@ def has_conflicts(path: Path) -> bool:
 
 
 def commit_blocker(repo: Path, wt: Worktree, busy: tuple[Path, ...] | None,
-                   now: float | None = None) -> str:
-    """Why tracked changes in this worktree must not be committed, or ""."""
+                   now: float | None = None, land_mode: bool = False) -> str:
+    """Why tracked changes in this worktree must not be committed, or "".
+    `land_mode` (Land, spec land-resolve-all 4.5): a commit deletes nothing, so
+    a recently used agent worktree is committed in too."""
     if not wt.path.exists():
         return "its folder is missing"
     if not current_branch(wt.path):
@@ -288,7 +290,7 @@ def commit_blocker(repo: Path, wt: Worktree, busy: tuple[Path, ...] | None,
             return "could not check whether a process is running in it"
         if in_use(wt.path, busy):
             return "a process is running in it"
-        if recent_agent_worktree(repo, wt.path, now):
+        if not land_mode and recent_agent_worktree(repo, wt.path, now):
             return f"an agent worktree used in the last {RECENT_HOURS} hours"
     return ""
 
@@ -322,8 +324,11 @@ def merge_target_blocker(repo: Path, default: str, after_commit: bool = False) -
 
 
 def merge_source_blocker(repo: Path, wt: Worktree | None,
-                         busy: tuple[Path, ...] | None, now: float | None = None) -> str:
-    """Why a branch's worktree says its work is not finished, or ""."""
+                         busy: tuple[Path, ...] | None, now: float | None = None,
+                         land_mode: bool = False) -> str:
+    """Why a branch's worktree says its work is not finished, or "".
+    `land_mode` (Land): a merge reads commits only, so a process in the
+    worktree or its recent use does not stop it."""
     if wt is None:
         return ""
     if not wt.path.exists():
@@ -333,6 +338,8 @@ def merge_source_blocker(repo: Path, wt: Worktree | None,
     paused = paused_operation(wt.path)
     if paused:
         return f"{paused} is in progress in its worktree"
+    if land_mode:
+        return ""
     if busy is None:
         return "could not check whether a process is running in its worktree"
     if in_use(wt.path, busy):
@@ -479,6 +486,7 @@ class Action:
     sha: str = ""  # a branch's tip when planned: deleted only if unchanged
     branch: str = ""  # commit: the branch the worktree was on when planned
     detail: str = ""  # claude_merge: the test command shown in the preview
+    land_mode: bool = False  # planned by Land: its guards (spec land-resolve-all 4.5)
 
     @property
     def label(self) -> str:
@@ -514,9 +522,11 @@ class Plan:
 def plan_repo(name: str, repo: Path, busy: tuple[Path, ...] | None = (),
               now: float | None = None,
               claude: str | None = None,
-              claude_why: str = "Claude Code not found") -> tuple[list[Action], list[Skip]]:
+              claude_why: str = "Claude Code not found",
+              land_mode: bool = False) -> tuple[list[Action], list[Skip]]:
     """`claude`: the Claude Code executable, or None to leave conflicting
-    branches for a person (section 11), saying `claude_why`."""
+    branches for a person (section 11), saying `claude_why`. `land_mode`: Land
+    plans it, which resolves untracked files itself and uses its guards."""
     actions: list[Action] = []
     skips: list[Skip] = []
     default = default_branch(repo)
@@ -530,13 +540,13 @@ def plan_repo(name: str, repo: Path, busy: tuple[Path, ...] | None = (),
     for wt in trees:
         changed = changed_tracked(wt.path) if wt.path.exists() else 0
         loose = untracked_count(wt.path) if wt.path.exists() else 0
-        if loose:
+        if loose and not land_mode:
             skips.append(Skip(name, str(wt.path),
                               f"{loose} untracked file{'s' if loose != 1 else ''} — "
                               "add them yourself if they belong in git"))
         if not changed:
             continue
-        blocker = commit_blocker(repo, wt, busy, now)
+        blocker = commit_blocker(repo, wt, busy, now, land_mode)
         if blocker:
             skips.append(Skip(name, str(wt.path),
                               f"{changed} changed file{'s' if changed != 1 else ''} not "
@@ -545,7 +555,7 @@ def plan_repo(name: str, repo: Path, busy: tuple[Path, ...] | None = (),
         branch = current_branch(wt.path)
         actions.append(Action(name, repo, "commit", str(wt.path),
                               f"{changed} changed tracked file{'s' if changed != 1 else ''}",
-                              branch=branch))
+                              branch=branch, land_mode=land_mode))
         main_committed = main_committed or (wt.main and branch == default)
 
     # Unlanded branches that merge into the default branch with no conflicts
@@ -567,7 +577,7 @@ def plan_repo(name: str, repo: Path, busy: tuple[Path, ...] | None = (),
             skips.append(Skip(name, branch, "not merged: its open work is committed in "
                                             "this run; the next Resolve can merge it"))
             continue
-        source = merge_source_blocker(repo, wt, busy, now)
+        source = merge_source_blocker(repo, wt, busy, now, land_mode)
         if source:
             skips.append(Skip(name, branch, f"not merged: {source}"))
             continue
@@ -594,10 +604,10 @@ def plan_repo(name: str, repo: Path, busy: tuple[Path, ...] | None = (),
                 name, repo, "claude_merge", branch,
                 f"{commits}, conflicts in {k} file{'s' if k != 1 else ''}; "
                 f"tests ({cmd.source}): {cmd.display}{note}",
-                sha, branch=default, detail=cmd.display))
+                sha, branch=default, detail=cmd.display, land_mode=land_mode))
         else:
             actions.append(Action(name, repo, "merge", branch, f"{commits}, no conflicts",
-                                  sha, branch=default))
+                                  sha, branch=default, land_mode=land_mode))
         merged_any = True
         # Once merged it has landed: tidy its worktree and the branch too.
         if wt is not None:
@@ -646,7 +656,7 @@ def plan_repo(name: str, repo: Path, busy: tuple[Path, ...] | None = (),
         skips.append(Skip(name, default, reason))
     elif changed:
         actions.append(Action(name, repo, "push", default,
-                              "after the commit or merges above"))
+                              "after the commit or merges above", land_mode=land_mode))
     else:
         ahead, behind = ahead_behind(repo) or (0, 0)
         if behind:
@@ -654,7 +664,8 @@ def plan_repo(name: str, repo: Path, busy: tuple[Path, ...] | None = (),
                                   f"{behind} commit{'s' if behind != 1 else ''} behind, nothing local"))
         elif ahead:
             actions.append(Action(name, repo, "push", default,
-                                  f"{ahead} commit{'s' if ahead != 1 else ''} not on the remote"))
+                                  f"{ahead} commit{'s' if ahead != 1 else ''} not on the remote",
+                                  land_mode=land_mode))
     return actions, skips
 
 
@@ -787,7 +798,7 @@ def check(action: Action, busy: tuple[Path, ...] | None = (),
             return "the worktree is gone"
         if current_branch(wt.path) != action.branch:
             return f"it is no longer on {action.branch}"
-        blocker = commit_blocker(repo, wt, busy, now)
+        blocker = commit_blocker(repo, wt, busy, now, action.land_mode)
         if blocker:
             return blocker
         if not changed_tracked(wt.path):
@@ -803,7 +814,7 @@ def check(action: Action, busy: tuple[Path, ...] | None = (),
         if reason:
             return reason
         wt = next((w for w in worktrees(repo) if w.branch == branch), None)
-        reason = merge_source_blocker(repo, wt, busy, now)
+        reason = merge_source_blocker(repo, wt, busy, now, action.land_mode)
         if reason:
             return reason
         if action.kind == "merge" and not merges_cleanly(repo, default, branch):
@@ -886,7 +897,8 @@ def apply(action: Action, log: Path | None = None,
         if merges_cleanly(repo, default, action.target):
             # It merges cleanly now: the plain merge path, no Claude.
             return apply(Action(action.repo_name, repo, "merge", action.target,
-                                action.reason, action.sha, branch=default),
+                                action.reason, action.sha, branch=default,
+                                land_mode=action.land_mode),
                          log, busy, now)
         from . import claude_resolve as cr
 
@@ -930,7 +942,19 @@ def apply(action: Action, log: Path | None = None,
         if rc == 0:
             _log(f"PULLED {action.target} in {repo}", log)
     else:  # push
-        rc, _, err = git(repo, "push", "--quiet", "origin",
+        if action.land_mode:
+            # Land commits and merges work nobody reviewed: no secret may leave
+            # with it (spec land-resolve-all §2.4, security P1-2).
+            from .land_resolve import outgoing_findings
+
+            found, error = outgoing_findings(repo, action.target)
+            if error or found:
+                why = error or ("gitleaks found a secret in the commits to push: "
+                                + "; ".join(found[:3])
+                                + "; remove it from those commits, then Land again")
+                _log(f"NOT PUSHED {action.target} in {repo}: {why}", log)
+                return False, f"not pushed — {why}"
+        rc, _, err = git(repo, "push", "--quiet", "--no-follow-tags", "origin",
                          f"refs/heads/{action.target}:refs/heads/{action.target}",
                          timeout=NETWORK_TIMEOUT)
         if rc == 0:

@@ -47,12 +47,16 @@ note, name check and sign-off.
 ## Models used
 Inventory from the code on 2026-11-11 (Foundry v9). Only the embedded **Narrator** tool (`lab_hub/tools/narrator/converter.py`, kept in
 step with Imprint's copy) calls models: text-to-speech, using the user's own keys from the
-environment or `.env`. Nothing else in Lab Hub calls a model.
+environment or `.env`. Land also runs the owner's Claude Code CLI (signed in with the owner's own
+login): to resolve merge conflicts (`lab_hub/claude_resolve.py`) and, since 2026-11-17, to decide
+whether a branch that could not land is landed or archived (`lab_hub/land_resolve.py`, spec
+`land-resolve-all`).
 
 | Provider | Model | What data it receives | Local? | Where in the code |
 |---|---|---|---|---|
 | OpenAI | `gpt-4o-mini-tts`, voice `alloy` (`converter.py:46`); the route Lab Hub's Narrator tab uses; OpenAI retires it on 2027-01-06 | the book's text, chunk by chunk (an ebook the user chose) | no | client `converter.py:182` |
 | Google Gemini | `gemini-3.8-flash-tts`, voice `Kore` (`converter.py:60`) | the book's text, chunk by chunk | no | `converter.py:865`; Lab Hub does not install `google-genai`, so this route refuses cleanly here |
+| Anthropic (Claude Code CLI) | `sonnet` (`claude_resolve.MODEL`) | merge: the conflicted files of a branch in a temporary worktree, $3 cap; triage: one branch's commit log, diffstat and diff (cut at 200 KB), read-only tools, $0.50 cap | no | `claude_resolve.run_claude`, `land_resolve.verdict` |
 | ElevenLabs | `eleven_multilingual_v2` (`converter.py:52`) | the book's text, chunk by chunk, plus up to 300 characters of neighbouring text | no | HTTP call `converter.py:839` |
 
 `tiktoken` (`requirements.txt`) counts tokens locally; it is not a model call. The book text is

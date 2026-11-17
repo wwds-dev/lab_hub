@@ -1,0 +1,1 @@
+{"ts": "2026-11-17T11:29:24", "provider": "anthropic", "model": "sonnet", "local": false, "purpose": "eval", "cost_usd": 0.0268, "note": "land-resolve-all: live triage on a toy repo, 2 branches: abandoned experiment -> archive, tested fix -> land; both correct"}

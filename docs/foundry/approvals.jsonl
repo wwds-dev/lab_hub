@@ -14,3 +14,4 @@
 {"ts": "2026-11-16T22:58:29", "gate": "release", "by": "owner", "words": "merge and rebuild after the review", "recorded_by": "agent", "spec": "viewer-filters"}
 {"ts": "2026-11-16T23:02:27", "gate": "define", "by": "owner", "words": "fix the timeout and the python lookup order", "recorded_by": "agent", "spec": "land-from-tiles"}
 {"ts": "2026-11-17T00:17:49", "gate": "define", "by": "owner", "words": "Approve as recommended", "recorded_by": "agent", "spec": "land-already-applied"}
+{"ts": "2026-11-17T10:13:01", "gate": "define", "by": "owner", "words": "Approve, use defaults", "recorded_by": "agent", "spec": "land-resolve-all"}

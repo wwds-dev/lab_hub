@@ -292,8 +292,14 @@ push master to origin, delete 3 landed branches."), and asks once; **Details**
 lists every step. Progress shows on the tile, and the outcome is stated there:
 **Landed**, or **Not landed: <the reason in one line>** (for example "no Claude
 run: the tests don't pass on master itself: ImportError: cannot import name
-'macro'"). A repo that still has branches only you can decide shows "N branches
-need your decision — review", which opens **Review branches…** for that repo.
+'macro'"). Land leaves nothing open (spec `docs/specs/land-resolve-all.md`):
+"Landed" means every worktree is clean, every branch is landed or archived and
+the default branch is level with origin; "Landed · 2 branches archived · 1 file
+quarantined" says what it put aside. "Not landed" is left only for what a
+person must clear, and names the one action: gitleaks or a signed-in Claude
+Code missing, a paused merge or rebase, a process inside a checkout Land must
+commit in or switch, a rejected push, or an app path that is neither a repo nor
+a link to one.
 **Land all (N)** on the launchpad does the same for every flagged repo, with one
 confirmation listing one sentence per repo; a repo that fails is reported and
 the rest carry on, and a summary ends the run. **Stop landing** ends a running
@@ -302,10 +308,36 @@ Only one Land runs at a time per page, and a repo is claimed while it lands, so
 the same repo can never be landed twice at once. `lab_hub/land.py`,
 `ui/lander.py`, `tests/test_land.py`, `tests/test_land_ui.py`.
 
-What Land is allowed to do is `lab_hub/repo_tidy.py`'s guarded set, unchanged
+Before that set runs, Land prepares the repo (`lab_hub/land_resolve.py`, ADR
+`docs/adr/0001-land-quarantine-and-archive-tags.md`):
+- **Untracked files** in the checkout and every worktree are scanned with gitleaks
+  (each file copied alone into a temporary folder, so a repo's own gitleaks
+  config or `gitleaks:allow` comments cannot switch the scan off). Clean files
+  are committed by exact path. Secret-like names (`.env*` except
+  `.env.example`, keys, `*credentials*`), files over 10 MB and files with a
+  finding are moved to `~/Documents/lab/.quarantine/<repo>/<date>/` (owner-only)
+  and their exact paths added to `.gitignore`. Nothing is deleted and the
+  secret is never logged.
+- **A checkout on a side branch** has its open work committed and is switched
+  back to the default branch; the side branch then lands like any other.
+- **A detached HEAD** holding work no branch has is put on a branch
+  `lab-hub/rescue-<date>-<sha>` first.
+- **A link checked out as a file** (a git symlink in a repo with
+  `core.symlinks=false`, like `shopfront/website`) is followed to its repo and
+  restored as a link.
+Land then plans and applies up to three rounds (a branch committed in one
+round merges in the next). A branch that still did not land goes to Claude Code
+read-only (its log and diff in a temporary folder, $0.50 cap each), which
+answers land or archive. "Land" gets one more merge attempt if none was made at
+that tip; otherwise, and for "archive", the branch is kept as a local annotated
+tag `archive/<branch>/<date>` (never pushed), its worktree removed or detached,
+and the branch deleted. **Review branches…** lists archived branches with
+**Restore branch**.
+
+What Land is allowed to do is otherwise `lab_hub/repo_tidy.py`'s guarded set
 (`docs/specs/repo-tidy.md`): merge branches that merge into the default branch
 without conflicts (not ones still being worked on, nor into a branch behind
-origin), commit tracked changes (never untracked files) and push that commit
+origin), commit tracked changes and push that commit
 when the branch was otherwise level, delete a branch whose changes are already
 in the default branch (including squash-merged work, and a branch whose every
 commit is already there as a rebased or cherry-picked copy: `git cherry` shows only
@@ -315,9 +347,11 @@ logged so `git branch <name> <sha>` restores it; spec `docs/specs/land-already-a
 remove a clean worktree on
 such a branch or detached at a commit already there, fast-forward a default
 branch that is only behind with no local changes, push one that is only ahead.
-A worktree with uncommitted or untracked files, a process inside it, a lock, or
-an agent worktree under `.claude/worktrees/` used in the last 24 hours is left
-alone. Every step is checked again just before it runs; a diverged or dirty repo
+A worktree with a process inside it, a lock, or an agent worktree under
+`.claude/worktrees/` used in the last 24 hours is never removed. Land does commit
+in a recently used agent worktree (not one with a process inside) and merges its
+branch, since a commit and a merge delete nothing; the bulk Resolve keeps the
+stricter rule. Every step is checked again just before it runs; a diverged or dirty repo
 is never synced, and nothing is force-pushed or rewritten.
 
 A branch that *conflicts* with the default branch (and passes the same guards)
