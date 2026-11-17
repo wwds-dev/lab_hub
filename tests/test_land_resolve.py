@@ -717,3 +717,28 @@ def test_each_prep_step_says_what_it_will_do():
     assert "Commit open work on claude/side and switch the checkout" in switch.label
     assert loose.label == ("r: In /x, commit 1 untracked file: a.md; move to quarantine and "
                            "ignore: .env (a secret by its name); ignore nested repos: sub/")
+
+
+def test_one_lsof_run_serves_every_busy_worktree_of_a_repo(lab, monkeypatch):
+    """Security review P3-3 (land-confirm-dialog): one reading per repo plan, not per stop."""
+    make_branch(lab, "agent", "g.txt")
+    wt = add_worktree(lab, "agent", lab / ".claude" / "worktrees" / "agent")
+    (lab / ".gitignore").write_text("/.claude/\n")
+    (wt / "loose.md").write_text("x")
+    sh(lab, "checkout", "-q", "-b", "wip")
+    commit(lab, "w.txt")
+    calls = []
+    fake = [("zsh", "1", lab), ("claude", "2", wt)]
+    monkeypatch.setattr(lr, "cwd_listing", lambda: calls.append(1) or fake)
+    _, stops = lr.prep("repo", lab, (lab, wt))
+    by_target = {s.target: s.processes for s in stops}
+    assert by_target == {str(lab): ("zsh (pid 1)",), str(wt): ("claude (pid 2)",)}
+    assert len(calls) == 1
+
+
+def test_a_process_name_is_made_safe_to_show():
+    """Security review P3-1 (land-confirm-dialog)."""
+    assert lr._shown_name("zsh") == "zsh"
+    assert lr._shown_name("evil\nnext\x1b[31m") == "evil?next?[31m"
+    long = lr._shown_name("x" * 100)
+    assert len(long) == lr.NAME_MAX and long.endswith("…")

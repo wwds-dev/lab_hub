@@ -178,6 +178,7 @@ def test_the_panel_total_is_the_old_notices_amounts(claude, merges, unlanded):
     plan = land.LandPlan("r", LAB, acts, claude=claude, unlanded=unlanded)
     old = plan.claude_notice
     panel = land.claude_panel([plan, plan])  # two repos alike: amounts add up
+    assert (panel is None) == (not plan.cost.any)  # security review P3-2
     if not old:
         assert panel is None
         return
@@ -239,6 +240,15 @@ def test_one_card_per_repo_and_a_line_for_the_idle(dialog):
     assert dialog.idle.text() == "Nothing to land in Imprint."
     assert dialog.title.text() == "Land 3 repos" and dialog.land.text() == "Land 3 repos"
     assert dialog.claude is not None and dialog.land.objectName() == "primary"
+    from ui.land_confirm import FOOTNOTE
+
+    pills = [[lb.text() for lb in card.findChildren(QLabel, "runPill")] for card in dialog.cards]
+    assert pills == [["3 steps", "stops at 2", "Claude Code · up to $14"],
+                     ["2 steps", "stops at 1"],
+                     ["2 steps", "stops at 1", "Claude Code · up to $3"]]  # QA P3
+    texts = [lb.text() for lb in dialog.findChildren(QLabel)]
+    assert FOOTNOTE in texts and not any("(pid " in s for s in texts)  # pids: Details only
+    assert dialog.width() >= 640 and dialog.minimumWidth() == 640
     rows = [r.text() for r in dialog.cards[0].stop_rows]
     assert rows[0] == "Main checkout · 63 processes running in it, including node, gk and zsh"
 
@@ -307,3 +317,31 @@ def test_the_cards_area_fits_wrapped_text_at_its_real_width(qapp):
     assert abs(box._cards_height - laid_out) <= 24
     box.close()
     box.deleteLater()
+
+
+def test_repeated_process_names_say_how_many():
+    """Review P3-5."""
+    stop = busy_stop("r", LAB, ("limactl (pid 1)", "limactl (pid 2)", "ssh (pid 3)"))
+    view = land.stop_view(stop, LAB)
+    assert view.problem == "3 processes running in it: limactl and ssh"
+    assert view.action == "Close those terminals or sessions, then Land again."
+    two = land.stop_view(busy_stop("r", LAB, ("zsh (pid 1)", "zsh (pid 2)")), LAB)
+    assert two.problem == "2 processes running in it: zsh"
+
+
+def test_same_named_worktrees_name_their_parent():
+    """Review P3-4."""
+    reason = "it has unresolved conflicts: resolve them in Terminal"
+    plan = land.LandPlan("r", LAB, (_act(LAB, "r", "push", "main"),), stops=(
+        land_resolve.Stop("r", str(LAB / ".claude/worktrees/fix"), reason),
+        land_resolve.Stop("r", "/elsewhere/fix", reason),
+        land_resolve.Stop("r", str(LAB / ".claude/worktrees/other"), reason)))
+    assert [v.place for v in plan.stop_views] == [
+        "Worktree worktrees/fix", "Worktree elsewhere/fix", "Worktree other"]
+
+
+def test_at_most_three_names_are_named():
+    """QA P3: the cap on names when there are more than three processes."""
+    procs = tuple(f"{n} (pid {i})" for i, n in enumerate(["a", "b", "c", "d", "e"]))
+    view = land.stop_view(busy_stop("r", LAB, procs), LAB)
+    assert view.problem == "5 processes running in it, including a, b and c"

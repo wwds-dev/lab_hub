@@ -23,7 +23,7 @@ import dataclasses
 import re
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from . import claude_resolve, land_resolve, repo_tidy
@@ -198,7 +198,15 @@ class LandPlan:
 
     @property
     def stop_views(self) -> tuple["StopView", ...]:
-        return tuple(stop_view(s, self.path) for s in self.stops)
+        views = [stop_view(s, self.path) for s in self.stops]
+        # Two worktrees with the same folder name under different parents:
+        # name the parent too, so the lines differ (review P3-4).
+        places = [v.place for v in views]
+        for i, (stop, view) in enumerate(zip(self.stops, views)):
+            target = Path(stop.target)
+            if places.count(view.place) > 1 and view.place.startswith("Worktree "):
+                views[i] = replace(view, place=f"Worktree {target.parent.name}/{target.name}")
+        return tuple(views)
 
     @property
     def claude_notice(self) -> str:
@@ -318,6 +326,8 @@ def _place(stop: land_resolve.Stop, repo: Path) -> str:
 def _who(processes: tuple[str, ...]) -> str:
     names = list(dict.fromkeys(p.rpartition(" (pid ")[0] or p for p in processes))
     if len(processes) <= 3:
+        if len(names) < len(processes):  # "zsh, zsh": say how many (review P3-5)
+            return f"{len(processes)} processes running in it: {_and(names)}"
         return f"{_and(names)} running in it"
     return f"{len(processes)} processes running in it, including {_and(names[:3])}"
 

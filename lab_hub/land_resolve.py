@@ -510,8 +510,10 @@ def _worktree_stop(repo: Path, wt: rt.Worktree, busy) -> str:
     return _worktree_stop_full(repo, wt, busy)[0]
 
 
-def _worktree_stop_full(repo: Path, wt: rt.Worktree, busy) -> tuple[str, tuple[str, ...]]:
-    """The stop's reason ("" when none) and, for a busy worktree, every process in it."""
+def _worktree_stop_full(repo: Path, wt: rt.Worktree, busy,
+                        listing=None) -> tuple[str, tuple[str, ...]]:
+    """The stop's reason ("" when none) and, for a busy worktree, every process in it.
+    `listing` returns one shared `lsof` reading (security review P3-3)."""
     paused = rt.paused_operation(wt.path)
     if paused:
         return f"{paused} is in progress: finish or abort it in Terminal", ()
@@ -520,7 +522,7 @@ def _worktree_stop_full(repo: Path, wt: rt.Worktree, busy) -> tuple[str, tuple[s
     if busy is None:
         return "could not check whether a process is running in it (lsof failed)", ()
     if in_own_tree(wt, rt.worktrees(repo), busy):
-        found = processes_in(wt, rt.worktrees(repo))
+        found = processes_in(wt, rt.worktrees(repo), listing() if listing else None)
         who = _first(found)
         return (f"a process is running in it{f' ({who})' if who else ''}: close that "
                 "terminal or session, then Land again"), tuple(found)
@@ -538,27 +540,47 @@ def who_is_in(wt: rt.Worktree, trees: list[rt.Worktree], limit: int = 3) -> str:
     return _first(processes_in(wt, trees), limit)
 
 
-def processes_in(wt: rt.Worktree, trees: list[rt.Worktree]) -> list[str]:
-    """Every "cmd (pid N)" whose current folder is this worktree (not one
-    nested in it), in lsof's order; [] when lsof cannot tell."""
+LSOF_TIMEOUT = 10  # seconds; planning waits on it (security review P3-3)
+NAME_MAX = 40  # a process names itself: cut it for display (security review P3-1)
+
+
+def _shown_name(cmd: str) -> str:
+    """A process's own name, safe to show: no control characters, at most NAME_MAX."""
+    clean = "".join(ch if ch.isprintable() else "?" for ch in cmd)
+    return clean if len(clean) <= NAME_MAX else clean[:NAME_MAX - 1] + "…"
+
+
+def cwd_listing() -> list[tuple[str, str, Path]] | None:
+    """(name, pid, current folder) of every process, from one `lsof` run;
+    None when lsof cannot tell."""
     lsof = shutil.which("lsof", path=rt._SEARCH_PATH)
     if lsof is None:
-        return []
+        return None
     try:
         r = subprocess.run([lsof, "-n", "-P", "-d", "cwd", "-F", "pcn"], capture_output=True,
-                           text=True, timeout=rt.GIT_TIMEOUT)
+                           text=True, timeout=LSOF_TIMEOUT)
     except (OSError, subprocess.SubprocessError):
-        return []
-    found, pid, cmd = [], "", ""
+        return None
+    listing, pid, cmd = [], "", ""
     for line in r.stdout.splitlines():
         tag, value = line[:1], line[1:]
         if tag == "p":
             pid = value
         elif tag == "c":
-            cmd = value
+            cmd = _shown_name(value)
         elif tag == "n" and value.startswith("/"):
-            if in_own_tree(wt, trees, (Path(value),)):
-                found.append(f"{cmd} (pid {pid})")
+            listing.append((cmd, pid, Path(value)))
+    return listing
+
+
+def processes_in(wt: rt.Worktree, trees: list[rt.Worktree],
+                 listing: list[tuple[str, str, Path]] | None = None) -> list[str]:
+    """Every "cmd (pid N)" whose current folder is this worktree (not one
+    nested in it), in lsof's order; [] when lsof cannot tell."""
+    if listing is None:
+        listing = cwd_listing() or []
+    found = [f"{cmd} (pid {pid})" for cmd, pid, cwd in listing
+             if in_own_tree(wt, trees, (cwd,))]
     return list(dict.fromkeys(found))
 
 
@@ -583,6 +605,13 @@ def prep(name: str, repo: Path, busy) -> tuple[list[Step], list[Stop]]:
     default = rt.default_branch(repo)
     if default is None:
         return steps, [Stop(name, str(repo), "no default branch found: set origin/HEAD")]
+    seen: list = []
+
+    def listing():  # one lsof run for every busy worktree of this repo, only when needed
+        if not seen:
+            seen.append(cwd_listing() or [])
+        return seen[0]
+
     for wt in rt.worktrees(repo):
         if not wt.path.exists():
             continue
@@ -590,7 +619,7 @@ def prep(name: str, repo: Path, busy) -> tuple[list[Step], list[Stop]]:
             wt.main and rt.current_branch(wt.path) != default)
         if not open_work:
             continue
-        stop, who = _worktree_stop_full(repo, wt, busy)
+        stop, who = _worktree_stop_full(repo, wt, busy, listing)
         if stop:
             stops.append(Stop(name, str(wt.path), stop, who))
             continue
