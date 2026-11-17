@@ -161,3 +161,11 @@
 {"ts": "2026-11-17T20:45:15", "phase": "build", "state": "done", "spec": "land-update-gaps"}
 {"ts": "2026-11-17T21:00:35", "phase": "release", "state": "start", "spec": "land-confirm-dialog"}
 {"ts": "2026-11-17T21:10:14", "phase": "release", "state": "done", "spec": "land-confirm-dialog"}
+{"ts": "2026-11-17T21:15:28", "phase": "define", "state": "start", "spec": "claude-handoff"}
+{"ts": "2026-11-17T21:17:07", "phase": "define", "state": "done", "spec": "claude-handoff"}
+{"ts": "2026-11-17T21:17:46", "phase": "design", "state": "start", "spec": "claude-handoff"}
+{"ts": "2026-11-17T21:19:02", "phase": "design", "state": "done", "spec": "claude-handoff"}
+{"ts": "2026-11-17T21:19:02", "phase": "architect", "state": "start", "spec": "claude-handoff"}
+{"ts": "2026-11-17T21:19:20", "phase": "architect", "state": "done", "spec": "claude-handoff"}
+{"ts": "2026-11-17T21:20:25", "phase": "build", "state": "start", "spec": "claude-handoff"}
+{"ts": "2026-11-17T23:15:10", "phase": "build", "state": "done", "spec": "claude-handoff"}
