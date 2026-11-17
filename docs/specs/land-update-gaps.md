@@ -1,6 +1,6 @@
 # Spec: Land and Update now gaps found in the 17 Nov Land all
 
-Status: **Define approved by the owner 2026-11-17 ("Approve as recommended"): §5 takes the recommended options.** Built 2026-11-17; not committed. Owner: this session (`land-update-gaps`).
+Status: **Define approved by the owner 2026-11-17 ("Approve as recommended"): §5 takes the recommended options.** Built, reviewed, verified, secured and documented 2026-11-17; not committed. Open for the owner: §10. Owner: this session (`land-update-gaps`).
 In-flight check (`session_start.py --inflight`, 2026-11-17): `land-fast` (document done, on `main` as `2c5c465`) already covers items 1 and 2 of the task below, see §1. `land-resolve-all` owns the untracked-file step; this spec changes one rule in it (§3.1). `self-update` (on `main` as `5e5a19f`; its worktree is clean) owns Update now's self-update; this spec changes only what happens after a failed rebuild (§3.2). No other in-flight spec, branch or worktree touches these files.
 
 ## 1. What is already fixed (no build here)
@@ -42,7 +42,7 @@ User: the owner, running Land / Land all and Check builds → Update now.
 1. **Foundry-file conflicts** (the gap in §1).
    - **A (recommended): keep land-fast's rule; build nothing.** Foundry owns these files, `install.sh --update` restores the newest copy, and the branch's edit stays in its history. It costs nothing more.
    - **B: Claude merges a staged copy.** Land copies each conflicted Foundry file to a path outside `.claude/` in the temporary worktree, Claude resolves it with the other conflicts, and Land copies the result back before the tests. This keeps both sides, as your hand merge did. The cost is about 1–1.5 h more build, and Security must review it, since a branch's prompt text then reaches `.claude/` through Claude's merge. The same text can already reach `.claude/` today through a plain merge (land-fast §11).
-2. **A directory symlink in the untracked step.**
+2. **A directory symlink in the untracked step** (extended by §10.2 B to links that are absolute or leave the repo).
    - **A (recommended): ignore it in place.** Land adds an exact line (`/.venv`, without a trailing `/`, so it matches the link) to the branch's `.gitignore`, commits that, and leaves the link alone. The agent's worktree keeps its venv, and nothing is left open.
    - **B: move it to quarantine.** This moves the link (not its target) out of the worktree, which breaks the worktree's venv until it is re-linked.
 3. **Lab Hub's restart after another app failed.** **Recommended:** restart into the new Lab Hub build, because it was built and tested. **Alternative:** don't restart when anything failed.
@@ -66,3 +66,7 @@ Skipped: Case (tier public), Design (no new UI; changed text lines in the existi
 
 ## 8. Note for the owner
 `docs/foundry/app-context.md` still has 8 unfilled placeholders (lines 7–45: summary, stack, commands, docs, state, security surfaces, test rules, never-do list). Foundry warns about this before Build. Nothing here depends on them.
+
+## 10. Open decisions for the owner (from Review and Secure)
+1. **A link that an agent already committed on its branch** (review P2-2). Land's guard covers only files Land commits. A branch that already contains a `.venv` link still replaces main's venv when it lands. **Recommended:** a follow-up spec: an outgoing check that stops a branch adding a symlink where the target checkout has a real folder or a name ignored as a folder.
+2. ~~**Links whose target changes after Land checks, and links pointing outside the repo**~~ (security P3-2, PE-1). **Decided by the owner 2026-11-17 ("Build option B"), built:** `never_commit_link` (renamed from `folder_link`) also holds back any untracked symlink whose text is absolute or that resolves outside the worktree, and any link that cannot be resolved (a loop). Relative links to files inside the repo are committed as before. Tests: `test_a_link_that_is_absolute_or_leaves_the_repo_is_never_committed` (4 cases), `test_an_absolute_link_into_the_repo_still_counts`, `test_a_link_loop_is_never_committed`, and the end-to-end `test_a_link_to_a_secret_outside_the_repo_is_ignored_and_never_pushed`. Mutations B1–B3 killed.

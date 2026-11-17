@@ -342,8 +342,11 @@ Before that set runs, Land prepares the repo (`lab_hub/land_resolve.py`, ADR
   secret is never logged. **A symlink to a folder** (an agent worktree's
   `.venv` linked to the checkout's) is never committed. The same goes for any
   symlink whose name the repo ignores as a folder: `.venv/` matches a folder,
-  not a link. Land leaves the link where it is and adds its exact path
-  (`/.venv`) to `.gitignore`. A folder link you do want in the repo (like
+  not a link. Nor is a symlink whose text is absolute or that leads out of the
+  worktree: its target could become a folder later, and its text names a
+  private path (`/Users/<name>/.ssh/...`). Land leaves the link where it is and
+  adds its exact path (`/.venv`) to `.gitignore`. Relative links to files inside
+  the repo are committed as before. A folder link you do want in the repo (like
   `shopfront/website`) has to be committed by hand, after you remove that
   line. This covers only files Land commits itself. A link an agent already
   committed on its branch still merges as it is. Spec `land-update-gaps.md`.

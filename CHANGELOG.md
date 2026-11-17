@@ -106,8 +106,9 @@ README and the specs in `docs/specs/` describe them.
   `.venv/`, which does not match a link. Merged into `main`, it replaced the
   real virtualenv with a link to itself. Land now never commits a symlink to a
   folder, or one whose name is ignored as a folder. It leaves the link in place
-  and ignores its exact path. A link already committed on a branch is not
-  checked yet.
+  and ignores its exact path. The same goes for a symlink that is absolute or
+  leads out of the repo, so a link such as `/Users/<name>/.ssh/id_ed25519` is
+  never pushed. A link already committed on a branch is not checked yet.
 - **Update now stopped at the first failed rebuild,** so the apps after it,
   and Lab Hub's own update (always last), were never built. A failed or
   unstartable rebuild is now marked failed and the run goes on. The window and

@@ -160,7 +160,8 @@ class LandPlan:
             parts.append(f"move {_n(held, 'file')} to quarantine")
         links = sum(len(s.links) for s in steps.get("untracked", ()))
         if links:
-            parts.append(f"ignore {_n(links, 'link')} to a folder without committing it")
+            parts.append(f"ignore {_n(links, 'link')} to a folder or outside the repo "
+                         "without committing it")
         if "switch" in steps:
             parts.append("switch the checkout from " + ", ".join(s.detail for s in steps["switch"])
                          + " back to the default branch")

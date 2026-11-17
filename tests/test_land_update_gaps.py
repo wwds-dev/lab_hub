@@ -24,42 +24,41 @@ def ignore(repo, text):
 def test_a_link_to_a_folder_is_a_folder_link(tmp_path, lab):
     (tmp_path / "real").mkdir()
     os.symlink(tmp_path / "real", lab / "venv")
-    assert lr.folder_link(lab, "venv")
+    assert lr.never_commit_link(lab, "venv")
 
 
-def test_a_link_to_a_file_nothing_ignores_is_committed_as_before(tmp_path, lab):
-    (tmp_path / "f.txt").write_text("x")
-    os.symlink(tmp_path / "f.txt", lab / "f-link")
-    assert not lr.folder_link(lab, "f-link")
-    assert not lr.folder_link(lab, "a.txt")  # a plain file is never a link
+def test_a_link_to_a_file_in_the_repo_nothing_ignores_is_committed_as_before(lab):
+    (lab / "docs").mkdir()
+    os.symlink("../a.txt", lab / "docs" / "f-link")
+    assert not lr.never_commit_link(lab, "docs/f-link")
+    assert not lr.never_commit_link(lab, "a.txt")  # a plain file is never a link
 
 
 def test_a_link_whose_name_is_ignored_as_a_folder_counts_even_to_a_file(tmp_path, lab):
     # The SONAR case: `.venv/` matches the folder, not the link.
     ignore(lab, ".venv/\n")
-    (tmp_path / "f.txt").write_text("x")
-    os.symlink(tmp_path / "f.txt", lab / ".venv")
+    os.symlink("a.txt", lab / ".venv")  # in the repo, to a file: only the name counts
     assert sh(lab, "ls-files", "--others", "--exclude-standard") == ".venv"  # git would add it
-    assert lr.folder_link(lab, ".venv")
+    assert lr.never_commit_link(lab, ".venv")
 
 
 def test_a_folder_rule_in_a_nested_gitignore_or_info_exclude_counts(tmp_path, lab):
     (lab / "sub").mkdir()
     (lab / "sub" / ".gitignore").write_text("build/\n")
-    os.symlink(tmp_path / "nowhere", lab / "sub" / "build")
-    assert lr.folder_link(lab, "sub/build")
+    os.symlink("missing", lab / "sub" / "build")
+    assert lr.never_commit_link(lab, "sub/build")
     exclude = lab / ".git" / "info" / "exclude"
     exclude.parent.mkdir(exist_ok=True)
     exclude.write_text("cache/\n")
-    os.symlink(tmp_path / "nowhere", lab / "cache")
-    assert lr.folder_link(lab, "cache")
-    os.symlink(tmp_path / "nowhere", lab / "other")
-    assert not lr.folder_link(lab, "other")  # broken, not a folder, not ignored
+    os.symlink("missing", lab / "cache")
+    assert lr.never_commit_link(lab, "cache")
+    os.symlink("missing", lab / "other")
+    assert not lr.never_commit_link(lab, "other")  # broken, in the repo, not ignored
 
 
 def test_a_broken_link_written_as_a_folder_counts(lab):
-    os.symlink("../gone/", lab / "gone-dir")
-    assert lr.folder_link(lab, "gone-dir")
+    os.symlink("gone/", lab / "gone-dir")
+    assert lr.never_commit_link(lab, "gone-dir")
 
 
 def test_a_gitignore_that_is_itself_a_link_is_not_read(tmp_path, lab):
@@ -70,11 +69,11 @@ def test_a_gitignore_that_is_itself_a_link_is_not_read(tmp_path, lab):
 
 
 def test_when_git_cannot_tell_the_link_is_not_committed(tmp_path, lab, monkeypatch):
-    os.symlink(tmp_path / "nowhere", lab / "x")
+    os.symlink("missing", lab / "x")
     real = lr.rt.git
     monkeypatch.setattr(lr.rt, "git", lambda repo, *a, **k: (
         (128, "", "boom") if "check-ignore" in a else real(repo, *a, **k)))
-    assert lr.folder_link(lab, "x")
+    assert lr.never_commit_link(lab, "x")
 
 
 # ------------------------------------------------------------ the 17 Nov SONAR case, end to end
@@ -90,10 +89,10 @@ def test_a_venv_link_in_an_agent_worktree_is_ignored_not_committed(lab, tmp_path
     (wt / "new.txt").write_text("new work")
 
     plan = plan_for(lab)
-    assert "ignore 1 link to a folder without committing it" in plan.sentence
+    assert "ignore 1 link to a folder or outside the repo without committing it" in plan.sentence
     step = next(s for s in plan.prep if s.kind == "untracked")
     assert step.links == (".venv",) and ".venv" not in step.files
-    assert "ignore links to folders (never committed): .venv" in step.label
+    assert "ignore links to folders or outside the repo (never committed): .venv" in step.label
     result = run(plan, tmp_path)
     assert result.state == "landed", result
 
@@ -105,7 +104,7 @@ def test_a_venv_link_in_an_agent_worktree_is_ignored_not_committed(lab, tmp_path
     if wt.exists():
         assert (wt / ".venv").is_symlink()  # left where it was, not quarantined
     assert not quarantine.exists() or not any(quarantine.rglob(".venv"))
-    assert "IGNORED link to a folder" in (tmp_path / "land.log").read_text()
+    assert "IGNORED link" in (tmp_path / "land.log").read_text()
     assert lr.open_items(lab) == []
 
 
@@ -123,7 +122,7 @@ def test_a_link_that_appears_after_the_preview_is_still_not_committed(lab, tmp_p
     os.symlink(tmp_path / "real", wt / "venv")
     ok, what = lr.apply_step(step, tmp_path / "land.log", busy=())
     assert ok, what
-    assert "0 committed" in what and "1 link to a folder ignored (venv)" in what
+    assert "0 committed" in what and "1 link ignored (venv)" in what
     assert "venv" not in sh(wt, "ls-files").splitlines()
     assert "/venv" in (wt / ".gitignore").read_text().splitlines()
 
@@ -169,7 +168,7 @@ def test_a_link_that_cannot_be_read_is_never_committed(tmp_path, lab, monkeypatc
         raise OSError("gone")
 
     monkeypatch.setattr(lr.os, "readlink", unreadable)
-    assert lr.folder_link(lab, "x")
+    assert lr.never_commit_link(lab, "x")
 
 
 def test_a_gitignore_linked_to_a_file_inside_the_repo_is_not_read_either(tmp_path, lab):
@@ -195,3 +194,44 @@ def test_a_worktree_whose_only_untracked_entry_is_a_folder_link_is_still_tidied(
     assert result.state == "landed", result
     assert "/venv" in sh(lab, "show", "main:.gitignore").splitlines()
     assert "venv" not in sh(lab, "ls-files").splitlines()
+
+
+# ------------------------------------------------------------ §10.2 B: links that leave the repo
+@pytest.mark.parametrize("target", ["abs-file", "abs-missing", "../outside.txt", "sub/../../x"])
+def test_a_link_that_is_absolute_or_leaves_the_repo_is_never_committed(tmp_path, lab, target):
+    # Security P3-2 and PE-1: its target can turn into a folder later, and its
+    # text names a private path.
+    (tmp_path / "outside.txt").write_text("x")
+    text = {"abs-file": str(tmp_path / "outside.txt"),
+            "abs-missing": str(tmp_path / "nowhere")}.get(target, target)
+    (lab / "sub").mkdir()
+    os.symlink(text, lab / "link")
+    assert lr.never_commit_link(lab, "link")
+
+
+def test_an_absolute_link_into_the_repo_still_counts(lab):
+    os.symlink(str(lab / "a.txt"), lab / "abs-in")  # its text still names a private path
+    assert lr.never_commit_link(lab, "abs-in")
+
+
+def test_a_link_loop_is_never_committed(lab):
+    os.symlink("loop-b", lab / "loop-a")
+    os.symlink("loop-a", lab / "loop-b")
+    assert lr.never_commit_link(lab, "loop-a")
+
+
+@needs_gitleaks
+def test_a_link_to_a_secret_outside_the_repo_is_ignored_and_never_pushed(lab, tmp_path, quarantine):
+    make_branch(lab, "agent", "g.txt")
+    wt = add_worktree(lab, "agent", tmp_path / "wt")
+    key = tmp_path / "home" / ".ssh" / "id_ed25519"
+    key.parent.mkdir(parents=True)
+    key.write_text("not a real key")
+    os.symlink(key, wt / "deploy_key")
+    os.symlink("g.txt", wt / "g-link")  # in the repo: committed as today
+    result = run(plan_for(lab), tmp_path)
+    assert result.state == "landed", result
+    tracked = sh(lab, "ls-files").splitlines()
+    assert "deploy_key" not in tracked and "g-link" in tracked
+    assert str(key) not in sh(lab, "log", "--all", "-p")
+    assert "/deploy_key" in sh(lab, "show", "main:.gitignore").splitlines()

@@ -151,3 +151,11 @@
 {"ts": "2026-11-17T19:41:16", "phase": "secure", "state": "done", "spec": "legal-bundle-fix"}
 {"ts": "2026-11-17T19:45:00", "phase": "comply", "state": "start", "spec": "legal-bundle-fix"}
 {"ts": "2026-11-17T19:47:56", "phase": "comply", "state": "done", "spec": "legal-bundle-fix"}
+{"ts": "2026-11-17T20:18:27", "phase": "release", "state": "start", "spec": "land-fast"}
+{"ts": "2026-11-17T20:19:47", "phase": "release", "state": "done", "spec": "land-fast"}
+{"ts": "2026-11-17T20:23:55", "phase": "review", "state": "done", "spec": "land-update-gaps"}
+{"ts": "2026-11-17T20:23:55", "phase": "verify", "state": "done", "spec": "land-update-gaps"}
+{"ts": "2026-11-17T20:23:55", "phase": "secure", "state": "done", "spec": "land-update-gaps"}
+{"ts": "2026-11-17T20:23:55", "phase": "document", "state": "done", "spec": "land-update-gaps"}
+{"ts": "2026-11-17T20:31:10", "phase": "review", "state": "done", "spec": "land-confirm-dialog"}
+{"ts": "2026-11-17T20:45:15", "phase": "build", "state": "done", "spec": "land-update-gaps"}

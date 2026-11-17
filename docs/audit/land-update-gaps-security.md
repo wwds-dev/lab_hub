@@ -88,7 +88,7 @@ No manifest changed. `pip-audit` is not installed, so the OSV querybatch API was
 | Finding | Status |
 |---|---|
 | P3-1 | Fixed (`./` prefix), tested, and mutation M06 killed. |
-| P3-2 | **Owner decision** (option A: reword; option B: also ignore absolute or outside-the-worktree links). §2.1 stays as worded until the owner decides. |
+| P3-2 | Fixed: owner chose option B ("Build option B"). Absolute and outside-the-worktree links are ignored in place, never committed. Tests and mutations B1–B3 in the QA record. |
 | P3-3 | Fixed: `src.resolve().is_relative_to(worktree.resolve())`. `test_a_gitignore_reached_through_a_swapped_folder_is_not_read`. M08 killed. |
-| PE-1 | **Owner decision**, together with P3-2 option B. |
+| PE-1 | Fixed by the same change: a link such as `/Users/<name>/.ssh/id_ed25519` is no longer committed (end-to-end test checks it never appears in `git log -p`). |
 | Non-security note (stale docstring) | Fixed. |

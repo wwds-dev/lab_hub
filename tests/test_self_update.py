@@ -1062,6 +1062,10 @@ def test_update_now_does_not_restart_when_lab_hubs_own_build_failed(
     run = type("Run", (_FakeRun,), {"succeeded": False, "ran_to_end": True,
                                      "failed": ["build lab hub"]})
     monkeypatch.setattr(apps_tab_module, "Rebuild", run)
+    # A restart attempt would end in a modal warning: record it instead of hanging.
+    warned = []
+    monkeypatch.setattr(apps_tab_module.QMessageBox, "warning", lambda *a: warned.append(a))
+    monkeypatch.setattr(self_update, "stage_build", lambda project: warned.append("staged"))
     window = _restart_window(tmp_path, "build lab hub", others=("echo x",))
     tab = _tab(check_builds=True)
     asked, said = [], []
@@ -1072,7 +1076,7 @@ def test_update_now_does_not_restart_when_lab_hubs_own_build_failed(
     finally:
         tab._poll.stop()
         window.close()
-    assert asked == []
+    assert asked == [] and warned == []
     assert "Rebuilt and reinstalled 1 app." in said[0] and "Lab Hub itself was not rebuilt" in said[0]
 
 

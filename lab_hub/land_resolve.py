@@ -154,7 +154,7 @@ class Sorted:
     ignore: tuple[str, ...] = ()  # nested repos: their own repo, ignored here
     error: str = ""
     blobs: tuple[tuple[str, str], ...] = ()  # (path, git blob id of the bytes scanned)
-    links: tuple[str, ...] = ()  # links to folders: ignored in place, never committed
+    links: tuple[str, ...] = ()  # links Land never commits (§3.1): ignored in place
 
 
 def gitleaks_exe() -> str | None:
@@ -284,7 +284,7 @@ def sort_untracked(worktree: Path) -> Sorted:
     for rel in paths:
         if rel.endswith("/"):
             ignore.append(rel)
-        elif folder_link(worktree, rel):
+        elif never_commit_link(worktree, rel):
             links.append(rel)
         elif secret_by_name(rel):
             quarantine.append((rel, "a secret by its name"))
@@ -306,18 +306,25 @@ def sort_untracked(worktree: Path) -> Sorted:
                   blobs=tuple((r, blobs[r]) for r in commit), links=tuple(links))
 
 
-def folder_link(worktree: Path, rel: str) -> bool:
-    """A symlink Land must never commit: it points at a folder, or the ignore
-    rules would ignore its name if it were one. `.venv/` does not match a link,
-    so SONAR's agent worktree committed its `.venv` link, and the main checkout
-    that took it lost its virtualenv (spec land-update-gaps §3.1)."""
+def never_commit_link(worktree: Path, rel: str) -> bool:
+    """A symlink Land must never commit (spec land-update-gaps §3.1):
+    - it points at a folder, or the ignore rules would ignore its name if it
+      were one. `.venv/` does not match a link, so SONAR's agent worktree
+      committed its `.venv` link, and the main checkout that took it lost its
+      virtualenv;
+    - its text is absolute or it leads out of the worktree (owner decision
+      §10.2 B): what it points at can become a folder after Land checks, and
+      its text names a private path such as `/Users/<name>/.ssh/...`."""
     path = worktree / rel
     if not path.is_symlink():
         return False
     try:
-        if path.is_dir() or os.readlink(path).endswith("/"):
+        text = os.readlink(path)
+        if path.is_dir() or text.endswith("/") or os.path.isabs(text):
             return True
-    except OSError:
+        if not (path.parent / text).resolve().is_relative_to(worktree.resolve()):
+            return True
+    except (OSError, RuntimeError):  # RuntimeError: a link loop on older Pythons
         return True  # cannot tell: never commit it
     return ignored_as_folder(worktree, rel)
 
@@ -426,7 +433,7 @@ class Step:
     files: tuple[str, ...] = ()  # untracked, switch: the files that may be committed
     quarantine: tuple[tuple[str, str], ...] = ()
     ignored: tuple[str, ...] = ()  # nested repos, only added to .gitignore
-    links: tuple[str, ...] = ()  # links to folders, only added to .gitignore
+    links: tuple[str, ...] = ()  # links Land never commits, only added to .gitignore
 
     @property
     def label(self) -> str:
@@ -447,7 +454,8 @@ class Step:
         if self.ignored:
             parts.append("ignore nested repos: " + ", ".join(self.ignored))
         if self.links:
-            parts.append("ignore links to folders (never committed): " + ", ".join(self.links))
+            parts.append("ignore links to folders or outside the repo (never committed): "
+                         + ", ".join(self.links))
         return f"{self.repo_name}: In {self.target}, " + "; ".join(parts or ["nothing"])
 
 
@@ -711,10 +719,10 @@ def _apply_untracked(step: Step, path: Path, log: Path | None,
         rt._log(f"IGNORED nested repo {path / rel}", log)
     for rel in sort.links:
         if "\n" in rel or "\r" in rel:
-            return False, "skipped — a link to a folder has a line break in its name: rename it"
+            return False, "skipped — a link has a line break in its name: rename it"
         # No trailing "/": a folder pattern does not match a link (spec land-update-gaps §3.1).
         lines.append(ignore_line(rel))
-        rt._log(f"IGNORED link to a folder {path / rel}", log)
+        rt._log(f"IGNORED link {path / rel} (to a folder or outside the repo)", log)
     add = list(commit)
     if lines:
         gi = path / ".gitignore"
@@ -725,7 +733,7 @@ def _apply_untracked(step: Step, path: Path, log: Path | None,
             with gi.open("a") as fh:
                 if before and not before.endswith("\n"):
                     fh.write("\n")
-                fh.write("# Lab Hub: moved to quarantine, a nested repo or a link to a folder, "
+                fh.write("# Lab Hub: moved to quarantine, a nested repo or a link, "
                          f"{stamp}\n" + "\n".join(lines) + "\n")
         except OSError as exc:
             return False, f"failed — could not update .gitignore: {exc}"
@@ -749,8 +757,8 @@ def _apply_untracked(step: Step, path: Path, log: Path | None,
     if sort.quarantine:
         done += f", {len(sort.quarantine)} moved to {dest_dir}"
     if sort.links:
-        done += (f", {len(sort.links)} link{'s' if len(sort.links) != 1 else ''} to a folder "
-                 f"ignored ({', '.join(sort.links)})")
+        done += (f", {len(sort.links)} link{'s' if len(sort.links) != 1 else ''} ignored "
+                 f"({', '.join(sort.links)})")
     return True, done
 
 
