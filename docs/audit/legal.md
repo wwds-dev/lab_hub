@@ -35,8 +35,14 @@ None.
 - Origin of `assets/tray.png` and `tray@2x.png` unrecorded.
 - `regex` (tiktoken dependency) is Apache-2.0 AND CNRI-Python; GPL-compatibility of the CNRI part not verified (folded into the licence lawyer trigger).
 
+## P2 (added from the Land session's audit, 2026-11-17)
+
+- **Retention of code sent to Anthropic is unknown.** Land sends diffs and conflicted files to Anthropic under the owner's Claude login. On a consumer plan with model improvement on, that data is used for training and kept for 5 years; otherwise 30 days (code.claude.com/docs/en/data-usage, read 2026-11-17). Which plan applies is not verified; the owner should check it and the README says only that the data goes to Anthropic.
+- **The claude.ai route** (Dashboards open claude.ai in QtWebEngine with a persistent sign-in, `ui/dashboard_view.py:48-57`) was missing from `## Models used`; now added to `docs/foundry/app-context.md`.
+
 ## P3
 
+- The Land triage diff (cut at 200 KB) goes to Anthropic without a secret scan (same as security P3-4). Not fixed here: a code change, so it needs its own spec.
 - DPF appeal C-703/25 P pending; PLD Irish transposition not yet found; CRA outside scope only while Lab Hub stays non-commercial.
 - `/docs/legal` is git-ignored (`.gitignore:44-45`), so `privacy.md` and `terms.md` are not public: the README section and `THIRD_PARTY_NOTICES.md` are
   the public texts. Copy changes there, not only in the pack.
