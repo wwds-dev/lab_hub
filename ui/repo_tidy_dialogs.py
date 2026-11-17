@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from lab_hub import claude_resolve, launcher, repo_tidy
+from lab_hub import claude_resolve, land_resolve, launcher, repo_tidy
 
 Repos = list[tuple[str, Path]]
 
@@ -104,6 +104,7 @@ class ReviewDialog(QDialog):
         self._subjects: dict[int, list[str]] = {}
         self._recent: dict[int, bool] = {}
         self._tries: dict[int, str] = {}
+        self._archived: list[land_resolve.Archived] = []
         self._last = ""  # what the last action did, kept across a reload
         self._bg = _Background(self)
 
@@ -133,10 +134,29 @@ class ReviewDialog(QDialog):
         self.delete_button.clicked.connect(self._delete)
         self.worktree_button = QPushButton("Remove worktree…")
         self.worktree_button.clicked.connect(self._remove_worktree)
+        layout.addLayout(_buttons(self.terminal_button, self.delete_button,
+                                  self.worktree_button))
+
+        # Branches Land archived as tags (spec land-resolve-all 4.6).
+        self._archived_label = QLabel("")
+        self._archived_label.setWordWrap(True)
+        layout.addWidget(self._archived_label)
+        self.archived_table = QTableWidget(0, 4)
+        self.archived_table.setHorizontalHeaderLabels(["Repo", "Branch", "Archived", "Why"])
+        self.archived_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.archived_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.archived_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.archived_table.verticalHeader().setVisible(False)
+        self.archived_table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.Stretch)
+        self.archived_table.setMinimumHeight(140)
+        self.archived_table.itemSelectionChanged.connect(self._selection)
+        layout.addWidget(self.archived_table)
+        self.restore_button = QPushButton("Restore branch")
+        self.restore_button.clicked.connect(self._restore)
         close = QPushButton("Close")
         close.clicked.connect(self.reject)
-        layout.addLayout(_buttons(self.terminal_button, self.delete_button,
-                                  self.worktree_button, close))
+        layout.addLayout(_buttons(self.restore_button, close))
         self._selection()
         self.reload()
 
@@ -151,7 +171,7 @@ class ReviewDialog(QDialog):
             subjects = {i: repo_tidy.commit_subjects(r) for i, r in enumerate(rows)}
             recent = {i: bool(r.worktree) and repo_tidy.recent_agent_worktree(
                 r.repo, Path(r.worktree)) for i, r in enumerate(rows)}
-            return rows, notes, subjects, recent, last_resolve(rows)
+            return rows, notes, subjects, recent, last_resolve(rows), land_resolve.archives(repos)
 
         self._bg.run(work, self._loaded)
         self._selection()
@@ -160,7 +180,20 @@ class ReviewDialog(QDialog):
         if result is None:
             self._status.setText(f"Could not read the branches: {exc}")
             return
-        self._rows, self._worktree_note, self._subjects, self._recent, self._tries = result
+        (self._rows, self._worktree_note, self._subjects, self._recent, self._tries,
+         self._archived) = result
+        self.archived_table.setRowCount(len(self._archived))
+        for i, a in enumerate(self._archived):
+            for col, text in enumerate((a.repo_name, a.branch, a.date, a.reason)):
+                item = QTableWidgetItem(text)
+                item.setToolTip(f"{a.tag} at {a.sha[:10]}" if col < 3 else text)
+                self.archived_table.setItem(i, col, item)
+        self.archived_table.resizeColumnsToContents()
+        k = len(self._archived)
+        self._archived_label.setText(
+            f"Archived by Land: {k} branch{'es' if k != 1 else ''}, kept as local tags "
+            "(never pushed). Restore brings one back as a branch." if k
+            else "Archived by Land: none.")
         self.table.setRowCount(len(self._rows))
         for i, r in enumerate(self._rows):
             tried = self._tries.get(i, "")
@@ -187,9 +220,23 @@ class ReviewDialog(QDialog):
             return None
         return self._rows[rows[0].row()]
 
+    def selected_archive(self) -> land_resolve.Archived | None:
+        model = self.archived_table.selectionModel()
+        rows = model.selectedRows() if model else []
+        if not rows or rows[0].row() >= len(self._archived):
+            return None
+        return self._archived[rows[0].row()]
+
+    def _restore(self) -> None:
+        item = self.selected_archive()
+        if item is not None:
+            self._run(lambda: land_resolve.restore(item, repo_tidy.log_path()))
+
     def _selection(self) -> None:
         row = self.selected()
         busy = self._bg.busy
+        if hasattr(self, "restore_button"):
+            self.restore_button.setEnabled(self.selected_archive() is not None and not busy)
         self.terminal_button.setEnabled(row is not None and not busy)
         self.delete_button.setEnabled(row is not None and not row.worktree and not busy)
         note = self._worktree_note.get(self._rows.index(row), "") if row else ""

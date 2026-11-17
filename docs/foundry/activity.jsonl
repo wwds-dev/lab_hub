@@ -82,3 +82,15 @@
 {"ts": "2026-11-17T00:45:36", "phase": "review", "state": "done", "spec": "land-already-applied"}
 {"ts": "2026-11-17T00:45:36", "phase": "verify", "state": "done", "spec": "land-already-applied"}
 {"ts": "2026-11-17T00:45:36", "phase": "document", "state": "done", "spec": "land-already-applied"}
+{"ts": "2026-11-17T10:06:41", "phase": "define", "state": "start", "spec": "land-resolve-all"}
+{"ts": "2026-11-17T10:08:10", "phase": "define", "state": "done", "spec": "land-resolve-all"}
+{"ts": "2026-11-17T10:17:35", "phase": "architect", "state": "start", "spec": "land-resolve-all"}
+{"ts": "2026-11-17T10:17:55", "phase": "architect", "state": "done", "spec": "land-resolve-all"}
+{"ts": "2026-11-17T10:42:43", "phase": "build", "state": "done", "spec": "land-resolve-all"}
+{"ts": "2026-11-17T10:42:43", "phase": "review", "state": "start", "spec": "land-resolve-all"}
+{"ts": "2026-11-17T10:42:43", "phase": "verify", "state": "start", "spec": "land-resolve-all"}
+{"ts": "2026-11-17T10:42:43", "phase": "secure", "state": "start", "spec": "land-resolve-all"}
+{"ts": "2026-11-17T11:31:34", "phase": "verify", "state": "done", "spec": "land-resolve-all"}
+{"ts": "2026-11-17T11:31:34", "phase": "secure", "state": "done", "spec": "land-resolve-all"}
+{"ts": "2026-11-17T11:31:34", "phase": "review", "state": "done", "spec": "land-resolve-all"}
+{"ts": "2026-11-17T11:31:34", "phase": "document", "state": "done", "spec": "land-resolve-all"}
