@@ -45,8 +45,28 @@ README and the specs in `docs/specs/` describe them.
 - The **Land all** summary ("Landed N of M repos.", and why each other repo
   did not land) is now the end state of the Land window instead of a separate
   box.
+- **Land runs each test suite less often.** After a conflicting branch lands,
+  Land no longer re-runs the default branch's tests on the commit it has just
+  tested. A chain of N branches that need Claude Code now takes N + 1 test runs
+  instead of 2N. In the fixture benchmark, 11 test runs dropped to 7 and 9
+  Claude Code runs to 5.
+- **A default branch whose own tests fail is tested once per Land**, not once
+  per branch. It is one stop that starts "fix main's own tests, then Land
+  again", names the error and lists the branches waiting on it. Those branches
+  stay as branches and are not archived.
+- **Conflicts in Foundry's own files** (`.claude/commands/`, `.claude/agents/`
+  in an app Foundry installed into) take the default branch's copy without
+  Claude Code. Any other `.claude/` conflict is a stop that says to merge it by
+  hand. Land no longer pays for a test run and a Claude run that cannot edit
+  the file.
 
 ### Fixed
+- A branch whose plain merge became a conflict after an earlier merge in the
+  same Land never got a Claude Code merge and was archived. It now gets one in
+  the next round.
+- A branch Claude Code said to land was archived when its only problem was a
+  `.claude/` conflict or a failing default branch. It now stays as a branch,
+  with the reason a person must clear.
 - Escape during a rebuild hid the window but left the build running unwatched,
   and the next rebuild then started. Escape, the red button, Close and Cancel
   now all stop the running build, and no later rebuild starts.

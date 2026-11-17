@@ -26,7 +26,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import land_resolve, repo_tidy
+from . import claude_resolve, land_resolve, repo_tidy
 
 # What a person can read on a tile line. A longer reason is cut, never wrapped
 # into a paragraph; the full text is in the log and the Details.
@@ -361,6 +361,10 @@ class _Run:
         self.tried: dict[tuple[str, str], str] = {}  # (branch, sha) -> why it did not land
         self.notes: list[str] = []  # branches Claude chose to land (security P2-4)
         self.push_failed: set[str] = set()  # not pushed in this run: not retried (review P2-6)
+        # (branch, sha) -> (kind, default, message): a merge that stopped for a
+        # reason only a person can clear; never triaged or archived (land-fast §3)
+        self.blocked: dict[tuple[str, str], tuple[str, str, str]] = {}
+        self.blocker_stops: list[land_resolve.Stop] = []
         self.kept = {b.branch for b in repo_tidy.unlanded([(plan.name, plan.path)])
                      if land_resolve.kept(b)}  # restored by the owner: left alone
 
@@ -448,18 +452,50 @@ class _Run:
                                                     claude=plan.claude, progress=self.say,
                                                     stop=self.stop))
             ran += 1
-            if action.kind in MERGES and not ok:
+            # A plain merge that an earlier merge turned into a conflict is not
+            # "tried": the next round plans a Claude merge for it (land-fast §3.5).
+            conflicts_now = (action.kind == "merge"
+                             and message.startswith("skipped — it now conflicts"))
+            if action.kind in MERGES and not ok and not conflicts_now:
                 self.tried[(action.target, action.sha)] = plain_reason(message)
-            elif action.kind in MERGES:
+                kind = claude_resolve.blocker_kind(message)
+                if kind:
+                    self.blocked[(action.target, action.sha)] = (kind, action.branch, message)
+            elif action.kind in MERGES and ok:
                 self.tried[(action.target, action.sha)] = ""
             if action.kind == "push" and not ok:
                 self.push_failed.add(action.target)
             self.outcome(ok, message)
         return ran
 
+    def blockers(self) -> None:
+        """One stop for a default branch whose own tests fail (naming the
+        branches waiting on it), one per branch with a protected-file conflict."""
+        plan = self.plan
+        self.stops = [s for s in self.stops if s not in self.blocker_stops]
+        self.blocker_stops = []
+        waiting: dict[str, list[str]] = {}
+        why: dict[str, str] = {}
+        for (branch, _sha), (kind, default, message) in self.blocked.items():
+            if kind == "base":
+                waiting.setdefault(default, []).append(branch)
+                why.setdefault(default, message)
+            else:
+                self.blocker_stops.append(land_resolve.Stop(plan.name, branch,
+                                                            plain_reason(message)))
+        for default, branches in waiting.items():
+            found = _ERROR_LINE.findall(why[default])
+            detail = f" ({found[-1].strip()[:120]})" if found else ""
+            self.blocker_stops.insert(0, land_resolve.Stop(
+                plan.name, default,
+                f"fix {default}'s own tests, then Land again: they fail in a clean copy"
+                f"{detail}; waiting: {', '.join(sorted(branches))}"))
+        self.stops = self.blocker_stops + self.stops
+
     def triage(self) -> None:
         plan = self.plan
-        left = land_resolve.unlanded(plan.path, plan.name)
+        left = [b for b in land_resolve.unlanded(plan.path, plan.name)
+                if (b.branch, b.sha) not in self.blocked]
         if not left or self.stopped:
             return
         if plan.claude is None:
@@ -493,6 +529,8 @@ class _Run:
                 self.notes.append(f"{plan.name}: {info.branch} — landed on Claude's verdict: "
                                   f"{v.reason}")
                 continue
+            if (info.branch, info.sha) in self.blocked:
+                continue  # a stop only a person can clear, never an archive (§5.3)
             reason = (v.reason if not v.land
                       else f"could not be landed ({why}); Claude: {v.reason}")
             label = f"{plan.name}: Archive {info.branch} — {reason}"
@@ -556,6 +594,7 @@ def land(plan: LandPlan, *, progress=None, stop=None, log: Path | None = None,
     if not claim(plan.path):
         return LandResult(plan.name, "not_landed", "it is already being landed")
     try:
+        claude_resolve.forget_base_failures(plan.path)  # each Land tests a failing tip once
         if plan.relinked:  # 4.1: restore the link even when nothing else is open
             land_resolve.repair_link(Path(plan.relinked), log)
         if plan.nothing:
@@ -575,9 +614,11 @@ def land(plan: LandPlan, *, progress=None, stop=None, log: Path | None = None,
                 break
             first = None
         if not run.stopped:
+            run.blockers()
             run.triage()
             run.actions()  # the push, and tidying what triage freed
             run.retry_busy()
+            run.blockers()  # merges after triage can stop for a person too (review P2)
         remaining = _remaining(plan)
         left = land_resolve.open_items(plan.path)
         notes = tuple(s.label for s in run.stops) + tuple(run.notes)
@@ -589,6 +630,8 @@ def land(plan: LandPlan, *, progress=None, stop=None, log: Path | None = None,
             reason = run.stops[0].reason if run.stops else run.first_failure or left[0]
             if run.first_failure and remaining and not run.archived:
                 reason = run.first_failure
+            if run.stops and run.stops[0] in run.blocker_stops:
+                reason = run.stops[0].reason
             return LandResult(plan.name, "not_landed", plain_reason(reason), **counts)
         return LandResult(plan.name, "landed", "", **counts)
     finally:

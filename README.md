@@ -300,16 +300,21 @@ its tick-boxes). One press looks at that repo, says in one sentence what it will
 do ("sonar: commit open changes in 2 worktrees, merge 3 branches into master,
 push master to origin, delete 3 landed branches."), and asks once; **Details**
 lists every step. Progress shows on the tile, and the outcome is stated there:
-**Landed**, or **Not landed: <the reason in one line>** (for example "no Claude
-run: the tests don't pass on master itself: ImportError: cannot import name
-'macro'"). Land leaves nothing open (spec `docs/specs/land-resolve-all.md`):
+**Landed**, or **Not landed: <the reason in one line>** (for example "fix
+master's own tests, then Land again: they fail in a clean copy (ImportError:
+cannot import name 'macro'); waiting: feat"). Land leaves nothing open (spec `docs/specs/land-resolve-all.md`):
 "Landed" means every worktree is clean, every branch is landed or archived and
 the default branch is level with origin; "Landed · 2 branches archived · 1 file
 quarantined" says what it put aside. "Not landed" is left only for what a
 person must clear, and names the one action: gitleaks or a signed-in Claude
 Code missing, a paused merge or rebase, a process inside a checkout Land must
-commit in or switch, a rejected push, or an app path that is neither a repo nor
-a link to one.
+commit in or switch, a rejected push, an app path that is neither a repo nor
+a link to one, a default branch whose own tests fail (tested once per Land; the
+branches waiting on it stay), or a conflict in a `.claude/` file Claude Code may
+not edit (spec `docs/specs/land-fast.md`). In an app Foundry installed into,
+conflicts in Foundry's own `.claude/commands/` and `.claude/agents/` files take
+the default branch's copy without Claude Code. A merge commit that passed its
+tests is not tested again as the base for the next branch.
 **Land all (N)** on the launchpad does the same for every flagged repo, with one
 confirmation listing one sentence per repo; a repo that fails is reported and
 the rest carry on. **Stop landing** ends a running
