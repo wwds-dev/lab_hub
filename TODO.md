@@ -361,6 +361,11 @@ copies be one.
   - Idea: an outgoing check next to `outgoing_findings` in `lab_hub/land_resolve.py`. It stops a branch whose diff adds a symlink (mode 120000) where the target checkout has a real folder, or a name the default branch ignores as a folder. Reuse `never_commit_link` / `ignored_as_folder`.
   - Start: Define a new spec (owner gate). Context: `docs/specs/land-update-gaps.md` §10.1, `docs/audit/land-update-gaps-code-review.md` P2-2. Suggested setup: Opus, high, about 60–90 min.
 
+- [ ] `P3` `security` `@me` **Decide: remove the real-lab Land confirmation screenshots from git history (2026-11-17).**
+  - Why: commits `4072f72` and `b2c0ab5` added `docs/specs/land-confirm-dialog-screenshot*.png` taken on the real lab, showing repo names and local process names (`gk`, `node`, `zsh`, `claude`) and counts. No paths or usernames are shown. `d87d2f2` replaced them with demo data, but the old images stay in the public repo's history (security review P2-1, `docs/audit/land-confirm-dialog-security.md`).
+  - Decision (owner): accept the exposure, or rewrite `main` (for example `git filter-repo --path docs/specs/land-confirm-dialog-screenshot.png --path docs/specs/land-confirm-dialog-screenshot-light.png --invert-paths`, then re-add the demo PNGs and force-push). A rewrite changes every commit hash after `4072f72`: every clone, worktree and open branch has to be re-synced. Do it while no other session is working in `lab_hub`.
+  - If rewriting: Sonnet, medium, about 20–30 min, with every other lab_hub session stopped first.
+
 - [x] `P1` `feature` `@ai` **Provisio and SYNDUSTRYX on the Apps tab; new Websites and
   Dashboards tabs** (2026-10-07). Provisio is a *web app* tile: Launch starts its local
   server through a login shell with the absolute entry path, `ui/web_open.py` opens
