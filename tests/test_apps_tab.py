@@ -746,7 +746,7 @@ class _FakeRebuild:
     ok = True
     asked: list = []
 
-    def __init__(self, commands, parent=None):
+    def __init__(self, commands, parent=None, **_hooks):
         type(self).asked.append(list(commands))
         self.succeeded = type(self).ok
 
@@ -1379,8 +1379,8 @@ def test_update_now_hands_its_open_window_to_the_rebuild(qapp, monkeypatch):
                         lambda self, code: closes.append(code) or real_done(self, code))
 
     class Spy(_FakeRebuild):
-        def __init__(self, commands, window=None):
-            super().__init__(commands, window)
+        def __init__(self, commands, window=None, **hooks):
+            super().__init__(commands, window, **hooks)
             windows.append(window)
             closed_before.append(len(closes))
 
@@ -1407,8 +1407,8 @@ def test_update_now_without_a_window_deletes_the_one_it_made(qapp, monkeypatch):
     made = []
 
     class Spy(_FakeRebuild):
-        def __init__(self, commands, window=None):
-            super().__init__(commands, window)
+        def __init__(self, commands, window=None, **hooks):
+            super().__init__(commands, window, **hooks)
             made.append(window)
 
     monkeypatch.setattr(apps_tab, "Rebuild", Spy)

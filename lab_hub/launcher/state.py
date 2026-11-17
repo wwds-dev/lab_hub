@@ -1136,6 +1136,9 @@ class BuildStatus:
     # it when Lab Hub has no command for it.
     project: Path | None = None
     guide: Path | None = None
+    # Lab Hub's own row (spec self-update): its command only builds, and Lab
+    # Hub restarts to install the result.
+    restarts: bool = False
 
     @property
     def needs_rebuild(self) -> bool:

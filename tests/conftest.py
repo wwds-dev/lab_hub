@@ -44,6 +44,9 @@ def isolated_config(tmp_path, monkeypatch):
     support = tmp_path / "Application Support" / "Lab Hub"
     monkeypatch.setattr(config, "SUPPORT_DIR", support)
     monkeypatch.setattr(config, "CONFIG_PATH", support / "config.json")
+    from lab_hub import self_update
+
+    monkeypatch.setattr(self_update, "UPDATE_DIR", support / "update")
     return support
 
 

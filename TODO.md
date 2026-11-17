@@ -8,6 +8,14 @@
 
 ## v2 — complete (2026-09-14)
 
+- [x] `P1` `feature` `@ai` **Lab Hub updates itself from Check builds (2026-11-17).**
+  - Spec `docs/specs/self-update.md`; Define "Approve as recommended", Architect "Approve architecture". ADR `docs/adr/0003-self-update-helper.md`.
+  - Why: the installed v2.172 lacked the Land progress window, and updating meant a terminal, `kill` and a menu bar click.
+  - A "Lab Hub (this app)" row comes last in the launchpad's Check builds. Update now builds Lab Hub last, waiting for any Land or tool and skipping Lab Hub unless the checkout is clean on `main`.
+  - The build that passed is staged out of the checkout. After Close and restart, a detached helper installs it (checked swap, previous build kept, self-test, rollback or `broken`) and opens Lab Hub, which reports the outcome once.
+  - Code: `lab_hub/self_update.py` (new), `ui/rebuild.py` (`hold`, `Skipped`), `ui/apps_tab.py`, `ui/main_window.py`, `lab_hub/progress.py`, `ui/progress_window.py`.
+  - Reviews: `docs/audit/self-update-code-review.md` (1 P1, 3 P2, fixed), `docs/audit/self-update-security.md` (2 P2, fixed), `docs/audit/self-update-qa.md`.
+  - Not done: the owner's real-Mac check (QA report §6: the swap, the window in front, a forced rollback), commit, merge and release. The first self-update has to come from a build that already has this feature: build and install it by hand once with `./build_app.sh --install` while Lab Hub is not running.
 - [x] `P1` `feature` `@ai` **Land leaves nothing open (2026-11-17).**
   - Spec `docs/specs/land-resolve-all.md`, approved by the owner: "Approve, use defaults". ADR `docs/adr/0001-land-quarantine-and-archive-tags.md`.
   - Why: Land all landed 2 of 6 repos and left 25 branches "for your decision". The owner said: "all open items always have to be resolved".

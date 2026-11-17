@@ -219,6 +219,7 @@ class Row:
     entered: float = 0.0
     took: dict[int, float] = field(default_factory=dict)
     matched: bool = False
+    held: bool = False  # waiting for something else to finish before it starts
 
 
 class RunModel:
@@ -537,7 +538,7 @@ class LandModel(RunModel):
 class BuildItem:
     key: str
     name: str
-    category: str  # current | rebuild | terminal | forward | no_command | unknown | missing
+    category: str  # current | rebuild | terminal | forward | no_command | held | unknown | missing
     note: str
     version: str
     command: str | None = None
@@ -558,6 +559,9 @@ class BuildCheckView:
     folder_names: str
     items: tuple[BuildItem, ...]
     apps: tuple[tuple[str, object], ...] = ()  # (command, ExternalApp) for in-app rebuilds
+    # Lab Hub's own build command, when Update now runs it (spec self-update):
+    # always the last command, and Lab Hub restarts to install what it built.
+    restarts: str | None = None
 
     @property
     def show_update(self) -> bool:
@@ -606,14 +610,22 @@ def build_check_view(report, scoped: bool) -> BuildCheckView:
     # Update now runs only what can run without a terminal. An installer that
     # refuses one (Provisio's) is listed for the owner to run, and an app with
     # no known build script is named rather than dropped.
-    commands = [row.command for row in behind if row.runs_in_app]
+    # Lab Hub's own rebuild goes last: it ends in a restart (spec self-update).
+    commands = [row.command for row in behind if row.runs_in_app and not row.restarts]
+    restarts = next((row.command for row in behind
+                     if row.runs_in_app and row.restarts), None)
+    if restarts:
+        commands.append(restarts)
     by_hand = [row.command for row in behind if row.by_hand and row.command]
     forward = [row.command for row in behind if row.forward and row.command]
-    no_command = [row for row in behind if not row.command]
+    no_command = [row for row in behind if not row.command and not row.restarts]
     if commands:
         lines.append("")
         lines.append("Update now runs:")
         lines.extend(f"  {command}" for command in commands)
+        if restarts:
+            lines.append("Lab Hub is rebuilt last; when you close this window it "
+                         "restarts to install the new build.")
     if by_hand:
         names = ", ".join(row.app.name for row in behind if row.by_hand and row.command)
         after = " after the rebuilds above succeed" if commands else ""
@@ -656,9 +668,12 @@ def build_check_view(report, scoped: bool) -> BuildCheckView:
             category = "terminal"
         elif row.forward:
             category = "forward"
+        elif row.restarts:
+            category = "held"
         else:
             category = "no_command"
-        items.append(BuildItem(row.app.key, row.app.name, category, row.note,
+        name = f"{row.app.name} (this app)" if row.restarts else row.app.name
+        items.append(BuildItem(row.app.key, name, category, row.note,
                                row.version.text, row.command))
 
     return BuildCheckView(
@@ -667,7 +682,8 @@ def build_check_view(report, scoped: bool) -> BuildCheckView:
         folders=tuple(r.project for r in no_command if r.project is not None),
         folder_names=", ".join(r.app.name for r in no_command),
         items=tuple(items),
-        apps=tuple((row.command, row.app) for row in behind if row.runs_in_app))
+        apps=tuple((row.command, row.app) for row in behind if row.runs_in_app),
+        restarts=restarts)
 
 
 _STATIC = {
@@ -678,6 +694,7 @@ _STATIC = {
                 "Move its release clone first; Lab Hub runs nothing there."),
     "no_command": ("needs", "Needs you", "warn",
                    "No rebuild command: Open in Terminal opens its folder."),
+    "held": ("needs", "Not now", "warn", "Update now leaves Lab Hub alone; the note says why."),
 }
 
 
@@ -725,6 +742,28 @@ class BuildModel(RunModel):
             # The build stage runs from the start: a script's set-up belongs to it.
             row.stage, row.entered, row.took, row.matched = 0, now, {}, False
             row.stages = [RUNNING, WAITING, WAITING, WAITING]
+        self.touch()
+
+    def hold(self, key: str, reason: str | None) -> None:
+        """A command is held back before it starts (spec self-update §8)."""
+        row = self._row(key)
+        if row is not None and row.state == WAITING:
+            row.held = bool(reason)
+            row.reason = f"Waiting: {reason}" if reason else ""
+            row.reason_tone = "warn"
+        self.touch()
+
+    def refuse(self, key: str, reason: str) -> None:
+        """A held command will not start at all (spec self-update §5.3): the row
+        says why and the run ends, as after a failed rebuild."""
+        row = self._row(key)
+        if row is not None and row.state == WAITING:
+            if row.units:
+                row.units[0].state = FAILED
+            row.state = FAILED
+            row.held = False
+            row.status, row.tone = "Not rebuilt", "warn"
+            row.reason, row.reason_tone = reason, "warn"
         self.touch()
 
     def on_build_output(self, key: str | None, line: str) -> None:
@@ -789,7 +828,12 @@ class BuildModel(RunModel):
         unit.state = DONE
         row.state, row.ended = DONE, now
         row.status, row.tone = f"Rebuilt · {fmt_clock(now - (unit.started or now))}", "ok"
-        row.reason = f"Installed: {version}" if version else "Installed; no version could be read."
+        if self.view.restarts and key == self.view.app_for(self.view.restarts).key:
+            row.status = f"Built · {fmt_clock(now - (unit.started or now))}"
+            row.reason = "Built and self-tested; installs when Lab Hub restarts."
+        else:
+            row.reason = (f"Installed: {version}" if version
+                          else "Installed; no version could be read.")
         row.reason_tone = "muted"
         samples = {"rebuild": (unit.ended or now) - (unit.started or now), "verify": row.took[3]}
         if row.matched:
@@ -851,7 +895,9 @@ class BuildModel(RunModel):
                     status, tone = self._row_status_left(row)
                     icon = "running"
                 elif row.state == WAITING:
-                    if self.live:
+                    if self.live and row.held:
+                        status, tone, icon = "Waiting", "wait", "waiting"
+                    elif self.live:
                         status, tone = self._waiting_status(row, first_waiting)
                         icon = "waiting"
                     else:
@@ -895,12 +941,12 @@ class BuildModel(RunModel):
             if failed := sum(r.state == FAILED for r in rebuilds):
                 counts.append((f"{failed} not rebuilt", "bad"))
         tally = {c: sum(r.category == c for r in self.rows)
-                 for c in ("terminal", "unknown", "forward", "no_command")}
+                 for c in ("terminal", "unknown", "forward", "no_command", "held")}
         if tally["terminal"]:
             counts.append((f"{tally['terminal']} needs Terminal", "warn"))
         if tally["unknown"]:
             counts.append((f"{tally['unknown']} cannot check", "muted"))
-        if needs := tally["forward"] + tally["no_command"]:
+        if needs := tally["forward"] + tally["no_command"] + tally["held"]:
             counts.append((f"{needs} needs you", "warn"))
 
         started = self.step != "review"

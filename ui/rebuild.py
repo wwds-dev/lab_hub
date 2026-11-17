@@ -42,6 +42,13 @@ from lab_hub import durations, launcher, progress
 
 _LINE_END = re.compile(r"\r\n|\n|\r")
 STOP_GRACE_S = 2.0  # after SIGTERM, before SIGKILL
+HOLD_POLL_MS = 2000  # how often a held command asks again whether it may start
+
+
+class Skipped(Exception):
+    """Raised by a `hold` hook: this command will not run, and that is not a
+    failure. The rest of the run goes on (spec self-update §5.3: Update now
+    skips Lab Hub when its checkout is not clean on main)."""
 
 
 def _signal_group(group: int, sig: int) -> bool:
@@ -64,7 +71,7 @@ class Rebuild(QObject):
     command that cannot start at all ends the run as failed.
     """
 
-    def __init__(self, commands: list[str], window, *, verify=None) -> None:
+    def __init__(self, commands: list[str], window, *, verify=None, hold=None) -> None:
         super().__init__(window)
         self._window = window
         self._commands = list(commands)
@@ -74,6 +81,12 @@ class Rebuild(QObject):
         self._ended = False
         self._loop: QEventLoop | None = None
         self._verify = verify or launcher.version
+        # Asked before each command starts: a reason means "not yet", and it is
+        # asked again every HOLD_POLL_MS (spec self-update §5.2: Lab Hub's own
+        # build waits for a running Land). Cancel while held ends the run.
+        self._hold = hold
+        self._holding: str | None = None
+        self.skipped: list[str] = []
         self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         self._partial = ""
 
@@ -120,12 +133,18 @@ class Rebuild(QObject):
                 self._loop = None
         return 0
 
+    def _release_hold(self) -> None:
+        if self._holding and self._index < len(self._commands):
+            self._window.command_held(self._command, None)
+        self._holding = None
+
     def cancel(self) -> None:
         """Stop the running build and all it started (if one runs), start
         nothing after it, and end the run."""
         if self._ended:
             return
         self._cancelled = True
+        self._release_hold()
         if not self.running:
             self._all_done()  # nothing started yet, or nothing left running
             return
@@ -167,6 +186,31 @@ class Rebuild(QObject):
         if self._cancelled or self._index >= len(self._commands):
             self._all_done()
             return
+        if self._hold is not None:
+            try:
+                reason = self._hold(self._command)
+            except Skipped as skip:
+                self._release_hold()
+                self.skipped.append(self._command)
+                self._window.command_refused(self._command, str(skip))
+                self._index += 1
+                self._start_next()
+                return
+            except Exception as error:  # noqa: BLE001 - a failing check holds nothing back silently
+                self._release_hold()
+                self._failed = True
+                self._window.command_refused(self._command, str(error))
+                self._all_done()
+                return
+            if reason:
+                # Said once per reason; every poll still counts as activity,
+                # so the window does not call a wait a silence.
+                self._window.command_held(self._command, reason,
+                                          repeat=reason == self._holding)
+                self._holding = reason
+                QTimer.singleShot(HOLD_POLL_MS, self._start_next)
+                return
+            self._release_hold()
         self._decoder.reset()
         self._partial = ""
         self._window.command_started(self._command)
@@ -234,6 +278,8 @@ class Rebuild(QObject):
         app = self._window.view.app_for(command)
         if app is None or self._window.lab_root is None:
             return ""
+        if command == getattr(self._window.view, "restarts", None):
+            return ""  # /Applications still holds the old build until the restart
         try:
             return self._verify(app, self._window.lab_root).text
         except Exception:  # noqa: BLE001 - a version read must not end the run

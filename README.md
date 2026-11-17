@@ -483,6 +483,57 @@ window; press Refresh after it finishes. If an in-app rebuild fails, no
 Terminal window opens. Spec `update-now-terminal.md`; `run_in_terminal` in
 `lab_hub/launcher/control.py`.
 
+**Lab Hub updates itself the same way.** The launchpad's Check builds ends with
+a row for **Lab Hub (this app)**, comparing the installed build with its
+checkout like any frozen app. When it is behind, Update now builds it last, with
+`./build_app.sh` (its own self-test included, no `--install`):
+
+- **It waits for running work.** Before the build starts, Update now waits while
+  a Land is planning or running on any page, or a tool (Convert, Images, Video,
+  Narrator) is running. The row reads "Waiting: Land is running", and Cancel
+  still works.
+- **It builds only from a clean checkout on `main`.** Several sessions share
+  this checkout, and their unfinished edits must not end up in the app that runs
+  Land. When that is not the case, the row says why ("the checkout has
+  uncommitted changes…", "the checkout is on claude/x, not main") and Update now
+  leaves Lab Hub alone. The check runs again after the wait.
+- **What gets installed is the build that passed.** As soon as it passes, Lab Hub
+  copies it out of the shared checkout to
+  `~/Library/Application Support/Lab Hub/update/staged/`. It does so only if the
+  checkout is still clean on `main` at the commit stamped into the build. A
+  later commit or build in the checkout cannot change what is installed.
+- **A refused Lab Hub is skipped, not failed.** If the checkout is not clean on
+  `main` when Lab Hub's turn comes, Lab Hub is skipped. The other rebuilds and
+  Terminal installers carry on as usual, and the window ends with "Lab Hub
+  itself was not rebuilt; its row says why".
+- **The restart happens when you close the window.** After the build passes, the
+  window says so and its button reads **Close and restart**. Lab Hub quits
+  only when nothing is running.
+- **A small helper does the swap.** It is a fixed script started in a session
+  of its own, and it:
+  1. waits for the old Lab Hub to exit (60 s at most, else nothing is replaced);
+  2. moves the installed `/Applications/Lab Hub.app` aside as the one kept
+     previous build (`~/Library/Application Support/Lab Hub/update/previous/`);
+  3. copies the new build into place and self-tests the installed copy,
+     putting the previous build back if that fails;
+  4. opens Lab Hub.
+- **Every step of the swap is checked.** A rename only goes onto a free path,
+  and the helper runs with a fixed environment and a lock. If it cannot put
+  things right, it records the update as broken, names where the previous
+  build is, and opens nothing. To recover, copy
+  `update/previous/Lab Hub.app` back to `/Applications`.
+- **The new Lab Hub says how the update went,** once, in the status bar and
+  as a menu bar notice: "Lab Hub updated to v2.180.", or "The update to
+  v2.180 did not install (…); you are on v2.172", with where the log is
+  (`update/update.log`).
+
+Unlike `--install`, an update leaves the checkout's `build/` and
+`dist.noindex/` in place; the next build replaces them.
+
+Apps Lab Hub started keep running across the restart. When Lab Hub runs from
+source, or from a copy other than `/Applications/Lab Hub.app`, its row offers
+no update. Spec `self-update.md`, ADR 0003; `lab_hub/self_update.py`.
+
 An app whose bundle runs a **release clone** (Provisio: `~/Releases/provisio`) that
 is behind its source gets neither an installer nor Update now: the installer
 rebuilds from the clone it sits in, so on a stale clone it changes nothing.
@@ -946,6 +997,11 @@ that emits Qt signals and raises `Cancelled` when Stop is pressed.
 
     ./build_app.sh            # -> dist.noindex/Lab Hub.app
     ./build_app.sh --install  # -> /Applications/Lab Hub.app
+
+From inside Lab Hub, Check builds → Update now does the same and restarts
+Lab Hub on the new build (Apps, "Lab Hub updates itself the same way"). Run
+`--install` by hand only while Lab Hub is not running: it replaces the bundle
+under a running copy and keeps no previous build.
 
 `build_app.sh` runs `--selftest` against the built binary before it installs
 anything. That check matters here because Pillow ships a binary extension, and

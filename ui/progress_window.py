@@ -775,6 +775,7 @@ class BuildCheckWindow(QDialog, _Run):
         self.view = view
         self.lab_root = lab_root
         self.choice: str | None = None
+        self._restart_refused = False  # Lab Hub's own build was skipped
         self._ask_loop: QEventLoop | None = None
         self._rebuild = None  # ui.rebuild.Rebuild, while one runs
         self._setup_run(clock, wall)
@@ -908,6 +909,29 @@ class BuildCheckWindow(QDialog, _Run):
         self.model.on_output(f"$ {command}")
         self.changed()
 
+    def command_held(self, command: str, reason: str | None, repeat: bool = False) -> None:
+        if repeat:
+            self.model.touch()
+            self.changed()
+            return
+        key = self._key(command)
+        if key is not None:
+            self.model.hold(key, reason)
+        if reason:
+            self.model.on_output(f"[waiting — {reason}]")
+        self.changed()
+
+    def command_refused(self, command: str, reason: str) -> None:
+        """A held command will not run: skipped (the run goes on) or, when its
+        check failed, the end of the run."""
+        key = self._key(command)
+        if key is not None:
+            self.model.refuse(key, reason)
+        if command == getattr(self.view, "restarts", None):
+            self._restart_refused = True
+        self.model.on_output(f"[not run — {reason}]")
+        self.changed()
+
     def command_output(self, command: str, line: str) -> None:
         self.model.on_build_output(self._key(command), line)
         self.changed()
@@ -934,9 +958,16 @@ class BuildCheckWindow(QDialog, _Run):
             "cancelled": ("Cancelled. Some apps may still be out of date.", "warn"),
             "failed": ("A rebuild failed — see the live output.", "bad"),
         }.get(how, ("Done. Every app was rebuilt and reinstalled.", "ok"))
+        restart = (how == "done" and bool(getattr(self.view, "restarts", None))
+                   and not self._restart_refused)
+        if restart:
+            line = ("Built and tested. Lab Hub restarts to install the new build "
+                    "when you close this window.")
+        elif how == "done" and self._restart_refused:
+            line, tone = "Done. Lab Hub itself was not rebuilt; its row says why.", "warn"
         self.model.finish(line, tone)
         self.steps.set_step(3)
-        self.cancel_button.setText("Close")
+        self.cancel_button.setText("Close and restart" if restart else "Close")
         _set_name(self.cancel_button, "")  # nothing left to cancel: an ordinary Close
         if how == "failed":
             self.output.toggle.setChecked(True)

@@ -16,6 +16,16 @@ README and the specs in `docs/specs/` describe them.
 ## Unreleased
 
 ### Added
+- **Lab Hub updates itself** from Check builds:
+  - The launchpad's report ends with a **Lab Hub (this app)** row, and Update
+    now builds it last.
+  - Before the build, it waits for any running Land or tool, and it builds only
+    from a clean checkout on `main`.
+  - Lab Hub restarts when you close the window (**Close and restart**). A
+    helper installs the new build after the old copy has quit, self-tests it,
+    puts the previous build back if that fails, and opens Lab Hub.
+  - The next start says how the update went.
+  - No terminal, no `kill`, no menu bar click.
 - A **Land window** for Land and Land all: a progress bar and percent, time
   elapsed, time left and "done around HH:MM", counts, one row per repo with a
   Commit / Merge and test / Push / Tidy track, the running repo's steps with

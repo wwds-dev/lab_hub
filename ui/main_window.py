@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from lab_hub import APP_NAME, asset_path, config, launcher, login_item, version
+from lab_hub import APP_NAME, asset_path, config, launcher, login_item, self_update, version
 
 from . import appkit_guard, dock, swipe, theme, tray
 from .application import LabHubApplication
@@ -41,6 +41,8 @@ REOPEN_GRACE_MS = 1000
 TRAY_SUPPRESS_S = 5.0
 WAKE_POLL_MS = 30_000
 WAKE_GAP_SECONDS = 60
+# While Lab Hub's restart for an update waits for a running job.
+RESTART_POLL_MS = 2000
 
 
 class MainWindow(QMainWindow):
@@ -218,6 +220,16 @@ class MainWindow(QMainWindow):
         self.setStatusBar(QStatusBar())
 
         self.apps_tab.launched.connect(self._on_launched)
+        # Lab Hub's own update (spec self-update): no page restarts while any
+        # page lands or any tool runs.
+        for page in self._app_pages():
+            page.busy_reasons = self.busy_reasons
+        self.apps_tab.restart_requested.connect(self.restart_for_update)
+        self._pending_update = None  # a self_update.Staged waiting for idle
+        self._restart_timer = QTimer(self)
+        self._restart_timer.setSingleShot(True)
+        self._restart_timer.timeout.connect(
+            lambda: self.restart_for_update(self._pending_update))
         self.backup_sync_tab.launched.connect(self._on_launched)
         self.unblock_tracker_tab.launched.connect(self._on_launched)
         self.backstage_tab.launched.connect(self._on_launched)
@@ -372,6 +384,63 @@ class MainWindow(QMainWindow):
             )
             if panel.is_running()
         ]
+
+    def _app_pages(self) -> tuple[AppsTab, ...]:
+        return (self.apps_tab, self.backup_sync_tab, self.unblock_tracker_tab,
+                self.backstage_tab)
+
+    def busy_reasons(self) -> list[str]:
+        """Everything running in this process that quitting would end."""
+        reasons = []
+        for page in self._app_pages():
+            reasons.extend(r for r in page._own_busy_reasons() if r not in reasons)
+        names = {
+            id(self.convert_tab.run_panel): "Convert",
+            id(self.images_tab.run_panel): "Images",
+            id(self.video_tab.run_panel): "Video",
+            id(self.narrator_tab): "Narrator",
+        }
+        for panel in self._running_panels():
+            reasons.append(f"{names.get(id(panel), 'A tool')} is running")
+        return reasons
+
+    def restart_for_update(self, staged) -> None:
+        """Quit for the helper to install Lab Hub's new build, once nothing is
+        running (spec self-update §2.3, §2.4). Checked in the same call as the
+        quit, so nothing can start in between."""
+        if staged is None:
+            return
+        self._pending_update = staged
+        reasons = self.busy_reasons()
+        if reasons:
+            self.statusBar().showMessage(
+                f"Lab Hub restarts to install its update when this finishes: "
+                f"{'; '.join(reasons)}.", RESTART_POLL_MS + 1000)
+            self._restart_timer.start(RESTART_POLL_MS)
+            return
+        from PySide6.QtWidgets import QApplication
+
+        self._pending_update = None
+        try:
+            self_update.start_helper(self_update.helper_paths(staged))
+        except (ValueError, OSError) as error:
+            self.present()
+            QMessageBox.warning(
+                self, "Lab Hub was not restarted",
+                f"The new build was not installed: {error}. This copy keeps running.")
+            return
+        self._quitting = True
+        QApplication.quit()
+
+    def show_update_outcome(self) -> None:
+        """After a restart for an update: say how it went, once."""
+        outcome = self_update.read_outcome()
+        if outcome is None:
+            return
+        message = self_update.notice(outcome, version.version_string())
+        self.statusBar().showMessage(message, 30000)
+        if self.tray is not None:
+            self.tray.notify(APP_NAME, message)
 
     def quit(self) -> None:
         """Really quit — as opposed to closing the window, which only hides it."""
@@ -540,6 +609,7 @@ def run() -> int:
 
     _Reopener(window, app)
     _QuitGuard(window, app)
+    window.show_update_outcome()
 
     # Started by the login agent: stay in the menu bar instead of opening a
     # window nobody asked for. Only honoured when there *is* a menu bar item to
