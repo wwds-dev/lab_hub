@@ -2,7 +2,7 @@
 
 Role: legal-compliance agent (not a lawyer; nothing here is a sign-off). Playbook `last-reviewed 2026-11-11`, status current, 6 days
 old. The pack: `docs/legal/{register,licences,privacy,terms,name,ai-act}.md`; root `THIRD_PARTY_NOTICES.md`; README section
-"Privacy, disclaimer and third-party notices". `LICENSE` is deliberately not written (owner decision).
+"Privacy, disclaimer and third-party notices". `LICENSE` written after the owner chose AGPL-3.0-or-later (2026-11-17).
 Gate: `python3 docs/foundry/tooling/legal_gate.py check .` is expected to say only "no legal sign-off recorded".
 
 ## P0
@@ -17,10 +17,9 @@ None.
    `--exclude-module` removes Python bindings only; frameworks are still collected. Who is exposed: the owner, as distributor, if Lab Hub is
    anything other than AGPL/GPL-3 compatible as a whole. Fix: prune frameworks after the build, re-sign, rerun `--selftest` and the Dashboards tab;
    or accept option A (AGPL-3.0-or-later) where it is permitted.
-2. **No LICENSE, and no licence texts or notices in the bundle.** Public repo, no `LICENSE` (nobody has a licence); the built `.app` has no LGPL/GPL
+2. **No licence texts or notices in the bundle.** `LICENSE` (AGPL-3.0, owner's choice 2026-11-17) is now in the repo, but the built `.app` has no LGPL/GPL
    text, no Qt notice, no notice for MIT/BSD/Apache/MPL components (only pydantic, httpcore2, httpx2 ship theirs). EbookLib is AGPL-3.0+ and ships
-   (`converter.py:18`), so the binary as a whole must be offered under AGPL-3.0 and its source offered. Fix: owner chooses the licence
-   (`register.md` A-D; proposal A); add `LICENSE`, `THIRD_PARTY_NOTICES.md`, `LICENSES/LGPL-3.0.txt`, `LICENSES/GPL-3.0.txt` to the bundle via `--add-data`;
+   (`converter.py:18`), so the binary as a whole must be offered under AGPL-3.0 and its source offered. Fix: add `LICENSE`, `THIRD_PARTY_NOTICES.md`, `LICENSES/LGPL-3.0.txt`, `LICENSES/GPL-3.0.txt` to the bundle via `--add-data`;
    attach the Qt source archives to the release. Suggested cleanup: add an About line pointing to the notices.
 
 ## P2
@@ -43,10 +42,11 @@ None.
   the public texts. Copy changes there, not only in the pack.
 - 35 of 177 commits are by "Claude"/"Claude AI": AI-assisted authorship of the code; copyright position unsettled, owner decides what he licenses.
 
-## Open lawyer triggers (2)
+## Open lawyer triggers (1)
 
 1. Name "Lab Hub"/"LABHUB": exact-match third-party marks and products found, official registers unqueried.
-2. Licence of the distributed binary (AGPL EbookLib + LGPL/GPL Qt + CNRI-Python `regex`) if the owner picks anything other than AGPL-3.0-or-later for the whole.
+
+Not triggered: licence of the binary. It applied only to a choice other than AGPL-3.0-or-later; the owner chose that on 2026-11-17. `regex`'s CNRI-Python part is not verified.
 
 ## Residual risks
 
@@ -64,7 +64,7 @@ with AGPL-3.0; secrets filtering end to end before diffs reach Anthropic.
 
 No earlier sign-off exists (no `docs/legal/signoff.jsonl`).
 
-## Command for the owner (not run by the agent), after deciding the P1 items and the LICENSE
+## Command for the owner (not run by the agent), after deciding the P1 items
 
 `python3 docs/foundry/tooling/legal_gate.py sign . --by "<name>" --role owner --accept-risk "<why>"`
-(`--accept-risk` is needed while the 2 lawyer triggers are open; `--role lawyer` clears them).
+(`--accept-risk` is needed while the lawyer trigger is open; `--role lawyer` clears them).

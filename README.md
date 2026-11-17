@@ -1080,13 +1080,18 @@ Lab Hub is free software, licensed under the GNU Affero General Public License, 
 
 ## Privacy, disclaimer and third-party notices
 
-**Privacy.** Lab Hub has no server, account, analytics or telemetry. Its settings and logs stay in
-`~/Library/Application Support/Lab Hub/` on your Mac. What leaves your Mac: **Narrator** sends the text of the ebook you
-pick, in pieces, to the speech provider you choose (OpenAI, ElevenLabs or Google Gemini) with your own API key; **Land** can run
-your own Claude Code CLI, which sends a branch's diff or conflicted files to Anthropic under your own login; **Websites**
-sends an HTTP HEAD request to altmerch.store and bookadatewithme.com, which see your IP address like any visitor.
-**Dashboards** only load pages from your own Mac (127.0.0.1:8765), and updating Lab Hub builds it from your local checkout and
-downloads nothing. Those providers' own terms and privacy policies apply to what they receive.
+**Privacy.** Lab Hub has no server, account, analytics or telemetry. Its settings and logs stay on your Mac, in
+`~/Library/Application Support/Lab Hub/`; logs of apps launched from a source checkout go to your system temp folder
+(`lab-hub-launch-<app>.log`). What leaves your Mac: **Narrator** sends the text of the ebook you pick, in pieces, to a
+speech provider with your own API key. The Lab Hub window uses OpenAI; ElevenLabs is available only through the converter's
+command line, and the Google Gemini route needs `google-genai`, which the built app does not include. **Land** can run your
+own Claude Code CLI, which sends a branch's diff, conflicted files or, in a fix round, the end of a failed test's output
+(last 6,000 characters) to Anthropic under your own login. **Websites** sends an HTTP HEAD request to altmerch.store and
+bookadatewithme.com, which see your IP address like any visitor. **Dashboards** load the pages in your dashboard catalog:
+local ones (127.0.0.1:8765) stay on your Mac, and an entry with a remote URL contacts that host. Updating Lab Hub builds it
+from your local checkout and does not download Lab Hub; if the checkout's virtualenv lacks PyInstaller, the build runs
+`uv pip install pyinstaller`, which contacts a package index and fails if it is unreachable. Those providers' own terms and
+privacy policies apply to what they receive.
 
 **Provided as is**, without warranty, to the extent the law allows; it starts programs, writes files and can merge and archive
 git branches, so keep backups. Narrator's audio is synthetic speech: say so where you publish it. Lab Hub is not affiliated with
