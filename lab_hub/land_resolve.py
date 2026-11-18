@@ -23,6 +23,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -366,6 +367,119 @@ def ignored_as_folder(worktree: Path, rel: str) -> bool:
     return not (rc == 1 and not err)
 
 
+# ----------------------------------------------------------------------
+# A link a branch already contains (spec land-folder-link-guard)
+# ----------------------------------------------------------------------
+LINK_MODE = "120000"
+# The start of a merge's link stop; `claude_resolve.blocker_kind` keys on it.
+LINK_STOPS = ("it adds a link at ", "it may add a link")
+_OID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
+
+
+def incoming_links(checkout: Path, old: str, new: str) -> list[tuple[str, str]] | None:
+    """(path, blob) for every path that is a symlink in `new` and was not the
+    same symlink in `old` (commits or trees); None when git cannot tell."""
+    rc, out, _ = rt.git(checkout, "diff-tree", "-r", "-z", "--no-renames", "--no-abbrev",
+                        old, new, strip=False)
+    if rc != 0:
+        return None
+    parts = out.split("\0")
+    if parts and parts[-1] == "":
+        parts.pop()
+    if len(parts) % 2:
+        return None
+    found = []
+    for meta, rel in zip(parts[::2], parts[1::2]):
+        fields = meta.lstrip(":").split()
+        if len(fields) != 5 or not rel:
+            return None
+        if fields[1] == LINK_MODE:
+            found.append((rel, fields[3]))
+    return found
+
+
+def _tracked(checkout: Path, rel: str) -> bool | None:
+    rc, out, _ = rt.git(checkout, "ls-files", "-z", "--", f":(literal){rel}", strip=False)
+    if rc != 0:
+        return None
+    return rel in out.split("\0")
+
+
+def link_problem(checkout: Path, rel: str, blob: str) -> str:
+    """Why the link `rel` (its text in `blob`) must not reach `checkout`, or ""
+    (spec land-folder-link-guard §3.2). Its target is judged on the text only:
+    it need not exist yet. A link to a folder inside the repo passes (§2.3)."""
+    parts = Path(rel).parts
+    try:
+        for depth in range(1, len(parts)):
+            if checkout.joinpath(*parts[:depth]).is_symlink():
+                return "behind a link in this checkout"
+        path = checkout / rel
+        if path.is_dir() and not path.is_symlink():
+            return "where this checkout has a real folder"
+        if os.path.lexists(path):
+            tracked = _tracked(checkout, rel)
+            if tracked is None:
+                return "that git cannot check"
+            if not tracked:
+                return "where this checkout has a file git does not track"
+    except OSError:
+        return "that git cannot check"
+    if ignored_as_folder(checkout, rel):
+        return "a name ignored as a folder here"
+    rc, text, _ = rt.git(checkout, "cat-file", "blob", blob, strip=False)
+    if rc != 0:
+        return "that git cannot check"
+    if not text or "\n" in text or "\0" in text:
+        return "whose target git cannot read"
+    if os.path.isabs(text):
+        return "whose target is an absolute path"
+    if text.endswith("/"):
+        return "whose target ends in /"
+    target = posixpath.normpath(posixpath.join(posixpath.dirname(rel), text))
+    if target == ".." or target.startswith("../"):
+        return "whose target is outside the repo"
+    return ""
+
+
+def _shown(rel: str) -> str:
+    """A branch's path, safe to show: no control characters, at most 120 long."""
+    text = re.sub(r"[\x00-\x1f\x7f]", "?", rel)
+    return text if len(text) <= 120 else text[:119] + "…"
+
+
+def link_stop(checkout: Path, old: str, new: str, who: str = "it",
+              fix_in: str = "the branch") -> str:
+    """The stop when moving `checkout` from `old` to `new` would bring a link
+    that §3.2 refuses, or "" when there is none."""
+    links = incoming_links(checkout, old, new)
+    if links is None:
+        return f"{who} may add a link that git cannot check: Land again, or land it by hand"
+    bad = [(rel, why) for rel, blob in links if (why := link_problem(checkout, rel, blob))]
+    if not bad:
+        return ""
+    rel, why = bad[0]
+    text = f"{who} adds a link at {_shown(rel)} {why}"
+    others = [_shown(r) for r, _ in bad[1:]]
+    if others:
+        text += f"; also at {', '.join(others[:2])}"
+        if len(others) > 2:
+            text += f" and {len(others) - 2} more"
+    return f"{text}: remove the link from {fix_in}, then Land again"
+
+
+def merge_link_stop(repo: Path, default: str, branch: str) -> str:
+    """`link_stop` for merging `branch` into `default` in the main checkout,
+    judged on the merge result git would write (with or without conflicts)."""
+    trees = rt.worktrees(repo)
+    rc, out, _ = rt.git(repo, "merge-tree", "--write-tree",
+                        f"refs/heads/{default}", f"refs/heads/{branch}")
+    tree = out.splitlines()[0].strip() if out else ""
+    if not trees or rc not in (0, 1) or not _OID.fullmatch(tree):
+        return "it may add a link that git cannot check: Land again, or land it by hand"
+    return link_stop(trees[0].path, f"refs/heads/{default}", tree)
+
+
 def _size(path: Path) -> int:
     try:
         return path.lstat().st_size
@@ -702,6 +816,11 @@ def apply_step(step: Step, log: Path | None = None, busy="fresh",
         rc, err = _commit_all_tracked(path, f"Lab Hub: commit open work, {stamp}")
         if rc != 0:
             return False, f"failed — could not commit the open work on {was}: {err}"
+        # git would replace an ignored real folder with a link (land-folder-link-guard).
+        why = link_stop(path, "HEAD", f"refs/heads/{default}", who=default, fix_in=default)
+        if why:
+            rt._log(f"NOT SWITCHED checkout {path} from {was} to {default}: {why}", log)
+            return False, f"failed — {why}"
         rc, _, err = rt.git(path, "switch", "--quiet", default)
         if rc != 0:
             return False, f"failed — could not switch to {default}: {err}"

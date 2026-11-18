@@ -663,6 +663,18 @@ class _Run:
                 if (b.branch, b.sha) not in self.blocked]
         if not left or self.stopped:
             return
+        _, skips = repo_tidy.plan_repo(plan.name, plan.path, self._busy(), self.now,
+                                       plan.claude, plan.claude_why, land_mode=True)
+        why_by_branch = {s.target: s.reason.removeprefix("not merged: ") for s in skips}
+        # A branch that brings a link over a folder is a stop for a person, never
+        # a verdict or an archive (land-folder-link-guard §3.4).
+        for info in [b for b in left
+                     if claude_resolve.blocker_kind(why_by_branch.get(b.branch, "")) == "link"]:
+            left.remove(info)
+            self.stops.append(land_resolve.Stop(plan.name, info.branch,
+                                                plain_reason(why_by_branch[info.branch])))
+        if not left:
+            return
         if plan.claude is None:
             self.stops.append(land_resolve.Stop(
                 plan.name, str(plan.path),
@@ -670,14 +682,11 @@ class _Run:
                 f"{plan.claude_why or 'Claude Code not found'}: install or sign in to "
                 "Claude Code, then Land again"))
             return
-        _, skips = repo_tidy.plan_repo(plan.name, plan.path, self._busy(), self.now,
-                                       plan.claude, plan.claude_why, land_mode=True)
-        why_by_branch = {s.target: s.reason for s in skips}
         for info in left:
             if self.stopped:
                 return
             why = (self.tried.get((info.branch, info.sha))
-                   or why_by_branch.get(info.branch, "").removeprefix("not merged: ")
+                   or why_by_branch.get(info.branch, "")
                    or "no merge path was found")
             self.say(f"{plan.name}: Ask Claude Code about {info.branch} — {why}")
             try:

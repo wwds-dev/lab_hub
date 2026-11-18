@@ -1,6 +1,6 @@
 # Spec: Land stops a branch that already contains a folder link
 
-Status: **Define, waiting for the owner's approval** (user-visible stop). Owner of the spec: this
+Status: **Define approved by the owner 2026-11-18 ("Approve as recommended"): §5 takes option A for all four decisions.** Owner of the spec: this
 session (`land-folder-link-guard`, worktree `bold-merkle-831506`).
 In-flight check (`session_start.py --inflight`, 2026-11-18): no unreleased spec, `claude/*` branch
 or worktree covers this. `land-update-gaps` (build done) owns Land's untracked-file rule and left
@@ -107,6 +107,53 @@ User: the owner, running Land, Land all, or Tidy.
 - `ignored_as_folder` copies `.gitignore` files into a temporary folder per path. Only paths that
   become links are checked, so the cost is near zero for normal branches.
 - `git merge-tree --write-tree` needs git 2.38+; Lab Hub already uses it (`merges_cleanly`).
+
+## 8. Architecture (Architect, 2026-11-18)
+No new state, thread or module boundary: no ADR. All checks are read-only git calls made just
+before the existing git command that moves the main checkout.
+
+1. **`land_resolve.incoming_links(checkout, old, new)`**: `git diff-tree -r -z --no-renames
+   --no-abbrev <old> <new>`; every entry whose new mode is `120000` (added, type-changed, or a link
+   whose text changed), as `(path, blob)`. `old`/`new` may be commits or trees. None when git fails.
+2. **`land_resolve.link_problem(checkout, rel, blob)`**: the first reason that applies, in the
+   order of §3.2: a parent of `rel` in the checkout is a link (cannot tell); the path is a real
+   folder; the path exists and `git ls-files` does not list it; `ignored_as_folder(checkout, rel)`;
+   the text (`git cat-file blob`) is empty, holds a newline or NUL, is absolute, ends in `/`, or
+   `posixpath.normpath(dirname(rel)/text)` starts with `..`. Lexical on purpose: the target need not
+   exist yet. Unlike `never_commit_link`, a link to an in-repo folder passes (§2.3).
+3. **`land_resolve.link_stop(checkout, old, new, who, fix_in)`**: the stop sentence or "".
+   `"<who> adds a link at <path> <why>[; also at <p2>, <p3> and N more]: remove the link from
+   <fix_in>, then Land again"`. Paths are untrusted (branch content): control characters become
+   `?` and each is cut at 120 characters. If git cannot list or read: `"<who> may add a link that
+   git cannot check: Land again, or land it by hand"`.
+4. **Call sites.**
+   - Plain and Claude merge: `land_resolve.merge_link_stop(repo, default, branch)` runs
+     `git merge-tree --write-tree refs/heads/<default> refs/heads/<branch>` (exit 0 clean, 1 with
+     conflicts; the tree OID is the first line either way) and checks `default → tree` in the main
+     checkout. Called in `repo_tidy.plan_repo` (a `not merged: …` skip, so the preview shows it) and
+     in `repo_tidy.check` (re-run by `apply`), for `merge` and `claude_merge`, after the source
+     blocker. So Claude is never started for such a branch.
+   - Claude merge's fast-forward (`claude_resolve.resolve`): `link_stop(main, d, m)` after
+     `merge_target_blocker`, before `merge --ff-only`. Catches what Claude's resolution produced.
+   - Prep's switch (`land_resolve.apply_step`): `link_stop(path, "HEAD", refs/heads/<default>,
+     who=<default>, fix_in=<default>)` after the open work is committed, before `git switch`.
+   - Pull (`repo_tidy.apply`): `git pull --ff-only origin X` becomes `git fetch origin
+     +refs/heads/X:refs/remotes/origin/X`, then `link_stop(main, "HEAD", refs/remotes/origin/X,
+     who=origin/X, fix_in="X on the remote")`, then `git merge --ff-only refs/remotes/origin/X`.
+     Same result as the pull, with the check between fetch and update. `check()` and `plan_repo`
+     also check the last-fetched ref for the preview.
+5. **A stopped branch is never triaged** (§5.3 A). Merge-time stops start with `it adds a link at`
+   or `it may add a link`; `claude_resolve.blocker_kind` returns `"link"` for those, so
+   `land.Lander` keeps them in `blocked` and shows them as stops (as for `protected`). A plan-time
+   skip with that start is turned into a stop by `Lander.triage` before any verdict, also when
+   Claude Code is not available. Branch names cannot contain spaces, so a name cannot fake the
+   start. In the merge stop the row already names the branch, so its text says "it adds …".
+6. **Log.** The skip or `NOT PULLED` / `NOT SWITCHED` / `CLAUDE not landed` line holds the stop
+   text (up to three paths and a count), not every path (narrower than §3.3).
+7. **Tests** (`tests/test_land_folder_link_guard.py`, real git repos in `tmp_path`): the helpers
+   per reason; the end-to-end `.venv` case through `land.land()`; one test per route (plan skip,
+   `apply` merge re-check, Claude ff, switch, pull); a wanted in-repo link still merges; triage
+   never asks Claude about a link-stopped branch.
 
 ## 7. Phases to run
 Define (this) → Architect (section below, after approval) → Build with tests, including the

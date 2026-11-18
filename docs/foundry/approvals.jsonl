@@ -31,3 +31,4 @@
 {"ts": "2026-11-18T12:25:52", "gate": "define", "by": "owner", "words": "approve", "recorded_by": "agent", "spec": "scroll-sidebar-only"}
 {"ts": "2026-11-18T12:25:44", "gate": "define", "by": "owner", "words": "Approve as recommended", "recorded_by": "agent", "spec": "land-pick-and-time"}
 {"ts": "2026-11-18T12:28:18", "gate": "architect", "by": "owner", "words": "Approve architecture", "recorded_by": "agent", "spec": "land-pick-and-time"}
+{"ts": "2026-11-18T22:24:02", "gate": "define", "by": "owner", "words": "Approve as recommended", "recorded_by": "agent", "spec": "land-folder-link-guard"}

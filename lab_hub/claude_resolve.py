@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import repo_tidy as rt
+from .land_resolve import LINK_STOPS as _LINK_STOPS, link_stop
 
 MODEL = "sonnet"  # owner decision A3
 BUDGET_USD = 3.0  # owner decision A4, per branch, both rounds together
@@ -1031,6 +1032,8 @@ def blocker_kind(message: str) -> str:
         return "base"
     if text.startswith(_PROTECTED):
         return "protected"
+    if text.startswith(_LINK_STOPS):
+        return "link"  # land-folder-link-guard §3.4: never triaged or archived
     return ""
 
 
@@ -1286,6 +1289,9 @@ def _resolve_in(repo, default, branch, d, b, cmd, claude, log, stop, progress,
     if blocker:
         return fail(blocker)
     main = rt.worktrees(repo)[0].path
+    blocker = link_stop(main, d, m)  # what Claude's resolution brings (land-folder-link-guard)
+    if blocker:
+        return fail(blocker)
     rc, _, err = rt.git(main, "merge", "--ff-only", "--quiet", m)
     if rc != 0:
         return fail(f"could not fast-forward {default}: {err}")
