@@ -6,6 +6,7 @@ Code are replaced at their module functions. Repos are real temporary ones.
 
 from __future__ import annotations
 
+import html
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -396,7 +397,7 @@ def test_rows_with_no_folder_say_so_and_open_nothing(qapp, tmp_path, monkeypatch
     tab.ask_claude(window)  # no folder known for "P"
     assert opened == []
     assert shown == [("information",
-                      "None of these rows has a folder a session could work in: P.")]
+                      "None of these rows has a folder a session could work in:\nP.")]
     window.close()
     _drop(tab)
 
@@ -418,5 +419,118 @@ def test_copy_prompt_through_the_page_says_so_in_the_window(qapp, tmp_path, lab,
     assert "Folder: " + str(lab.resolve()) in QApplication.clipboard().text()
     assert window.handoff_note.text().startswith("Copied the prompt for repo")
     assert not window.handoff_note.isHidden()  # readable at Review (review P2-3)
+    window.close()
+    _drop(tab)
+
+
+# ------------------------------------------------------------------ QA gaps
+def test_never_during_update_now_even_with_a_needs_you_row(qapp, tmp_path, lab, monkeypatch):
+    window = BuildCheckWindow(progress.build_check_view((_forward(lab), _rebuild()),
+                                                        scoped=True))
+    assert not window.ask_claude_button.isHidden()
+    window.show()
+    window.begin_update()
+    assert window.ask_claude_button.isHidden() and window.handoff_rows() == []
+    tab = _tab(qapp, tmp_path, monkeypatch)
+    window._rebuild = SimpleNamespace(ended=False, cancel=lambda: None)
+    assert tab._handoff_jobs(window) == "Update now is rebuilding"
+    window._rebuild = SimpleNamespace(ended=True, cancel=lambda: None)
+    assert tab._handoff_jobs(window) == ""
+    window._rebuild = None
+    window.done(0)
+    _drop(tab)
+
+
+def test_a_refused_rebuild_is_offered_at_done(qapp):
+    window = BuildCheckWindow(progress.build_check_view((_rebuild(),), scoped=True))
+    window.show()
+    window.begin_update()
+    window.command_refused("cd /x && ./build_app.sh", "the checkout has uncommitted changes")
+    window.update_ended("done")
+    [row] = window.handoff_rows()
+    assert (row.status, row.reason) == ("Not rebuilt", "the checkout has uncommitted changes")
+    window.done(0)
+
+
+def test_the_tooltip_counts_the_rows(qapp, lab, tmp_path):
+    window = BuildCheckWindow(progress.build_check_view((_forward(lab), _forward(tmp_path)),
+                                                        scoped=True))
+    assert "for the 2 rows Lab Hub could not clear" in window.ask_claude_button.toolTip()
+    window.close()
+
+
+def test_the_dialog_shows_folder_cost_command_access_and_what_runs(qapp, tmp_path):
+    a, b = tmp_path / "a&b", tmp_path / "c"
+    h1 = handoff.Handoff("a&b", a, (handoff.Item("A", "Needs you", "why", "", "git -C /r x"),),
+                         (tmp_path / "release",))
+    h2 = handoff.Handoff("c", b, (handoff.Item("C", "Needs you"),))
+    dialog = HandoffDialog([
+        (h1, handoff.Context(claude=("claude (pid 7) in .",), others=("zsh (pid 8) in .",)),
+         "p1"),
+        (h2, handoff.Context(known=False), "p2"),
+    ], [])
+    texts = [w.text() for w in dialog.findChildren(QLabel)]
+    from ui.handoff_dialog import COST
+    assert COST in texts
+    assert ("Claude Code is already running here: claude (pid 7) in .. Copy prompt and paste "
+            "it there, or tick to open another session.") in texts
+    assert "Also running here: zsh (pid 8) in ." in texts
+    assert "Lab Hub could not tell what else runs here; the session is told to check." in texts
+    assert "Command Lab Hub shows: git -C /r x" in texts
+    assert f"Also gives the session access to: {tmp_path / 'release'}" in texts
+    block = dialog.blocks[0]
+    assert block.name.text() == "a&b" and block.tick.text() == ""  # no & shortcut
+    assert html.escape(str(a)) in block.folder.toolTip()  # escaped: shown as typed
+    _delete(dialog)
+
+
+def test_rows_keyed_by_their_shown_name_find_their_folder(qapp, tmp_path, lab, monkeypatch,
+                                                           fakes):
+    """An app name `plain` changes (a bidi mark) still finds its folder (review P3-5)."""
+    tab = tab_for(qapp, tmp_path, ["p"], monkeypatch, check_own_builds=True)
+    odd = launcher.ExternalApp("p", "P\u202eQ", "p", "main.py", "s")
+    status = launcher.BuildStatus(odd, launcher.Version(), "behind", "clone behind", None,
+                                  "git -C /nowhere x", forward=True, project=lab)
+    monkeypatch.setattr(launcher, "build_report", lambda root, *a: (status,))
+    seen = []
+    tab.confirm_handoff = lambda items, unplaced, parent: seen.append((items, unplaced)) or []
+
+    def press(window):
+        window.ask_claude_button.click()
+        window.done(0)
+    monkeypatch.setattr(BuildCheckWindow, "ask", lambda self: (press(self), None)[1])
+    tab.show_build_report()
+    [(items, unplaced)] = seen
+    assert unplaced == [] and items[0][0].path == lab.resolve()
+    _drop(tab)
+
+
+def test_lab_hub_refreshes_after_opening_a_session(qapp, tmp_path, lab, monkeypatch, fakes):
+    opened, _shown = fakes
+    tab = _tab(qapp, tmp_path, monkeypatch)
+    refreshed = []
+    tab.refresh = lambda: refreshed.append(1)
+    tab.confirm_handoff = lambda items, unplaced, parent: [h for h, _c, _t in items]
+    window = BuildCheckWindow(progress.build_check_view((_forward(lab),), scoped=True))
+    window.handoff_paths["P"] = lab
+    tab.ask_claude(window)
+    assert len(opened) == 1 and refreshed == [1]
+    window.close()
+    _drop(tab)
+
+
+def test_the_page_never_adds_the_lab_root_or_another_apps_checkout(qapp, tmp_path, lab,
+                                                                   monkeypatch, fakes):
+    """The forbidden list reaches collect: a command naming the lab root adds nothing."""
+    opened, _shown = fakes
+    tab = _tab(qapp, tmp_path, monkeypatch)
+    assert tab.settings.resolved_lab_root() in tab._handoff_forbidden()
+    seen = []
+    tab.confirm_handoff = lambda items, unplaced, parent: seen.append(items) or []
+    window = BuildCheckWindow(progress.build_check_view((_forward(lab),), scoped=True))
+    window.handoff_paths["P"] = lab
+    window.handoff_commands["P"] = f"cd {tmp_path} && ./build_app.sh"
+    tab.ask_claude(window)
+    assert seen[0][0][0].extra_dirs == ()
     window.close()
     _drop(tab)

@@ -69,6 +69,12 @@ class Block(QFrame):
         box.addLayout(head)
         for item in h.items:
             box.addWidget(_label(item.line, "", wrap=True))
+            if item.command:
+                box.addWidget(_label(f"Command Lab Hub shows: {item.command}", "hint",
+                                     wrap=True))
+        for folder in h.extra_dirs:  # the access this grants, said up front (security P2-1)
+            box.addWidget(_label(f"Also gives the session access to: {folder}", "stateWarn",
+                                 wrap=True))
         if ctx.claude:
             box.addWidget(_label("Claude Code is already running here: "
                                  + "; ".join(ctx.claude) + ". Copy prompt and paste it "

@@ -1,6 +1,6 @@
 # ADR 0004: Ask Claude opens `claude` in Terminal, one session per repo, with per-session permission rules
 
-Status: accepted by the owner 2026-11-17 ("Approve architecture"); amended 2026-11-18 after review (setting sources, more deny rules, `--add-dir`), approved by the owner ("Fix all as proposed").
+Status: accepted by the owner 2026-11-17 ("Approve architecture"); amended 2026-11-18 after review (setting sources, more deny rules, `--add-dir`), approved by the owner ("Fix all as proposed"); amended again 2026-11-18 after Verify and Secure (inline rules, folder checks, fenced rows, limit 7), approved by the owner ("Fix as proposed").
 Spec: `docs/specs/claude-handoff.md` §10.
 
 ## Context
@@ -23,13 +23,13 @@ The hard limits in spec §4.2 must hold even if the session ignores its prompt. 
    - The line passes `check_terminal_commands` (one line, no NUL).
 3. **The limits are enforced three ways.**
    - **As text:** the limits are appended to the system prompt (`--append-system-prompt`) and repeated in the task.
-   - **Every command asks:** the session runs in `--permission-mode manual`.
+   - **Every change asks:** the session runs in `--permission-mode manual`. Read-only commands and reads inside the working folders run without asking.
    - **Only user and project settings** (`--setting-sources user,project`). A repo's `settings.local.json` can allow `python3 -c '…'`, which would run around every rule below; every lab repo's checked-in `settings.json` holds hooks only (checked 2026-11-17), so the Foundry hooks still run.
-   - **A per-session settings file** (`--settings`):
+   - **Per-session rules, inline** (`--settings '<json>'`, amended 2026-11-18 from a file, security P3-3):
      - `ask` rules for push, merge, tag and install, so an allow rule in the owner's own settings cannot let them run without asking;
      - `deny` rules for the sign-off and approval commands, any command naming `signoff.jsonl`, and the Edit and Write tools on it, which no answer in the session can override.
    - **What the rules cannot hold.** A command that reaches git or a sign-off file indirectly (a script, inline Python) matches no rule. `manual` mode still asks the owner before it runs.
-4b. **A folder outside the repo, only from Lab Hub's own command.** When a row's command starts with `cd <folder>` outside the repo (Provisio's release clone), that folder is added with `--add-dir` and named in the prompt.
+4b. **A folder outside the repo, only from Lab Hub's own command.** When a row's command starts with `cd <folder>` or `git -C <folder>` (Provisio's release clone), that folder is added with `--add-dir`, named in the prompt and shown in the confirmation. It is refused when it is `/`, the home folder, the lab root, the repo or above it, or another registered app's checkout (security P2-1).
 4. **One session per resolved git top level**, started with `cd -- <repo>`. Apps that share a repo share its session. Nothing is ever started in the lab root on behalf of several repos.
 5. **No tracking.**
    - Lab Hub keeps no record of a session it started and never reads one back.

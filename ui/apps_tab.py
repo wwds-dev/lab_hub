@@ -929,6 +929,22 @@ class AppsTab(TilePage):
             return "Update now is rebuilding"
         return "; ".join(self.land_jobs())
 
+    def _handoff_forbidden(self) -> list[Path]:
+        """Folders a row's command may never add to a session (security P2-1):
+        the lab root and every registered app's checkout."""
+        root = self.settings.resolved_lab_root()
+        apps = (*launcher.SUITES, *launcher.BACKUP_SYNC_APPS, *launcher.UTILITIES,
+                *launcher.TOOLS_ONLY_APPS)
+        found = [root]
+        for app in apps:
+            try:
+                folder = launcher.source_dir(app, root)
+            except Exception:  # noqa: BLE001 - one odd entry must not stop the rest
+                folder = None
+            if folder is not None:
+                found.append(folder)
+        return found
+
     def refresh_handoff_buttons(self) -> None:
         """Ask Claude's enabled state on this page's open windows (spec §4.3)."""
         for window in (self._build_window, self.land_window):
@@ -959,7 +975,8 @@ class AppsTab(TilePage):
                 found, unplaced, items = [], [], []
             else:
                 found, unplaced = handoff.collect(window.handoff_rows(), window.handoff_paths,
-                                              window.handoff_commands)
+                                                  window.handoff_commands,
+                                                  forbidden=self._handoff_forbidden())
                 listing = land_resolve.cwd_listing() if found else None
                 items = []
                 for h in found:
@@ -973,8 +990,10 @@ class AppsTab(TilePage):
                                 "in, then try again.")
             return
         if not items:
+            # Names on their own line: Qt judges rich text by the first line,
+            # so a name that looks like HTML stays plain (security P3-6).
             QMessageBox.information(window, "Ask Claude",
-                                    "None of these rows has a folder a session could work in: "
+                                    "None of these rows has a folder a session could work in:\n"
                                     + ", ".join(unplaced) + ".")
             return
         chosen = self.confirm_handoff(items, unplaced, window)
