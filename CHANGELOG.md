@@ -21,6 +21,15 @@ README and the specs in `docs/specs/` describe them.
   longer jumps to the next section. Sideways swipes are unchanged.
 
 ### Added
+- **Choose what Land all lands.** Each repo card in the Land confirmation has a
+  tick box, on by default. Untick a repo to leave it out: its card folds, its
+  tile goes back at once, and the title, stop count, Claude Code cost panel,
+  Details and the Land button count only the ticked repos.
+- **The Land window keeps the time at the end:** "Took 14:22 · 13:55 to 14:09",
+  each repo's time in its status (also "Needs you" and "Stopped" rows), finished
+  repos open into their steps with times, and an "Earlier:" line shows the last
+  three Lands' totals (new `land-runs.json`, no repo names). The title reads
+  "Land finished · N repos" or "Land stopped". Times over an hour read `h:mm:ss`.
 - **Ask Claude…** in Check builds (Review and Done) and the Land window (after
   the run):
   - It opens one Claude Code session per repo in Terminal for the rows Lab Hub

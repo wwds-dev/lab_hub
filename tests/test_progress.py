@@ -65,7 +65,9 @@ def test_fmt_left(seconds, text):
 
 
 @pytest.mark.parametrize("seconds, text", [(0, "0:00"), (9.9, "0:09"), (61, "1:01"),
-                                           (3600, "60:00"), (-3, "0:00")])
+                                           (3599, "59:59"), (3600, "1:00:00"),
+                                           (5525, "1:32:05"), (36000, "10:00:00"),
+                                           (-3, "0:00")])
 def test_fmt_clock(seconds, text):
     assert progress.fmt_clock(seconds) == text
 
@@ -169,7 +171,8 @@ def test_landed_with_branches_left_needs_you_and_a_clean_land_is_landed():
     model.on_repo_done("b", LandResult("b", "landed", remaining=1))
     model.on_repo_done("c", LandResult("c", "nothing"))
     rows = model.snapshot().rows
-    assert rows[0].status == "Landed · 0:42" and rows[0].tone == "ok"
+    assert rows[0].status == "Landed" and rows[0].took == "0:42" and rows[0].tone == "ok"
+    assert rows[1].took == "" and rows[2].took == ""  # no step of theirs ran
     assert rows[1].status == "Needs you" and "1 branch needs your decision" in rows[1].reason
     assert rows[2].status == "Nothing to land"
     assert [c for c, _t in model.snapshot().counts][::3] == ["1 landed", "1 needs you"]
@@ -578,3 +581,119 @@ def test_a_command_that_could_not_start_says_so():
     model.end_command("x", ok=False, code=None)
     row = model.snapshot().rows[0]
     assert row.status == "Failed" and row.reason == "It could not start; see the live output."
+
+
+# ------------------------------------------- land-pick-and-time: times at the end
+class Wall:
+    def __init__(self, t: datetime = WALL) -> None:
+        self.t = t
+
+    def __call__(self) -> datetime:
+        return self.t
+
+
+def test_the_end_keeps_the_total_time_and_the_clock_span():
+    clock, wall = Clock(), Wall(datetime(2026, 11, 18, 13, 55, 10))
+    model = progress.LandModel([_plan("a", "merge")], {}, clock=clock, wall=wall)
+    feed = Feed(model, clock)
+    feed.start("a", 0, "merge"); clock.tick(862); feed.end("a", 0, "merge")
+    assert model.snapshot().took == ""  # live: elapsed and time left, as before
+    model.on_repo_done("a", LandResult("a", "landed"))
+    wall.t = datetime(2026, 11, 18, 14, 9, 32)
+    model.finish("Landed 1 of 1 repos.")
+    clock.tick(500)  # time after the end does not count
+    snap = model.snapshot()
+    assert snap.took == "Took 14:22 · 13:55 to 14:09"
+    assert snap.title == "Land finished · a"
+
+
+def test_a_run_over_an_hour_reads_hours():
+    clock = Clock()
+    model = progress.LandModel([_plan("a", "merge"), _plan("b", "push")], {}, clock=clock,
+                               wall=Wall())
+    clock.tick(5525)
+    model.finish("x")
+    snap = model.snapshot()
+    assert snap.took.startswith("Took 1:32:05 · ") and snap.title == "Land finished · 2 repos"
+
+
+def test_every_started_row_has_its_time_and_the_status_word_stays_bare():
+    from lab_hub import handoff
+
+    clock = Clock()
+    model = progress.LandModel([_plan("a", "merge"), _plan("b", "merge"), _plan("c", "push"),
+                                _plan("d"), _plan("e", "push")], {}, clock=clock, wall=Wall())
+    feed = Feed(model, clock)
+    feed.start("a", 0, "merge"); clock.tick(42); feed.end("a", 0, "merge")
+    model.on_repo_done("a", LandResult("a", "landed"))
+    feed.start("b", 0, "merge"); clock.tick(41); feed.end("b", 0, "merge", "failed")
+    model.on_repo_done("b", LandResult("b", "not_landed", "tests fail"))
+    feed.start("c", 0, "push"); clock.tick(63)
+    model.on_repo_done("c", LandResult("c", "not_landed", "stopped", stopped=True))
+    model.on_repo_done("d", LandResult("d", "nothing"))
+    model.finish("Landed 1 of 5 repos.")
+    rows = {r.name: r for r in model.snapshot().rows}
+    assert (rows["a"].status, rows["a"].took) == ("Landed", "0:42")
+    assert (rows["b"].status, rows["b"].took) == ("Needs you", "0:41")
+    assert (rows["c"].status, rows["c"].took) == ("Stopped", "1:03")
+    assert (rows["d"].status, rows["d"].took) == ("Nothing to land", "")
+    assert (rows["e"].status, rows["e"].took) == ("Not reached", "")
+    # Ask Claude matches the bare word, never the time
+    assert handoff.qualifies(rows["b"]) and not handoff.qualifies(rows["a"])
+    assert model.snapshot().title == "Land stopped"
+
+
+def test_a_finished_row_opens_into_every_step_with_its_time():
+    clock = Clock()
+    model = progress.LandModel([_plan("a", *(["delete_branch"] * 7)), _plan("b", "push")], {},
+                               clock=clock, wall=Wall())
+    feed = Feed(model, clock)
+    for i in range(7):
+        feed.start("a", i, "delete_branch", 7); clock.tick(2)
+        feed.end("a", i, "delete_branch", "done", 7)
+    model.on_repo_done("a", LandResult("a", "landed"))
+    live = {r.name: r for r in model.snapshot().rows}
+    assert not live["a"].openable  # while Land runs, only the running row opens
+    model.finish("x")
+    rows = {r.name: r for r in model.snapshot().rows}
+    assert rows["a"].openable and not rows["a"].expanded
+    assert [s.time for s in rows["a"].steps] == ["2s"] * 7  # all of them, none folded
+    assert not rows["b"].openable  # never reached: nothing to open
+
+
+def test_earlier_line_is_the_last_three_newest_first():
+    runs = [durations.Run(datetime(2026, 11, d, 9, 10), 6, 5, s, d == 17)
+            for d, s in ((14, 30), (15, 41), (16, 5525), (17, 862))]
+    assert progress.earlier_line(runs) == (
+        "Earlier: 17 Nov 09:10, 6 repos, 14:22, stopped · 16 Nov 09:10, 6 repos, 1:32:05 · "
+        "15 Nov 09:10, 6 repos, 0:41")
+    assert progress.earlier_line(runs[:1]).endswith("14 Nov 09:10, 6 repos, 0:30")
+    assert progress.earlier_line([durations.Run(datetime(2026, 1, 2, 3, 4), 1, 1, 9)]) == \
+        "Earlier: 2 Jan 03:04, 1 repo, 0:09"
+    assert progress.earlier_line([]) == ""
+
+
+# --- review findings (docs/audit/land-pick-and-time-review.md) ---------------
+def test_a_stopped_row_is_muted_not_amber():
+    clock = Clock()
+    model = progress.LandModel([_plan("a", "push")], {}, clock=clock, wall=Wall())
+    feed = Feed(model, clock)
+    feed.start("a", 0, "push"); clock.tick(3)
+    model.on_repo_done("a", LandResult("a", "not_landed", "stopped", stopped=True))
+    row = model.snapshot().rows[0]
+    assert (row.status, row.tone) == ("Stopped", "muted")  # review P3-2
+
+
+def test_month_names_stay_english_whatever_the_locale():
+    import locale
+
+    old = locale.setlocale(locale.LC_TIME)
+    try:
+        try:
+            locale.setlocale(locale.LC_TIME, "de_DE.UTF-8")
+        except locale.Error:
+            pytest.skip("no German locale here")
+        runs = [durations.Run(datetime(2026, 3, 5, 9, 10), 1, 1, 9)]
+        assert progress.earlier_line(runs) == "Earlier: 5 Mar 09:10, 1 repo, 0:09"
+    finally:
+        locale.setlocale(locale.LC_TIME, old)

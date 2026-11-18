@@ -245,3 +245,82 @@ def test_the_path_follows_the_support_dir(isolated_config):
     assert durations.path() == isolated_config / "durations.json"
     assert durations.record("app:x", "build", 3)
     assert (config.SUPPORT_DIR / "durations.json").exists()
+
+
+# ------------------------------------------- the Land run log (ADR 0005)
+from datetime import datetime  # noqa: E402
+
+
+def test_run_log_round_trip_keeps_the_last_ten(tmp_path):
+    file = tmp_path / "land-runs.json"
+    for i in range(12):
+        assert durations.record_run(datetime(2026, 11, 18, 14, i), 6, 5, 860.5 + i,
+                                    i == 11, path=file)
+    runs = durations.load_runs(path=file)
+    assert len(runs) == 10 and runs[0].at == datetime(2026, 11, 18, 14, 2)
+    assert runs[-1] == durations.Run(datetime(2026, 11, 18, 14, 11), 6, 5, 871.5, True)
+    assert not list(tmp_path.glob(".*.tmp"))
+    assert oct(file.stat().st_mode & 0o777) == "0o600"
+
+
+def test_the_run_log_follows_the_support_dir():
+    assert durations.runs_path() == config.SUPPORT_DIR / "land-runs.json"
+    assert durations.load_runs() == []
+    assert durations.record_run(datetime(2026, 11, 18, 9, 0), 1, 1, 41)
+    assert len(durations.load_runs()) == 1
+    assert durations.load() == {}  # the step history is a different file, untouched
+
+
+@pytest.mark.parametrize("bad", [
+    {"at": "2026-11-18T14:09:33", "repos": 1, "landed": 1, "seconds": 5},
+    {"at": "yesterday", "repos": 1, "landed": 1, "seconds": 5},
+    {"at": 20261118, "repos": 1, "landed": 1, "seconds": 5},
+    {"at": "2026-11-18T14:09", "repos": -1, "landed": 0, "seconds": 5},
+    {"at": "2026-11-18T14:09", "repos": 501, "landed": 0, "seconds": 5},
+    {"at": "2026-11-18T14:09", "repos": True, "landed": 0, "seconds": 5},
+    {"at": "2026-11-18T14:09", "repos": 1, "landed": 1.5, "seconds": 5},
+    {"at": "2026-11-18T14:09", "repos": 1, "landed": 1, "seconds": 0},
+    {"at": "2026-11-18T14:09", "repos": 1, "landed": 1, "seconds": "5"},
+    {"at": "2026-11-18T14:09", "repos": 1, "landed": 1, "seconds": 1e9},
+    {"at": "2026-11-18T14:09", "repos": 1, "landed": 1, "seconds": 5, "stopped": "no"},
+    ["2026-11-18T14:09", 1, 1, 5],
+])
+def test_a_bad_run_entry_is_dropped_and_the_good_ones_kept(tmp_path, bad):
+    file = tmp_path / "land-runs.json"
+    good = {"at": "2026-11-18T14:09", "repos": 2, "landed": 3, "seconds": 5}
+    file.write_text(json.dumps({"version": 1, "runs": [bad, good]}))
+    runs = durations.load_runs(path=file)
+    assert runs == [durations.Run(datetime(2026, 11, 18, 14, 9), 2, 2, 5.0)]  # landed <= repos
+
+
+@pytest.mark.parametrize("text", ["", "{", "[]", '{"version": 2, "runs": []}',
+                                  '{"version": 1, "runs": {}}', '{"version": 1}',
+                                  "[" * 100000, '{"version": 1, "runs": [' + "1," * 40000 + "1]}"])
+def test_a_hostile_run_log_reads_as_no_runs_and_the_next_record_replaces_it(tmp_path, text):
+    file = tmp_path / "land-runs.json"
+    file.write_text(text)
+    assert durations.load_runs(path=file) == []
+    assert durations.record_run(datetime(2026, 11, 18, 9, 0), 1, 0, 3, path=file)
+    assert len(durations.load_runs(path=file)) == 1
+
+
+def test_a_symlink_or_fifo_run_log_is_not_read(tmp_path):
+    target = tmp_path / "real.json"
+    target.write_text(json.dumps({"version": 1, "runs": [
+        {"at": "2026-11-18T14:09", "repos": 1, "landed": 1, "seconds": 5}]}))
+    link = tmp_path / "land-runs.json"
+    link.symlink_to(target)
+    assert durations.load_runs(path=link) == []
+    fifo = tmp_path / "fifo.json"
+    os.mkfifo(fifo)
+    assert durations.load_runs(path=fifo) == []
+
+
+def test_record_run_refuses_bad_values_and_a_failed_save_says_false(tmp_path, monkeypatch):
+    file = tmp_path / "land-runs.json"
+    assert not durations.record_run(datetime(2026, 11, 18), 1, 1, 0, path=file)
+    assert not durations.record_run(datetime(2026, 11, 18), -1, 0, 5, path=file)
+    assert not file.exists()
+    monkeypatch.setattr(durations.os, "replace", lambda *a: (_ for _ in ()).throw(OSError()))
+    assert not durations.record_run(datetime(2026, 11, 18), 1, 1, 5, path=file)
+    assert not file.exists() and not list(tmp_path.glob(".*.tmp"))

@@ -8,8 +8,9 @@ path, branch, process and reason is plain text: they come from git and lsof.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -48,9 +49,12 @@ def _pill(text: str, tone: str) -> QLabel:
     return pill
 
 
-def headline(todo: list[land.LandPlan]) -> tuple[str, str]:
-    """The title and the one sentence under it."""
+def headline(todo: list[land.LandPlan], offered: int = 0) -> tuple[str, str]:
+    """The title and the one sentence under it. `offered`: how many repo cards
+    the dialog shows; with cards but none ticked, it asks for a tick."""
     if not todo:
+        if offered:
+            return "Nothing chosen", "Tick a repo to land it."
         return "Land", "Nothing to land."
     title = f"Land {todo[0].name}" if len(todo) == 1 else f"Land {len(todo)} repos"
     stops = sum(len(p.stops) for p in todo)
@@ -76,10 +80,26 @@ def details_text(todo: list[land.LandPlan]) -> str:
     return "\n\n".join(parts)
 
 
-class RepoCard(QFrame):
-    """One repo: what Land will do, and what only you can clear."""
+class _Head(QWidget):
+    """A card's header line; a click on it toggles the card's box."""
 
-    def __init__(self, plan: land.LandPlan, parent: QWidget | None = None) -> None:
+    clicked = Signal()
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        if (event.button() == Qt.MouseButton.LeftButton
+                and self.rect().contains(event.position().toPoint())):  # review P3-8
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+
+class RepoCard(QFrame):
+    """One repo: what Land will do, and what only you can clear. With
+    `choosable`, a tick box (on) leaves the repo in or out of this Land."""
+
+    choice_changed = Signal()
+
+    def __init__(self, plan: land.LandPlan, parent: QWidget | None = None,
+                 choosable: bool = False) -> None:
         super().__init__(parent)
         self.setObjectName("card")
         self.plan = plan
@@ -87,19 +107,44 @@ class RepoCard(QFrame):
         box.setContentsMargins(14, 10, 14, 12)
         box.setSpacing(4)
 
-        head = QHBoxLayout()
+        self.head = _Head()
+        head = QHBoxLayout(self.head)
+        head.setContentsMargins(0, 0, 0, 0)
         head.setSpacing(8)
-        head.addWidget(_label(plan.name, "appName"))
+        self.check = None
+        if choosable:
+            self.check = QCheckBox()
+            self.check.setChecked(True)
+            self.check.setAccessibleName(f"Land {plan.name}")
+            self.check.setToolTip(_plain_tip(f"Untick to leave {plan.name} out of this Land"))
+            self.check.toggled.connect(self._toggled)
+            self.head.clicked.connect(self.check.toggle)
+            head.addWidget(self.check)
+        self.name = _label(plan.name, "appName")
+        head.addWidget(self.name)
+        self._in_pills: list[QWidget] = []
         items = plan.items
         if items:
-            head.addWidget(_pill(_n(len(items), "step"), "ok"))
+            self._in_pills.append(_pill(_n(len(items), "step"), "ok"))
         if plan.stops:
-            head.addWidget(_pill(f"stops at {len(plan.stops)}", "warn"))
+            self._in_pills.append(_pill(f"stops at {len(plan.stops)}", "warn"))
+        for pill in self._in_pills:
+            head.addWidget(pill)
+        self.left_out = _pill("Left out", "muted")
+        self.left_out.hide()
+        head.addWidget(self.left_out)
         head.addStretch(1)
         cost = plan.cost
         if cost.any:
-            head.addWidget(_pill(f"Claude Code · up to {land._usd(cost.total_usd)}", "run"))
-        box.addLayout(head)
+            pill = _pill(f"Claude Code · up to {land._usd(cost.total_usd)}", "run")
+            self._in_pills.append(pill)
+            head.addWidget(pill)
+        box.addWidget(self.head)
+        self.body = QWidget()
+        box.addWidget(self.body)
+        box = QVBoxLayout(self.body)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(4)
 
         if items:
             box.addWidget(_label("WILL DO", "sectionTitle"))
@@ -124,6 +169,26 @@ class RepoCard(QFrame):
                 self.stop_rows.append(where)
                 if view.action:
                     box.addWidget(_label(view.action, "stateWarn", wrap=True))
+
+    @property
+    def chosen(self) -> bool:
+        return self.check is None or self.check.isChecked()
+
+    def _toggled(self, on: bool) -> None:
+        """Out: folded to its header, dimmed, "Left out" (decision 4)."""
+        self.body.setVisible(on)
+        for pill in self._in_pills:
+            pill.setVisible(on)
+        self.left_out.setVisible(not on)
+        self.name.setEnabled(on)
+        # The app stylesheet's text colour beats the disabled palette (review P2-1).
+        self.name.setObjectName("appName" if on else "hint")
+        self.name.style().unpolish(self.name)
+        self.name.style().polish(self.name)
+        self.setProperty("out", "false" if on else "true")
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.choice_changed.emit()
 
 
 class ClaudeBox(QFrame):
@@ -157,6 +222,7 @@ class LandConfirmDialog(QDialog):
         self.setModal(True)
         todo = [p for p in plans if not p.nothing]
         idle = [p.name for p in plans if p.nothing]
+        self._todo = todo
         outer = QVBoxLayout(self)
         outer.setContentsMargins(18, 16, 18, 14)
         outer.setSpacing(10)
@@ -171,9 +237,11 @@ class LandConfirmDialog(QDialog):
         cards = QVBoxLayout(holder)
         cards.setContentsMargins(0, 0, 0, 0)
         cards.setSpacing(10)
-        self.cards = [RepoCard(p) for p in todo]
+        choosable = len(todo) > 1
+        self.cards = [RepoCard(p, choosable=choosable) for p in todo]
         for card in self.cards:
             cards.addWidget(card)
+            card.choice_changed.connect(self._sync)
         cards.addStretch(1)
         self.scroll = QScrollArea()
         self.scroll.setWidget(holder)
@@ -187,10 +255,14 @@ class LandConfirmDialog(QDialog):
             self.idle = _label("Nothing to land in " + land._and(idle) + ".", "hint", wrap=True)
             outer.addWidget(self.idle)
 
+        # The Claude Code box sits here; _sync replaces it as the choice changes.
+        self._claude_at = outer.count()
+        self._outer = outer
+        self.claude = None
         panel = land.claude_panel(todo)
-        self.claude = ClaudeBox(panel) if panel else None
-        if self.claude is not None:
-            outer.addWidget(self.claude)
+        if panel:
+            self.claude = ClaudeBox(panel)
+            outer.insertWidget(self._claude_at, self.claude)
 
         self.details = QPlainTextEdit(details_text(todo))
         self.details.setObjectName("runLog")
@@ -217,6 +289,37 @@ class LandConfirmDialog(QDialog):
         buttons.addWidget(self.land)
         outer.addLayout(buttons)
         self._fit()
+
+    def chosen(self) -> list[land.LandPlan]:
+        """The ticked repos, in plan order: what Land runs (spec land-pick-and-time)."""
+        return [card.plan for card in self.cards if card.chosen]
+
+    def _sync(self) -> None:
+        """Everything that counts or sums follows the ticked repos only, so the
+        Claude Code disclosure covers exactly the repos that will run."""
+        chosen = self.chosen()
+        title, line = headline(chosen, len(self.cards))
+        self.title.setText(title)
+        self.summary.setText(line)
+        if self.claude is not None:
+            self._outer.removeWidget(self.claude)
+            self.claude.hide()
+            self.claude.deleteLater()
+            self.claude = None
+        panel = land.claude_panel(chosen)
+        if panel:
+            self.claude = ClaudeBox(panel)
+            self._outer.insertWidget(self._claude_at, self.claude)
+        self.details.setPlainText(details_text(chosen))
+        self.land.setText("Land" if len(chosen) <= 1 else f"Land {len(chosen)} repos")
+        self.land.setEnabled(bool(chosen))
+        self._refit()
+
+    def _refit(self) -> None:
+        """Folded cards give their room back (review P3-5)."""
+        self._fit()
+        if not self.details.isHidden():
+            self.scroll.setMinimumHeight(min(self._cards_height, CARDS_MIN_WITH_DETAILS))
 
     def _toggle_details(self) -> None:
         show = self.details.isHidden()

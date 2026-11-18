@@ -8,6 +8,8 @@ for real. A step Claude Code or a repo's tests would decide is replaced at
 
 from __future__ import annotations
 
+import re
+
 import threading
 import time
 
@@ -239,14 +241,14 @@ def test_the_confirmation_is_one_card_per_repo_with_the_claude_disclosure(qapp, 
         return 0
 
     monkeypatch.setattr(LandConfirmDialog, "exec", fake_exec)
-    assert tab.confirm_land([plan]) is False  # nothing clicked
+    assert tab.confirm_land([plan]) == []  # nothing clicked: nothing to land
     assert seen["title"] == "Land sonar" and seen["cards"] == 1 and seen["claude"]
     assert plan.sentence in seen["details"] and "Anthropic" in seen["details"]
     assert claude_resolve.MODEL in seen["details"]
     assert "Resolve conflicts with Claude" in seen["details"]
     assert seen["land"] == "Land" and seen["default"] == [False, False, False]
     monkeypatch.setattr(LandConfirmDialog, "exec", lambda self: 1)
-    assert tab.confirm_land([plan]) is True
+    assert tab.confirm_land([plan]) == [plan]  # Land: the plans to run
     _drop(tab)
 
 
@@ -523,7 +525,8 @@ def test_land_all_with_a_failure_says_so_in_the_window_not_a_box(qapp, tmp_path,
     assert boxes == []  # the window's end state replaced the Land all box
     assert window.header.outcome.text() == "Landed 1 of 2 repos."
     assert "repo: Not landed: remote said <b>no</b>" in window.header.details.text()
-    assert window.rows[0].pill.text() == "Needs you"
+    # Its steps ran, so its time follows the bare status (spec land-pick-and-time item 9).
+    assert re.fullmatch(r"Needs you · \d+:\d\d", window.rows[0].pill.text())
     assert window.rows[0].reason.text() == "remote said <b>no</b>"
     from PySide6.QtCore import Qt
 
@@ -570,7 +573,7 @@ def test_a_single_land_ends_with_its_tile_line_in_the_window(qapp, tmp_path, lab
     window = tab.land_window
     window.draw()
     assert window.header.outcome.text() == "repo: Landed"
-    assert window.header.title.text() == "Landing repo"
+    assert window.header.title.text() == "Land finished · repo"
     _drop(tab)
 
 
@@ -617,4 +620,136 @@ def test_a_later_land_that_opens_no_window_leaves_the_finished_one_alone(
     assert tab.land_window is window
     assert state() == before
     assert show_hidden_while_running
+    _drop(tab)
+
+
+def test_land_all_lands_only_the_ticked_repos(qapp, tmp_path, lab, monkeypatch):
+    """Spec land-pick-and-time items 3-5: a left-out repo is not run and its
+    tile goes back at once; the window and the run log count the run only."""
+    from lab_hub import durations
+
+    make_branch(lab, "feat", "f.txt")
+    other = second_repo(tmp_path, "other")
+    make_branch(other, "feat2", "g.txt")
+    _write(tmp_path, [_row(tmp_path, "repo", ["1 branch not merged into main"]),
+                      _row(tmp_path, "other", ["1 branch not merged into main"])])
+    tab = tab_for(qapp, tmp_path, ["repo", "other"], monkeypatch, check_builds=True)
+    tab.refresh()
+    ran = []
+
+    def confirm(plans):
+        return [p for p in plans if p.name == "other"]
+
+    tab.confirm_land = confirm
+    real_run = tab.lander.run
+    tab.lander.run = lambda plans: ran.append([p.name for p in plans]) or real_run(plans)
+    tab.land_all_button.click()
+    assert pump(lambda: tab.land_window is not None and not tab.land_window.model.live)
+    assert ran == [["other"]]
+    assert (other / "g.txt").exists() and not (lab / "f.txt").exists()
+    assert "repo" not in tab._landing_cards
+    assert tab.cards[0].outcome.text() == ""  # never landed, nothing to say
+    assert tab.cards[1].outcome.text() == "Landed"
+    window = tab.land_window
+    window.draw()
+    assert [r.name.text() for r in window.rows] == ["other"]
+    assert window.header.title.text() == "Land finished · other"
+    assert [(r.repos, r.landed) for r in durations.load_runs()] == [(1, 1)]
+    _drop(tab)
+
+
+def test_true_from_the_confirmation_still_means_every_repo(qapp, tmp_path, lab, monkeypatch):
+    make_branch(lab, "feat", "f.txt")
+    other = second_repo(tmp_path, "other")
+    make_branch(other, "feat2", "g.txt")
+    _write(tmp_path, [_row(tmp_path, "repo", ["1 branch not merged into main"]),
+                      _row(tmp_path, "other", ["1 branch not merged into main"])])
+    tab = tab_for(qapp, tmp_path, ["repo", "other"], monkeypatch, check_builds=True)
+    tab.refresh()
+    ran = []
+    tab.confirm_land = lambda plans: True
+    real_run = tab.lander.run
+    tab.lander.run = lambda plans: ran.append(sorted(p.name for p in plans)) or real_run(plans)
+    tab.land_all_button.click()
+    assert pump(lambda: tab.land_window is not None and not tab.land_window.model.live)
+    assert ran == [["other", "repo"]]
+    _drop(tab)
+
+
+def test_an_empty_choice_is_a_cancel(qapp, tmp_path, lab, monkeypatch):
+    has_work(tmp_path, lab)
+    tab = tab_for(qapp, tmp_path, ["repo"], monkeypatch)
+    tab.refresh()
+    tab.confirm_land = lambda plans: []
+    tab.cards[0].land_button.click()
+    assert pump(lambda: not tab.lander.busy)
+    assert tab.land_window is None and tab._landing_cards == {}
+    assert tab.cards[0].land_button.isEnabled()
+    _drop(tab)
+
+
+# --- review findings (docs/audit/land-pick-and-time-review.md) ---------------
+def _planned_tab(qapp, tmp_path, monkeypatch):
+    tab = tab_for(qapp, tmp_path, ["repo"], monkeypatch)
+    ran, windows = [], []
+    tab.lander.run = lambda plans: ran.append([p.name for p in plans]) or True
+    tab._open_land_window = lambda plans: windows.append([p.name for p in plans])
+    return tab, ran, windows
+
+
+def test_a_partial_choice_keeps_the_nothing_to_land_rows_in_plan_order(qapp, tmp_path,
+                                                                       monkeypatch):
+    from .test_land_confirm import screenshot_plans
+
+    tab, ran, windows = _planned_tab(qapp, tmp_path, monkeypatch)
+    plans = screenshot_plans()  # lab_hub, foundry, syndustryx, Imprint (nothing to land)
+    tab.confirm_land = lambda ps: [p for p in ps if p.name == "foundry"]
+    tab._land_planned(plans)
+    assert ran == [["foundry", "Imprint"]] and windows == ran  # review P2-2
+    tab.confirm_land = lambda ps: []
+    tab._land_planned(screenshot_plans())
+    assert ran == [["foundry", "Imprint"]]  # Cancel runs nothing, not even Imprint
+    _drop(tab)
+
+
+def test_land_all_narrowed_to_one_repo_still_opens_the_window(qapp, tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from lab_hub import land_resolve
+
+    tab, ran, windows = _planned_tab(qapp, tmp_path, monkeypatch)
+    stop_only = land.LandPlan("a", Path("/a"), stops=(
+        land_resolve.Stop("a", "/a", "a process is running in it: close that terminal"),))
+    other = land.LandPlan("b", Path("/b"), stops=(
+        land_resolve.Stop("b", "/b", "a process is running in it: close that terminal"),))
+    tab.confirm_land = lambda ps: [stop_only]
+    tab._land_planned([stop_only, other])
+    assert ran == [["a"]] and windows == [["a"]]  # review P3-6: it came from Land all
+    _drop(tab)
+
+
+def test_the_real_dialog_choice_is_what_runs_and_what_is_disclosed(qapp, tmp_path,
+                                                                   monkeypatch):
+    """Spec §6 mitigation, end to end (review P3-9)."""
+    from ui.land_confirm import LandConfirmDialog
+
+    from .test_land_confirm import screenshot_plans
+
+    tab, ran, windows = _planned_tab(qapp, tmp_path, monkeypatch)
+    seen = {}
+
+    def exec_(self):
+        for card in self.cards:
+            if card.plan.cost.any:  # untick both repos that may use Claude Code
+                card.check.setChecked(False)
+        seen["claude"] = self.claude
+        seen["details"] = self.details.toPlainText()
+        return QDialog.DialogCode.Accepted
+
+    from PySide6.QtWidgets import QDialog
+
+    monkeypatch.setattr(LandConfirmDialog, "exec", exec_)
+    tab._land_planned(screenshot_plans())
+    assert seen["claude"] is None and "Anthropic" not in seen["details"]
+    assert ran == [["foundry", "Imprint"]]
     _drop(tab)

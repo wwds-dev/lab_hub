@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Land pick and time</title>
+<style>
+:root{--surface-0:#f5f4ef;--surface-1:#f0efe9;--surface-2:#fff;--border:rgba(0,0,0,.1);--border-strong:rgba(0,0,0,.18);--text-primary:#1f1f1d;--text-secondary:#5f5e5a;--text-muted:#888780;--text-success:#3b6d11;--text-accent:#185fa5;--text-warning:#854f0b;--bg-success:#eaf3de;--bg-accent:#e6f1fb;--bg-warning:#faeeda;--border-warning:#e8c48a;--fill-accent:#378add;--radius:8px;--font-mono:ui-monospace,Menlo,monospace}
+@media (prefers-color-scheme:dark){:root{--surface-0:#1a1a19;--surface-1:#262624;--surface-2:#30302e;--border:rgba(255,255,255,.1);--border-strong:rgba(255,255,255,.18);--text-primary:#f1efe8;--text-secondary:#b4b2a9;--text-muted:#888780;--text-success:#97c459;--text-accent:#85b7eb;--text-warning:#ef9f27;--bg-success:#27500a;--bg-accent:#0c447c;--bg-warning:#4a2a05;--border-warning:#854f0b}}
+body{margin:0;padding:24px 16px;background:var(--surface-0);color:var(--text-primary);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:640px;margin:0 auto}
+.lbl{font-size:12px;color:var(--text-secondary);margin:0 0 6px}
+.win{background:var(--surface-2);border:.5px solid var(--border-strong);border-radius:12px;overflow:hidden;font-size:13px;line-height:1.45}
+.bar{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:.5px solid var(--border);background:var(--surface-1)}
+.d3{width:10px;height:10px;border-radius:50%;background:var(--border-strong)}
+.hd{padding:14px 16px 10px}
+.hd h1{font-size:17px;font-weight:600;margin:0 0 2px}
+.hd p{margin:0;color:var(--text-secondary)}
+.scroll{max-height:none;padding:0 16px 4px}
+.card{border:.5px solid var(--border-strong);border-radius:10px;margin:0 0 10px;overflow:hidden}
+.ch{display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--surface-1)}
+.ch b{font-size:14px}
+.pill{font-size:11px;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.ok{background:var(--bg-success);color:var(--text-success)}.warn{background:var(--bg-warning);color:var(--text-warning)}.ai{background:var(--bg-accent);color:var(--text-accent)}
+.sec{padding:8px 12px 10px}
+.sec h2{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin:0 0 4px}
+.it{display:flex;gap:8px;align-items:flex-start;padding:2px 0}
+.it i{font-size:15px;margin-top:1px;color:var(--text-success)}
+.stops{border-top:.5px solid var(--border-warning);background:var(--bg-warning)}
+.stops h2{color:var(--text-warning)}
+.stop{display:flex;gap:8px;align-items:flex-start;padding:4px 0}
+.stop>i{font-size:15px;margin-top:1px;color:var(--text-warning)}
+.where{font-weight:600}
+.why{color:var(--text-secondary)}
+.do{font-weight:500}
+.sub{font-size:12px;color:var(--text-muted)}
+code{font-family:var(--font-mono);font-size:12px}
+.claude{margin:4px 16px 12px;border:.5px solid var(--border);border-left:3px solid var(--fill-accent);border-radius:var(--radius);padding:10px 12px;background:var(--surface-1)}
+.claude .t{display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
+.claude .t b{font-size:13px}
+.claude .t .tot{margin-left:auto;font-weight:600}
+.claude table{border-collapse:collapse;width:100%;font-size:12px;margin:4px 0 6px}
+.claude td{padding:2px 0;vertical-align:top}
+.claude td.n{text-align:right;white-space:nowrap;padding-left:12px}
+.claude p{margin:4px 0 0;font-size:12px;color:var(--text-secondary)}
+.ft{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 16px;border-top:.5px solid var(--border)}
+.ft .note{font-size:12px;color:var(--text-muted);flex-basis:100%}
+button{font:inherit;font-size:13px;padding:5px 14px;border-radius:var(--radius);border:.5px solid var(--border-strong);background:var(--surface-2);color:var(--text-primary);cursor:pointer}
+button.primary{background:var(--fill-accent);border-color:var(--fill-accent);color:#fff;font-weight:500}
+.det{margin:0 16px 12px;font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;background:var(--surface-1);border-radius:var(--radius);padding:8px 10px;color:var(--text-secondary);display:none;max-height:220px;overflow:auto}
+.det.on{display:block}
+.idle{padding:0 16px 8px;font-size:12px;color:var(--text-muted)}
+main{max-width:720px}
+.ch input{width:15px;height:15px;margin:0;accent-color:var(--fill-accent)}
+.card.out .ch{opacity:.5}.card.out .sec{display:none}
+.card .outp{display:none}.card.out .outp{display:inline}.card.out .inp{display:none}
+.muted{background:var(--surface-1);color:var(--text-muted);border:.5px solid var(--border)}
+button:disabled{opacity:.45;cursor:default}
+h3{font-size:13px;margin:28px 0 6px}
+.lw .big{font-size:26px;font-weight:600;margin-right:10px}
+.track{height:8px;border-radius:4px;background:var(--fill-accent);margin:8px 0 6px}
+.cnt{display:flex;gap:16px;font-size:12px}.cnt .g{color:var(--text-success)}.cnt .w{color:var(--text-warning)}
+.earl{font-size:12px;color:var(--text-muted);margin-top:6px}
+table.rows{width:100%;border-collapse:collapse;margin:4px 0}
+table.rows td{padding:7px 6px;border-top:.5px solid var(--border);vertical-align:top}
+table.rows th{font-size:11px;color:var(--text-muted);text-align:left;padding:4px 6px;font-weight:500}
+.chip{display:inline-block;width:100%;height:6px;border-radius:3px;background:var(--text-success)}
+.chip.n{background:transparent;border:1px dashed var(--border-strong)}
+.st{text-align:right;white-space:nowrap}
+.tog{cursor:pointer;user-select:none;width:14px}
+.steps{font-size:12px;background:var(--surface-1);border-radius:6px;padding:6px 10px}
+.steps div{display:flex;justify-content:space-between;gap:12px}
+</style>
+</head>
+<body>
+<main>
+<p class="lbl">Spec land-pick-and-time, 2026-11-18. Data: the owner's build-199 screenshots. Untick a card to see the title, the button and the Claude Code panel follow; click ▸ in the second window to open a row.</p>
+
+<h3>(a) Land confirmation with a checkbox per repo (lab_hub unticked)</h3>
+<div class="win" role="dialog" aria-labelledby="t">
+  <div class="bar"><span class="d3"></span><span class="d3"></span><span class="d3"></span><span style="margin-left:8px;font-weight:500">Land</span></div>
+  <div class="hd"><h1 id="t">Land 6 repos</h1><p id="s"></p></div>
+  <div class="scroll" id="cards"></div>
+  <div class="claude" id="cl">
+    <div class="t"><b>Claude Code (model sonnet)</b><span class="tot" id="tot"></span></div>
+    <table><tr><td>1 branch may be sent to merge, up to $3 each</td><td class="n" id="mn"></td></tr></table>
+    <p>Code from these repos goes to Anthropic, as in any Claude Code session. Lab Hub runs each repo's tests itself; a merge that passes them lands and is pushed without review. A branch that fails or is archived is kept as a local tag archive/&lt;branch&gt;/&lt;date&gt;, never pushed.</p>
+  </div>
+  <div class="ft"><span class="note">Each step is checked again just before it runs. Nothing is forced. Cancel leaves everything as it is.</span>
+    <button>Show details</button><span style="flex:1"></span><button>Cancel</button><button class="primary" id="go">Land 6 repos</button></div>
+</div>
+
+<h3>(b) Land window after it finished</h3>
+<div class="win lw">
+  <div class="bar"><span class="d3"></span><span class="d3"></span><span class="d3"></span><span style="margin-left:8px;font-weight:500">Land</span></div>
+  <div class="hd">
+    <h1>Landed 5 repos</h1>
+    <div style="display:flex;align-items:baseline;flex-wrap:wrap;gap:4px"><span class="big">100%</span><span class="sub">15 of 15 steps finished</span><span style="margin-left:auto;font-weight:600">Took 14:22 · 13:55 to 14:09</span></div>
+    <div class="track"></div>
+    <div class="cnt"><span class="g">4 landed</span><span>0 running</span><span>0 waiting</span><span class="w">1 needs you</span></div>
+    <div class="earl">Earlier: 17 Nov 16:20 · 6 repos · 1:32:05 &nbsp;·&nbsp; 17 Nov 09:10 · 1 repo · 0:41</div>
+  </div>
+  <div style="padding:0 16px 8px">
+  <table class="rows">
+    <tr><th></th><th>Repo</th><th>Commit</th><th>Merge and test</th><th>Push</th><th>Tidy</th><th class="st">Status</th></tr>
+    <tr><td class="tog" data-r="r1">▾</td><td><b>sonar</b></td><td><span class="chip"></span></td><td><span class="chip n"></span></td><td><span class="chip"></span></td><td><span class="chip n"></span></td><td class="st"><span class="pill ok">Landed · 0:03</span></td></tr>
+    <tr id="r1"><td></td><td colspan="6"><div class="steps"><div><span>✓ Commit 1 changed tracked file</span><span>0s</span></div><div><span>✓ Push master</span><span>2s</span></div></div></td></tr>
+    <tr><td class="tog" data-r="r2">▸</td><td><b>sentinel</b></td><td><span class="chip"></span></td><td><span class="chip n"></span></td><td><span class="chip"></span></td><td><span class="chip n"></span></td><td class="st"><span class="pill ok">Landed · 0:03</span></td></tr>
+    <tr id="r2" hidden><td></td><td colspan="6"><div class="steps"><div><span>✓ Commit 1 changed tracked file</span><span>0s</span></div><div><span>✓ Push main</span><span>2s</span></div></div></td></tr>
+    <tr><td class="tog">▸</td><td><b>kaila</b></td><td><span class="chip"></span></td><td><span class="chip n"></span></td><td><span class="chip"></span></td><td><span class="chip n"></span></td><td class="st"><span class="pill ok">Landed · 0:03</span></td></tr>
+    <tr><td class="tog">▸</td><td><b>foundry</b></td><td><span class="chip"></span></td><td><span class="chip n"></span></td><td><span class="chip"></span></td><td><span class="chip n"></span></td><td class="st"><span class="pill ok">Landed · 0:04</span></td></tr>
+    <tr><td class="tog" data-r="r5">▸</td><td><b>syndustryx</b><div class="sub" style="color:var(--text-warning)">1 branch needs your decision</div></td><td><span class="chip"></span></td><td><span class="chip"></span></td><td><span class="chip"></span></td><td><span class="chip n"></span></td><td class="st"><span class="pill warn">Needs you · 14:04</span></td></tr>
+    <tr id="r5" hidden><td></td><td colspan="6"><div class="steps"><div><span>✓ Commit 1 changed tracked file</span><span>0s</span></div><div><span>✗ Merge feature-x (Claude Code)</span><span>8:12</span></div><div><span>✓ Push main</span><span>3s</span></div><div><span>✓ Archive feature-x</span><span>5:49</span></div></div></td></tr>
+  </table>
+  </div>
+  <div class="ft"><span style="flex:1"></span><button>Ask Claude</button><button>Close</button></div>
+</div>
+</main>
+<script>
+const repos=[
+ ["sonar",["Commit open changes in 1 worktree","Push master to origin"],["Main checkout · 5 processes running in it, including zsh, bash and python3.11","Close those terminals or sessions, then Land again."],0],
+ ["lab_hub",["Commit open changes in 1 worktree","Push main to origin","Delete 5 landed branches"],["Main checkout · 42 processes running in it, including node, gk and gk_3_1_80","Close those terminals or sessions, then Land again."],0],
+ ["sentinel",["Commit open changes in 1 worktree","Push main to origin"],["Main checkout · zsh running in it","Close that terminal or session, then Land again."],0],
+ ["kaila",["Commit open changes in 1 worktree","Push main to origin"],null,0],
+ ["foundry",["Commit open changes in 1 worktree","Push main to origin"],null,0],
+ ["syndustryx",["Commit open changes in 1 worktree","Merge 1 branch with Claude Code","Push main to origin"],null,3]];
+const box=document.getElementById('cards');
+const esc=t=>t.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+repos.forEach(([n,items,stop,usd],i)=>{
+ const c=document.createElement('div');c.className='card';c.dataset.i=i;
+ c.innerHTML=`<div class="ch"><input type="checkbox" checked aria-label="Land ${esc(n)}"><b>${esc(n)}</b>
+  <span class="inp"><span class="pill ok">${items.length} steps</span>${stop?' <span class="pill warn">stops at 1</span>':''}${usd?` <span class="pill ai">Claude Code · up to $${usd}</span>`:''}</span>
+  <span class="outp"><span class="pill muted">Left out</span></span></div>
+  <div class="sec"><h2>Will do</h2>${items.map(t=>`<div class="it">✓ <span>${esc(t)}</span></div>`).join('')}</div>
+  ${stop?`<div class="sec stops"><h2>⚠ Only you can clear</h2><div class="where">${esc(stop[0])}</div><div class="do" style="color:var(--text-warning)">${esc(stop[1])}</div></div>`:''}`;
+ c.querySelector('input').onchange=e=>{c.classList.toggle('out',!e.target.checked);sync()};
+ box.appendChild(c)});
+function sync(){
+ const on=[...box.children].filter(c=>!c.classList.contains('out')).map(c=>repos[c.dataset.i]);
+ const stops=on.filter(r=>r[2]).length, usd=on.reduce((a,r)=>a+r[3],0);
+ const t=document.getElementById('t'),s=document.getElementById('s'),go=document.getElementById('go');
+ if(!on.length){t.textContent='Nothing chosen';s.textContent='Tick a repo to land it.';go.textContent='Land';go.disabled=true}
+ else{go.disabled=false;t.textContent=on.length==1?'Land '+on[0][0]:`Land ${on.length} repos`;go.textContent=on.length==1?'Land':`Land ${on.length} repos`;
+  s.textContent=stops?`Land does everything it can, then stops at ${stops} thing${stops>1?'s':''} only you can clear. You can clear ${stops>1?'them':'it'} now and press Land after, or press Land and clear ${stops>1?'them':'it'} later.`:'Land does all of it; nothing needs you.'}
+ document.getElementById('cl').style.display=usd?'':'none';
+ document.getElementById('tot').textContent=`at most $${usd} in total`;
+ document.getElementById('mn').textContent='$'+usd;
+}
+box.children[1].querySelector('input').click();
+document.querySelectorAll('.tog').forEach(td=>td.onclick=()=>{const r=document.getElementById(td.dataset.r);if(r){r.hidden=!r.hidden;td.textContent=r.hidden?'▸':'▾'}});
+</script>
+</body>
+</html>

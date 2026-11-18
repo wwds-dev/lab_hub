@@ -1194,30 +1194,45 @@ class AppsTab(TilePage):
                     card.set_landing("Looking at the repo…")
             self._update_land_controls()
 
-    def confirm_land(self, plans: list[land.LandPlan]) -> bool:
-        """The one confirmation: what will happen, per repo (tests replace this)."""
+    def confirm_land(self, plans: list[land.LandPlan]) -> list[land.LandPlan]:
+        """The one confirmation: what will happen, per repo, with a tick box per
+        repo. Returns the plans to land, [] for Cancel (tests replace this;
+        True still means all of them)."""
         from .land_confirm import LandConfirmDialog
 
-        return LandConfirmDialog(plans, self).exec() == QDialog.DialogCode.Accepted
+        dialog = LandConfirmDialog(plans, self)
+        return dialog.chosen() if dialog.exec() == QDialog.DialogCode.Accepted else []
 
     def _land_planned(self, plans) -> None:
         try:
-            go = all(p.nothing for p in plans) or self.confirm_land(plans)
+            answer = True if all(p.nothing for p in plans) else self.confirm_land(plans)
         except Exception:  # noqa: BLE001 - never leave the tiles on "Looking…"
-            go = False
-        if not go:
-            for plan in plans:
+            answer = False
+        if answer is True:
+            picked = list(plans)
+        elif isinstance(answer, (list, tuple)):
+            ids = {id(p) for p in answer}
+            # Repos with nothing to land are not cards; they keep their row (§8.1).
+            picked = [p for p in plans if id(p) in ids or (p.nothing and ids)]
+        else:
+            picked = []
+        for plan in plans:  # left out or cancelled: the tile goes back at once
+            if not any(plan is p for p in picked):
                 card = self._card_for(plan.name)
                 if card is not None:
                     card.set_landing(None)
+                self._landing_cards.pop(plan.name, None)
+        if not picked:
             self._landing_cards.clear()
             self._update_land_controls()
             return
+        from_land_all = len(plans) > 1
+        plans = picked
         # The window opens after the confirmation. A single repo with nothing
         # to do (no confirmation either) says so on its tile alone, as before;
         # Land all always gets the window, whose end state is its summary.
         self._land_window_owns_run = False
-        if self.lander.run(plans) and (len(plans) > 1 or any(p.actions for p in plans)):
+        if self.lander.run(plans) and (from_land_all or any(p.actions for p in plans)):
             self._open_land_window(plans)
         self._update_land_controls()
 

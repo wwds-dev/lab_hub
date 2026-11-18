@@ -324,7 +324,12 @@ a few) and the one thing to do. Repos with nothing to land share one line. One
 **Claude Code** panel gives the model, what may be sent, each cap and one
 total. **Show details** holds the full text, with every path and process id.
 Return presses nothing; Escape cancels (spec `docs/specs/land-confirm-dialog.md`,
-`ui/land_confirm.py`). **Stop landing** ends a running
+`ui/land_confirm.py`). With two or more repos, each card has a tick box, on by
+default: untick a repo to leave it out of this Land. Its card folds to one
+"Left out" line, its tile goes back at once, and the title, the stop count, the
+Claude Code panel, Details and the **Land N repos** button count only the ticked
+repos. Every Land starts with every repo ticked (spec
+`docs/specs/land-pick-and-time.md`). **Stop landing** ends a running
 Claude Code or test step and skips the rest; work already landed stays landed.
 Only one Land runs at a time per page, and a repo is claimed while it lands, so
 the same repo can never be landed twice at once. `lab_hub/land.py`,
@@ -380,7 +385,13 @@ window is not modal: you can go on using Lab Hub, and closing it (or **Hide**)
 only hides it. Landing goes on, the tiles keep their line, and **Show
 progress** beside Stop landing on the page brings the window back while the
 Land runs. The window's own **Stop landing** does the same as the page's. At
-the end it states the outcome in one line and keeps the rows. For Land all
+the end it states the outcome in one line and keeps the rows, and it keeps the
+time: "Took 14:22 · 13:55 to 14:09", with each repo's own time in its status
+("Landed · 2:14", "Needs you · 0:41") and ▸ before a repo to open its steps with
+their times. Under the counts, "Earlier:" names the last three finished Lands
+and how long each took, from `~/Library/Application Support/Lab Hub/land-runs.json`
+(date, repo counts and seconds only; the last 10 kept; ADR 0005). Times of an
+hour or more read `1:32:05`. For Land all
 over more than one repo that line is the summary that used to be a separate box ("Landed N of M
 repos.", then one line per repo that did not land), and a hidden window comes
 back to show it. A single tile's Land with nothing to do asks nothing and opens
