@@ -89,6 +89,10 @@ def _set_text(widget: QLabel, text: str) -> None:
         widget.setText(text)
 
 
+def land_n(count: int) -> str:
+    return f"{count} branch" if count == 1 else f"{count} branches"
+
+
 def _clear(layout) -> None:
     while layout.count():
         item = layout.takeAt(0)
@@ -585,6 +589,9 @@ class _Run:
         button.hide()
         button.clicked.connect(lambda _=False: self.handoff_requested.emit())
         self.ask_claude_button = button
+        # What Ask Claude did, where it can be read at any step (review P2-3).
+        self.handoff_note = _label("", "hint", wrap=True)
+        self.handoff_note.hide()
         self.handoff_paths: dict = {}  # row name -> its folder (or None)
         self.handoff_commands: dict = {}  # row name -> the command the window shows
         self._handoff_open = False  # the step allows it (Review, Done, Land's end)
@@ -609,10 +616,19 @@ class _Run:
         if self._handoff_busy:
             tip = f"Not now: {self._handoff_busy}."
         else:
-            repos = len({str(self.handoff_paths.get(r.name)) for r in rows})
-            tip = (f"Open a Claude Code session for what is left here ({repos} "
-                   f"repo{'' if repos == 1 else 's'}). Each session is paid; you confirm first.")
+            n = len(rows)
+            tip = (f"Open a Claude Code session per repo for the {n} row"
+                   f"{'' if n == 1 else 's'} Lab Hub could not clear. Each session is paid; "
+                   "you confirm first.")
         button.setToolTip(_plain_tip(tip))
+
+    def show_handoff_note(self, line: str) -> None:
+        """Say what Ask Claude did, under the rows, and in the live output."""
+        self.handoff_note.setText(line)
+        self.handoff_note.show()
+        if self.model is not None:
+            self.model.on_output(line)
+            self.changed()
 
     def _shown(self) -> None:
         if self.model is not None:
@@ -658,7 +674,8 @@ class LandWindow(QWidget, _Run):
         self.stop_button.clicked.connect(self._stop)
         buttons.addWidget(self.note)
         buttons.addWidget(self._make_handoff_button())
-        buttons.addStretch(1)
+        buttons.addWidget(self.handoff_note, 1)
+        buttons.addStretch(1)  # keeps Hide and Stop right while the note is hidden
         buttons.addWidget(self.hide_button)
         buttons.addWidget(self.stop_button)
         layout.addWidget(footer)
@@ -735,19 +752,20 @@ class LandWindow(QWidget, _Run):
         rows = []
         for view in self.model.snapshot().rows:
             result = self.results.get(view.name)
-            if (view.icon == "done" and result is not None
-                    and getattr(result, "archived", 0)):
+            if result is not None and getattr(result, "stopped", False):
+                continue  # the owner stopped it: not Claude's to finish (review P2-1)
+            archived = getattr(result, "archived", 0) if result is not None else 0
+            if view.icon == "done" and archived:
                 view = progress.RowView(view.name, view.icon, status=result.line,
                                         reason="kept as local archive/<branch>/<date> "
                                                "tags; Review branches can restore them")
+            elif archived and handoff.qualifies(view):  # review P3-6
+                view = progress.RowView(
+                    view.name, view.icon, status=view.status,
+                    reason=f"{view.reason} · {land_n(archived)} archived".lstrip(" ·"))
             if handoff.qualifies(view):
                 rows.append(view)
         return rows
-
-    def say(self, line: str) -> None:
-        if self.model is not None:
-            self.model.on_output(line)
-            self.changed()
 
     def _stop(self) -> None:
         self.stop_requested.emit()
@@ -883,7 +901,8 @@ class BuildCheckWindow(QDialog, _Run):
             if button is not None:
                 self._buttons.addWidget(button)
         self._buttons.addWidget(self._make_handoff_button())
-        self._buttons.addStretch(1)
+        self._buttons.addWidget(self.handoff_note, 1)
+        self._buttons.addStretch(1)  # keeps Close and Update now right
         self._buttons.addWidget(self.close_button)
         if update is not None:
             update.setObjectName("primary")

@@ -621,6 +621,10 @@ class AppsTab(TilePage):
         # Land jobs on every page, for Ask Claude (spec claude-handoff §4.3);
         # the main window replaces it too. Tools running do not count.
         self.land_jobs: Callable[[], list[str]] = self._own_busy_reasons
+        # Called when a Land starts or ends here; the main window makes it
+        # refresh Ask Claude on every page (review P2-2).
+        self.land_state_changed: Callable[[], None] = self.refresh_handoff_buttons
+        self._build_window: BuildCheckWindow | None = None  # while Check builds is open
         # The Land window (spec progress-windows): opened after the
         # confirmation, fed from the same signals as the tiles. Closing it
         # only hides it; Show progress brings it back while Land runs.
@@ -789,12 +793,15 @@ class AppsTab(TilePage):
         window = BuildCheckWindow(view, root, self)
         window.copy_requested.connect(self.copy_commands)
         # Ask Claude: each row's folder and command, in the window's names.
+        # Keyed as the rows are: `plain` names (review P3-5).
         for row, item in zip(report, view.items):
-            window.handoff_paths[item.name] = row.project or launcher.source_dir(row.app, root)
+            name = progress.plain(item.name)
+            window.handoff_paths[name] = row.project or launcher.source_dir(row.app, root)
             if item.command:
-                window.handoff_commands[item.name] = item.command
+                window.handoff_commands[name] = item.command
         window.handoff_requested.connect(self._ask_claude_clicked)
         window.set_handoff_busy("; ".join(self.land_jobs()))  # no rebuild yet at Review
+        self._build_window = window
         try:
             window.ask()
             clicked = window.choice
@@ -811,6 +818,7 @@ class AppsTab(TilePage):
             if clicked == "Update now":
                 self.run_updates(commands, by_hand, window=window)
         finally:
+            self._build_window = None
             if window.isVisible():
                 window.done(0)
             window.deleteLater()
@@ -921,6 +929,12 @@ class AppsTab(TilePage):
             return "Update now is rebuilding"
         return "; ".join(self.land_jobs())
 
+    def refresh_handoff_buttons(self) -> None:
+        """Ask Claude's enabled state on this page's open windows (spec §4.3)."""
+        for window in (self._build_window, self.land_window):
+            if window is not None:
+                window.set_handoff_busy(self._handoff_jobs(window))
+
     def _ask_claude_clicked(self) -> None:
         # A bound slot, not a closure over the window: the window is a child
         # that is deleted while the page lives on.
@@ -937,24 +951,27 @@ class AppsTab(TilePage):
             QMessageBox.information(window, "Ask Claude",
                                     f"Not now: {busy}. Try again when it has finished.")
             return
-        claude = claude_resolve.find_claude()
+        where = "Check builds" if isinstance(window, BuildCheckWindow) else "Land"
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            claude = claude_resolve.find_claude()  # runs `claude --version` (review P3-2)
+            if claude is None:
+                found, unplaced, items = [], [], []
+            else:
+                found, unplaced = handoff.collect(window.handoff_rows(), window.handoff_paths,
+                                              window.handoff_commands)
+                listing = land_resolve.cwd_listing() if found else None
+                items = []
+                for h in found:
+                    ctx = handoff.context(h, listing)
+                    items.append((h, ctx, handoff.prompt(h, ctx, where)))
+        finally:
+            QApplication.restoreOverrideCursor()
         if claude is None:
             QMessageBox.warning(window, "Ask Claude",
                                 "Claude Code was not found on this Mac. Install it and sign "
                                 "in, then try again.")
             return
-        where = "Check builds" if isinstance(window, BuildCheckWindow) else "Land"
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        try:
-            found, unplaced = handoff.collect(window.handoff_rows(), window.handoff_paths,
-                                              window.handoff_commands)
-            listing = land_resolve.cwd_listing() if found else None
-            items = []
-            for h in found:
-                ctx = handoff.context(h, listing)
-                items.append((h, ctx, handoff.prompt(h, ctx, where)))
-        finally:
-            QApplication.restoreOverrideCursor()
         if not items:
             QMessageBox.information(window, "Ask Claude",
                                     "None of these rows has a folder a session could work in: "
@@ -969,14 +986,18 @@ class AppsTab(TilePage):
             return
         texts = {h.path: text for h, _ctx, text in items}
         opener = handoff.Launcher(launcher.run_in_terminal, config.SUPPORT_DIR)
-        failed = []
+        failed, opened = [], []
         for h in chosen:
             try:
                 opener.launch(claude, h, texts[h.path])
             except Exception as error:  # noqa: BLE001 - say it; the other repos still open
                 failed.append(f"{h.repo}: {error}")
                 continue
-            window.say(f"Opened Claude Code for {h.repo} in Terminal.")
+            opened.append(h.repo)
+        if opened:
+            window.show_handoff_note(f"Opened Claude Code in Terminal for {', '.join(opened)}. "
+                                     "Press Refresh when the session is done.")
+            self.refresh()  # spec §3
         if failed:
             QMessageBox.warning(window, "Ask Claude",
                                 "Could not open a session for:\n" + "\n".join(failed))
@@ -989,8 +1010,9 @@ class AppsTab(TilePage):
         try:
             accepted = dialog.exec() == QDialog.DialogCode.Accepted
             if dialog.copied is not None:
-                parent.say(f"Copied the prompt for {dialog.copied.repo}: paste it into the "
-                           "Claude Code session already open there.")
+                parent.show_handoff_note(
+                    f"Copied the prompt for {dialog.copied.repo}: paste it into the Claude "
+                    "Code session already open there.")
             return dialog.chosen() if accepted else []
         finally:
             dialog.deleteLater()
@@ -1117,8 +1139,7 @@ class AppsTab(TilePage):
             self.land_all_button.setText(f"Land all ({n})" if n else "Land all")
             self.land_all_button.setEnabled(bool(n) and not busy)
         self.stop_land_button.setVisible(self.lander.running)
-        if self.land_window is not None:
-            self.land_window.set_handoff_busy(self._handoff_jobs(self.land_window))
+        self.land_state_changed()
         self.show_land_button.setVisible(self.lander.running and self._run_window() is not None)
         for card in self.cards:
             card.set_land_enabled(not busy)

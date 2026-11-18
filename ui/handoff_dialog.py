@@ -26,8 +26,14 @@ from lab_hub import handoff
 from .progress_window import _label, _plain_tip
 
 WIDTH = 600
+FOLDER_W = 320  # pixels for the folder beside the name
 COST = ("Each ticked repo opens its own Claude Code session on your plan. A session costs "
         "whatever it uses until you close it; Lab Hub sets no cap.")
+
+
+def _elided(text: str, widget: QWidget, width: int = FOLDER_W) -> str:
+    """A long folder cut in the middle, so both ends stay readable."""
+    return widget.fontMetrics().elidedText(text, Qt.TextElideMode.ElideMiddle, width)
 
 
 class Block(QFrame):
@@ -42,14 +48,18 @@ class Block(QFrame):
         box.setContentsMargins(14, 10, 14, 12)
         box.setSpacing(4)
         head = QHBoxLayout()
-        self.tick = QCheckBox(h.repo)
+        # The name is a label, not the box's text: a box would read "&" in a
+        # repo's name as a shortcut, and a label can be bold (review P3-3).
+        self.tick = QCheckBox()
+        self.tick.setAccessibleName(h.repo)
         self.tick.setChecked(not ctx.claude)
         self.tick.toggled.connect(dialog.recount)
         head.addWidget(self.tick)
-        folder = _label(str(h.path), "hint")
-        folder.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        folder.setToolTip(_plain_tip(str(h.path)))
-        head.addWidget(folder, 1)
+        self.name = _label(h.repo, "appName")
+        head.addWidget(self.name)
+        self.folder = _label(_elided(str(h.path), self), "hint")
+        self.folder.setToolTip(_plain_tip(str(h.path)))
+        head.addWidget(self.folder, 1)
         self.copy_button = None
         if ctx.claude:
             self.copy_button = QPushButton("Copy prompt")

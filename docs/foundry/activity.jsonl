@@ -169,3 +169,6 @@
 {"ts": "2026-11-17T21:19:20", "phase": "architect", "state": "done", "spec": "claude-handoff"}
 {"ts": "2026-11-17T21:20:25", "phase": "build", "state": "start", "spec": "claude-handoff"}
 {"ts": "2026-11-17T23:15:10", "phase": "build", "state": "done", "spec": "claude-handoff"}
+{"ts": "2026-11-17T23:35:00", "phase": "review", "state": "start", "spec": "claude-handoff"}
+{"ts": "2026-11-17T23:54:53", "phase": "review", "state": "done", "spec": "claude-handoff"}
+{"ts": "2026-11-18T00:40:18", "phase": "build", "state": "done", "spec": "claude-handoff"}

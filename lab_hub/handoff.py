@@ -45,7 +45,7 @@ Hard limits for this session (set by Lab Hub; the owner approved them):
 1. Never sign or record a legal or tax sign-off. Never run `legal_gate.py sign`, never edit `docs/legal/signoff.jsonl`, never record an approval for the owner (`record_approval.py`).
 2. Never accept anything on the owner's behalf: a gate, a contract, terms, a client's acceptance.
 3. Never push, merge into the default branch, tag a release, or install, unless the owner says yes in this session for that step.
-4. Work only in this repo's checkout and its own worktrees. Never another repo's.
+4. Work only in this repo's checkout, its own worktrees, and a folder a row's own command names (Lab Hub added it to this session). Never another repo's.
 5. Do not run Lab Hub's Update now or Land, and do not run `build_app.sh` while another build is running.
 6. Anything only the owner can do goes into a short list for the owner at the end. Do not attempt it: a legal or tax sign-off, a password, a payment, an App Store or notarisation login, a choice the spec leaves to the owner."""
 
@@ -62,16 +62,28 @@ SETTINGS = {
         ],
         "deny": [
             "Bash(*legal_gate.py sign*)",
-            "Bash(*record_approval.py*)",
+            "Bash(*legal_gate*sign*)",
+            "Bash(*record_approval*)",
+            "Bash(*signoff.jsonl*)",
             "Edit(**/docs/legal/signoff.jsonl)",
             "Write(**/docs/legal/signoff.jsonl)",
         ],
     }
 }
 
+# Only user and project settings: a repo's settings.local.json can allow broad
+# commands (`python3 -c '…'`) that would run around the rules above (review
+# P1-1). Every lab repo's checked-in settings.json holds hooks only.
+SETTING_SOURCES = "user,project"
+
+ARCHIVED_NOTE = ("Archived branches are information only: you may propose restoring one "
+                 "(Lab Hub's Review branches, or `git branch <name> <archive tag>`), but "
+                 "never restore one without the owner's yes.")
+
 FOLDER = "claude-handoff"
 _STAMP = re.compile(r"^\d{8}T\d{6}Z-\d+$")
-KEEP_SECONDS = 24 * 3600
+KEEP_SECONDS = 24 * 3600  # a finished launch's folder
+LIVE_SECONDS = 30 * 24 * 3600  # one whose .command is still there (session open)
 
 
 @dataclass(frozen=True)
@@ -93,8 +105,9 @@ class Item:
 class Handoff:
     """Everything for one repo's session."""
     repo: str  # the checkout folder's name
-    path: Path  # the repo's top level: the session's working folder
+    path: Path  # the repo's main checkout: the session's working folder
     items: tuple[Item, ...]
+    extra_dirs: tuple[Path, ...] = ()  # folders a row's own command works in (--add-dir)
 
 
 @dataclass(frozen=True)
@@ -119,9 +132,25 @@ def qualifies(row) -> bool:
 
 
 def top_level(path: Path) -> Path:
-    """The git top level of `path`, or `path` itself when git cannot say."""
+    """The main checkout of the repo `path` is in (a worktree gives its main
+    checkout), or `path` itself when git cannot say."""
+    rc, out, _ = rt.git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if rc == 0 and out and Path(out).name == ".git":
+        return Path(out).parent
     rc, out, _ = rt.git(path, "rev-parse", "--show-toplevel")
     return Path(out) if rc == 0 and out else path
+
+
+def command_dir(command: str) -> Path | None:
+    """The folder a row's command starts in (`cd <folder> && …`), if it exists."""
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return None
+    if len(words) < 2 or words[0] != "cd":
+        return None
+    folder = Path(words[2] if words[1] == "--" and len(words) > 2 else words[1]).expanduser()
+    return folder.resolve() if folder.is_absolute() and folder.is_dir() else None
 
 
 def collect(rows, paths: dict[str, Path | None],
@@ -131,6 +160,7 @@ def collect(rows, paths: dict[str, Path | None],
     order, and the names of rows with no folder (not sent)."""
     commands = commands or {}
     groups: dict[Path, list[Item]] = {}
+    extra: dict[Path, list[Path]] = {}
     unplaced: list[str] = []
     for row in rows:
         if not qualifies(row):
@@ -140,9 +170,16 @@ def collect(rows, paths: dict[str, Path | None],
             unplaced.append(row.name)
             continue
         root = Path(top(Path(path))).resolve()
+        command = commands.get(row.name, "")
         groups.setdefault(root, []).append(Item(
-            row.name, row.status, row.reason, row.detail, commands.get(row.name, "")))
-    return [Handoff(root.name, root, tuple(items)) for root, items in groups.items()], unplaced
+            row.name, row.status, row.reason, row.detail, command))
+        folder = command_dir(command) if command else None
+        if folder is not None and folder != root and root not in folder.parents:
+            extra.setdefault(root, [])
+            if folder not in extra[root]:
+                extra[root].append(folder)
+    return [Handoff(root.name, root, tuple(items), tuple(extra.get(root, ())))
+            for root, items in groups.items()], unplaced
 
 
 def worktrees(path: Path) -> list[Path]:
@@ -152,6 +189,16 @@ def worktrees(path: Path) -> list[Path]:
     if rc == 0:
         found += [Path(line[9:]) for line in out.splitlines() if line.startswith("worktree ")]
     return list(dict.fromkeys(p.resolve() for p in found))
+
+
+def _nested_repo(folder: Path, here: Path) -> bool:
+    """`here` is inside another repo nested in `folder` (a `.git` between them)."""
+    for step in [here, *here.parents]:
+        if step == folder:
+            return False
+        if (step / ".git").exists():
+            return True
+    return False
 
 
 def _inside(cwd: Path, folders: list[Path]) -> Path | None:
@@ -164,6 +211,8 @@ def _inside(cwd: Path, folders: list[Path]) -> Path | None:
         if here == folder or folder in here.parents:
             if best is None or len(folder.parts) > len(best.parts):
                 best = folder  # the innermost worktree it is in
+    if best is not None and _nested_repo(best, here):
+        return None  # a repo inside this one (the lab root holds the apps): not ours
     return best
 
 
@@ -201,6 +250,11 @@ def prompt(handoff: Handoff, ctx: Context, window: str, when: datetime | None = 
         out.append(f"- {item.line}")
         if item.command:
             out.append(f"  Command Lab Hub shows for it: {item.command}")
+    if any("archived" in item.status for item in handoff.items):
+        out.append(ARCHIVED_NOTE)
+    if handoff.extra_dirs:
+        out.append("Lab Hub also added the folder a row's command works in: "
+                   + ", ".join(str(d) for d in handoff.extra_dirs) + ".")
     out.append("")
     if not ctx.known:
         out.append("Lab Hub could not tell what else is running in this repo (lsof failed). "
@@ -229,8 +283,10 @@ def command_line(claude: str, handoff: Handoff, folder: Path) -> str:
     """The one line the `.command` file runs. Repo text reaches `claude` only
     through `$(cat …)`; every other value is quoted (ADR 0004 §2)."""
     q = shlex.quote
+    add = "".join(f"--add-dir {q(str(d))} " for d in handoff.extra_dirs)
     return (f"cd -- {q(str(handoff.path))} && {q(claude)} --permission-mode manual "
-            f"--settings {q(str(folder / 'settings.json'))} "
+            f"--setting-sources {SETTING_SOURCES} "
+            f"--settings {q(str(folder / 'settings.json'))} {add}"
             f"--append-system-prompt \"$(cat -- {q(str(folder / 'limits.md'))})\" "
             f"-n {q('Lab Hub: ' + handoff.repo)} "
             f"\"$(cat -- {q(str(folder / 'prompt.md'))})\"")
@@ -243,11 +299,16 @@ def _write(path: Path, text: str) -> None:
 
 
 def _prune(base: Path, now: float) -> None:
-    """Remove launch folders older than a day: only names Lab Hub makes."""
+    """Remove old launch folders, only names Lab Hub makes. A folder whose
+    `.command` file is still there belongs to a session still open (the file
+    removes itself when `claude` exits): it stays up to 30 days (review P2-6)."""
     for old in base.iterdir():
         try:
-            if (_STAMP.match(old.name) and not old.is_symlink() and old.is_dir()
-                    and now - old.stat().st_mtime > KEEP_SECONDS):
+            if not _STAMP.match(old.name) or old.is_symlink() or not old.is_dir():
+                continue
+            age = now - old.stat().st_mtime
+            live = any(old.glob("*.command"))
+            if age > (LIVE_SECONDS if live else KEEP_SECONDS):
                 shutil.rmtree(old)
         except OSError:
             pass  # a folder that cannot go stays; the next launch tries again

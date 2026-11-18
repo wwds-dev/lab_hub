@@ -1,6 +1,6 @@
 # ADR 0004: Ask Claude opens `claude` in Terminal, one session per repo, with per-session permission rules
 
-Status: accepted by the owner 2026-11-17 ("Approve architecture").
+Status: accepted by the owner 2026-11-17 ("Approve architecture"); amended 2026-11-18 after review (setting sources, more deny rules, `--add-dir`), approved by the owner ("Fix all as proposed").
 Spec: `docs/specs/claude-handoff.md` §10.
 
 ## Context
@@ -24,9 +24,12 @@ The hard limits in spec §4.2 must hold even if the session ignores its prompt. 
 3. **The limits are enforced three ways.**
    - **As text:** the limits are appended to the system prompt (`--append-system-prompt`) and repeated in the task.
    - **Every command asks:** the session runs in `--permission-mode manual`.
+   - **Only user and project settings** (`--setting-sources user,project`). A repo's `settings.local.json` can allow `python3 -c '…'`, which would run around every rule below; every lab repo's checked-in `settings.json` holds hooks only (checked 2026-11-17), so the Foundry hooks still run.
    - **A per-session settings file** (`--settings`):
      - `ask` rules for push, merge, tag and install, so an allow rule in the owner's own settings cannot let them run without asking;
-     - `deny` rules for the sign-off and approval commands and for writing `docs/legal/signoff.jsonl`, which no answer in the session can override.
+     - `deny` rules for the sign-off and approval commands, any command naming `signoff.jsonl`, and the Edit and Write tools on it, which no answer in the session can override.
+   - **What the rules cannot hold.** A command that reaches git or a sign-off file indirectly (a script, inline Python) matches no rule. `manual` mode still asks the owner before it runs.
+4b. **A folder outside the repo, only from Lab Hub's own command.** When a row's command starts with `cd <folder>` outside the repo (Provisio's release clone), that folder is added with `--add-dir` and named in the prompt.
 4. **One session per resolved git top level**, started with `cd -- <repo>`. Apps that share a repo share its session. Nothing is ever started in the lab root on behalf of several repos.
 5. **No tracking.**
    - Lab Hub keeps no record of a session it started and never reads one back.
@@ -46,7 +49,7 @@ The hard limits in spec §4.2 must hold even if the session ignores its prompt. 
   - the clean-up pattern;
   - that `deny` and `ask` hold in the real CLI (Verify on the real Mac: a `git push` in an opened session asks; `legal_gate.py sign` is refused).
 - **Coupling to Claude Code's flags.**
-  - The design depends on `--permission-mode manual`, `--settings`, `--append-system-prompt`, `-n` and the positional prompt.
+  - The design depends on `--permission-mode manual`, `--setting-sources`, `--settings`, `--add-dir`, `--append-system-prompt`, `-n` and the positional prompt.
   - If a flag is renamed, the open fails visibly: the Terminal window shows the CLI's error, and nothing runs without permission.
   - The radar check at Release re-reads `claude --help`.
 - **Late clashes.** A session can still meet a Land or Update now started later by the owner. Those runs keep their existing guards.

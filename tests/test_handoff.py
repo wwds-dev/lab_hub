@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import stat
 import subprocess
 import sys
@@ -40,7 +41,7 @@ def row(name, status, icon="needs", reason="", detail=""):
     (row("A", "Landed · 2 branches archived", icon="done"), True),
     (row("OK", "Landed · 0:42", icon="done"), False),
     (row("N", "Nothing to land", icon="nothing"), False),
-    (row("S", "Not reached", icon="nothing"), False),  # the owner stopped Land
+    (row("S", "Not reached", icon="nothing"), False),  # Land never reached it
     (row("T", "Needs Terminal", icon="terminal"), False),  # Update now opens it
     (row("M", "Not installed", icon="unknown"), False),
     (row("O", "Out of date", icon="needs"), False),  # Update now rebuilds it
@@ -143,8 +144,12 @@ def test_settings_ask_before_push_and_deny_sign_off():
     rules = handoff.SETTINGS["permissions"]
     assert "Bash(git push:*)" in rules["ask"] and "Bash(git merge:*)" in rules["ask"]
     assert "Bash(*legal_gate.py sign*)" in rules["deny"]
-    assert "Bash(*record_approval.py*)" in rules["deny"]
+    assert "Bash(*legal_gate*sign*)" in rules["deny"]
+    assert "Bash(*record_approval*)" in rules["deny"]
+    assert "Bash(*signoff.jsonl*)" in rules["deny"]  # a shell write as well as Edit/Write
     assert "Edit(**/docs/legal/signoff.jsonl)" in rules["deny"]
+    # The repo's settings.local.json (broad `python3 -c` allows) is never loaded.
+    assert handoff.SETTING_SOURCES == "user,project"
 
 
 def _launcher(tmp_path, calls, clock=lambda: 1_763_390_000.0):
@@ -226,7 +231,103 @@ def test_a_hostile_repo_name_reaches_claude_as_data_not_shell(tmp_path):
     got = json.loads(out.read_text())
     assert got["cwd"] == str(repo.resolve()) or got["cwd"] == str(repo)
     assert got["argv"] == ["--permission-mode", "manual",
+                           "--setting-sources", "user,project",
                            "--settings", str(folder / "settings.json"),
                            "--append-system-prompt", handoff.LIMITS,
                            "-n", f"Lab Hub: {repo.name}", task]
     assert not list(tmp_path.rglob("PWNED*"))
+
+
+# ------------------------------------------------------------- review fixes
+def test_a_rows_command_folder_outside_the_repo_is_added_to_the_session(lab, tmp_path):
+    clone = tmp_path / "rel clone"
+    clone.mkdir()
+    rows = [row("Provisio", "Needs you", reason="Move its release clone first.")]
+    command = f"cd {shlex.quote(str(clone))} && git pull --ff-only"
+    [h], _ = handoff.collect(rows, {"Provisio": lab}, {"Provisio": command})
+    assert h.extra_dirs == (clone.resolve(),)
+    line = handoff.command_line("/bin/claude", h, tmp_path / "f")
+    assert f"--add-dir {shlex.quote(str(clone.resolve()))} " in line
+    assert "Lab Hub also added the folder" in handoff.prompt(h, handoff.Context(), "X", WHEN)
+    # A command inside the repo, or not starting with cd, adds nothing.
+    for inside in (f"cd {lab} && ./build_app.sh", "./build_app.sh", "cd relative && x"):
+        [h], _ = handoff.collect(rows, {"Provisio": lab}, {"Provisio": inside})
+        assert h.extra_dirs == ()
+
+
+def test_a_worktree_groups_under_its_main_checkout(lab):
+    sh(lab, "branch", "feat")
+    wt = add_worktree(lab, "feat", lab.parent / "wt")
+    got, _ = handoff.collect([row("A", "Needs you"), row("B", "Needs you")],
+                             {"A": lab, "B": wt})
+    assert [(h.path, len(h.items)) for h in got] == [(lab.resolve(), 2)]
+
+
+def test_processes_in_a_repo_nested_inside_this_one_are_not_listed(lab):
+    nested = lab / "apps" / "inner"
+    nested.mkdir(parents=True)
+    sh(nested, "init", "-q")
+    h = handoff.Handoff("repo", lab.resolve(), ())
+    ctx = handoff.context(h, [("zsh", "1", nested / "src"), ("vim", "2", lab / "apps")], me=0)
+    assert ctx.others == ("vim (pid 2) in .",)
+
+
+def test_the_prompt_says_archived_branches_are_information_only():
+    h = handoff.Handoff("r", Path("/r"), (handoff.Item("r", "Landed · 2 branches archived"),))
+    text = handoff.prompt(h, handoff.Context(), "Land", WHEN)
+    assert handoff.ARCHIVED_NOTE in text and "never restore one without the owner's yes" in text
+    assert handoff.ARCHIVED_NOTE not in handoff.prompt(_handoff(), handoff.Context(), "X", WHEN)
+
+
+def test_a_folder_whose_session_is_still_open_survives_the_day_clean_up(tmp_path):
+    base = tmp_path / "support" / handoff.FOLDER
+    base.mkdir(parents=True)
+    live, gone = base / "20261110T000000Z-1", base / "20261001T000000Z-1"
+    for folder in (live, gone):
+        folder.mkdir()
+        (folder / "install-1.command").write_text("x")
+    now = 1_763_390_000.0
+    os.utime(live, (now - 3 * 86400, now - 3 * 86400))
+    os.utime(gone, (now - 40 * 86400, now - 40 * 86400))
+    _launcher(tmp_path, [], clock=lambda: now).launch("/bin/claude", _handoff(tmp_path), "x")
+    assert live.exists() and not gone.exists()
+
+
+def test_real_check_builds_rows_qualify_by_their_shown_words():
+    """Through the real view and model: a rewording of a stop status fails here."""
+    from lab_hub import launcher, progress
+
+    def app(key):
+        return launcher.ExternalApp(key, key.upper(), key, "main.py", "s")
+    report = (
+        launcher.BuildStatus(app("f"), launcher.Version(), "behind", "clone behind", None,
+                             "cd /r && git pull", forward=True),
+        launcher.BuildStatus(app("n"), launcher.Version(), "behind", "older."),
+        launcher.BuildStatus(app("u"), launcher.Version(), "unknown", "no version"),
+        launcher.BuildStatus(app("h"), launcher.Version(), "behind", "held: checkout dirty",
+                             restarts=True),  # Lab Hub's own build, held: "Not now"
+        launcher.BuildStatus(app("x"), launcher.Version(), "behind", "older.", None,
+                             "cd /x && ./build_app.sh"),
+        launcher.BuildStatus(app("t"), launcher.Version(), "behind", "older.", None,
+                             "cd /t && ./i.sh", by_hand=True),
+        launcher.BuildStatus(app("ok"), launcher.Version("1"), "current", "matches."),
+    )
+    view = progress.build_check_view(report, scoped=True)
+    rows = progress.BuildModel(view, {}).snapshot().rows
+    picked = {r.name: r.status for r in rows if handoff.qualifies(r)}
+    assert picked == {"F": "Needs you", "N": "Needs you", "U": "Cannot check",
+                      "H (this app)": "Not now"}
+
+
+def test_the_prompt_for_a_land_stop_row():
+    h = handoff.Handoff("backstage", Path("/lab/backstage"), (handoff.Item(
+        "backstage", "Needs you", "a merge is in progress: finish or abort it in Terminal"),))
+    text = handoff.prompt(h, handoff.Context(), "Land", WHEN)
+    assert text.splitlines()[:6] == [
+        "Lab Hub's Land window could not clear these rows. Resolve them in this repo.",
+        "",
+        "Repo: backstage",
+        "Folder: /lab/backstage",
+        "Shown by Lab Hub on 2026-11-17 15:30:",
+        "- backstage: Needs you. a merge is in progress: finish or abort it in Terminal",
+    ]

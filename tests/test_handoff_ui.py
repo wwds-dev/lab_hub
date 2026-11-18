@@ -194,7 +194,9 @@ def test_ask_claude_opens_one_session_per_repo_with_the_row_text(qapp, tmp_path,
     assert len(opened) == 2
     assert opened[0][0][0].startswith(f"cd -- {lab.resolve()} && /bin/claude ")
     assert (opened[0][1] / "prompt.md").read_text() == items[0][2]
-    assert "Opened Claude Code for repo in Terminal." in window.model.take_output()
+    note = "Opened Claude Code in Terminal for repo, other. Press Refresh when the session is done."
+    assert window.handoff_note.text() == note and not window.handoff_note.isHidden()
+    assert note in window.model.take_output()
     window.close()
     _drop(tab)
 
@@ -292,3 +294,129 @@ def test_main_window_counts_land_on_any_page_but_not_tools(qapp):
     fake = SimpleNamespace(_app_pages=lambda: pages,
                            _running_panels=lambda: ["Convert"])  # a tool: not counted
     assert MainWindow.land_jobs(fake) == ["Land is running"]
+
+
+# ------------------------------------------------------------- review fixes
+def test_a_repo_the_owner_stopped_is_not_offered(qapp, lab, tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    window = LandWindow(wall=lambda: WALL)
+    window.start([_plan("repo", lab), _plan("other", other)])
+    window.on_repo_done("repo", LandResult("repo", "not_landed", "it was stopped", stopped=True))
+    window.on_repo_done("other", LandResult("other", "not_landed", "push rejected by origin",
+                                            archived=1))
+    window.finish([])
+    rows = window.handoff_rows()
+    assert [r.name for r in rows] == ["other"]
+    assert rows[0].reason == "push rejected by origin · 1 branch archived"
+    window.close()
+
+
+def test_a_repo_stop_cut_short_is_marked_stopped(monkeypatch, tmp_path):
+    from lab_hub import land
+    from ui.lander import Lander
+
+    lander = Lander()
+    lander._stopper.stop()
+    events = []
+    lander._events = SimpleNamespace(put=events.append)
+    lander._run([_plan("a", tmp_path)])
+    [result] = [e[2] for e in events if e[0] == "repo_done"]
+    assert result.stopped and result.reason == "it was stopped"
+
+    lander = Lander()
+    events.clear()
+    lander._events = SimpleNamespace(put=events.append)
+
+    def land_then_stop(plan, **kwargs):
+        lander._stopper.stop()  # Stop pressed while this repo landed
+        return land.LandResult(plan.name, "not_landed", "skipped — stopped")
+    monkeypatch.setattr(land, "land", land_then_stop)
+    lander._run([_plan("b", tmp_path)])
+    [result] = [e[2] for e in events if e[0] == "repo_done"]
+    assert result.stopped
+
+
+def test_the_check_builds_button_comes_back_when_land_ends(qapp, tmp_path, lab, monkeypatch):
+    tab = _tab(qapp, tmp_path, monkeypatch)
+    window = BuildCheckWindow(progress.build_check_view((_forward(lab),), scoped=True))
+    tab._build_window = window
+    tab.land_jobs = lambda: ["Land is running"]
+    tab.land_state_changed()
+    assert not window.ask_claude_button.isEnabled()
+    tab.land_jobs = lambda: []
+    tab.land_state_changed()
+    assert window.ask_claude_button.isEnabled()
+    tab._build_window = None
+    window.close()
+    _drop(tab)
+
+
+def test_a_land_on_any_page_refreshes_every_pages_buttons(qapp):
+    from ui.main_window import MainWindow
+
+    refreshed = []
+    pages = tuple(SimpleNamespace(refresh_handoff_buttons=lambda n=n: refreshed.append(n))
+                  for n in range(3))
+    MainWindow.land_state_changed(SimpleNamespace(_app_pages=lambda: pages))
+    assert refreshed == [0, 1, 2]
+
+
+def test_one_failed_launch_is_named_and_the_others_still_open(qapp, tmp_path, lab, monkeypatch,
+                                                              fakes):
+    opened, shown = fakes
+    other = tmp_path / "other"
+    other.mkdir()
+    sh(other, "init", "-q")
+
+    def runner(commands, directory=None):
+        if f"cd -- {lab.resolve()} " in commands[0]:
+            raise OSError("Terminal did not open")
+        opened.append((commands, directory))
+    monkeypatch.setattr(launcher, "run_in_terminal", runner)
+    tab = _tab(qapp, tmp_path, monkeypatch)
+    tab.confirm_handoff = lambda items, unplaced, parent: [h for h, _c, _t in items]
+    window = LandWindow(wall=lambda: WALL)
+    window.start([_plan("repo", lab), _plan("other", other)])
+    for name in ("repo", "other"):
+        window.on_repo_done(name, LandResult(name, "not_landed", "push rejected by origin"))
+    window.finish([])
+    tab.ask_claude(window)
+    assert len(opened) == 1 and str(other.resolve()) in opened[0][0][0]
+    assert shown == [("warning", "Could not open a session for:\nrepo: Terminal did not open")]
+    assert "for other." in window.handoff_note.text()
+    window.close()
+    _drop(tab)
+
+
+def test_rows_with_no_folder_say_so_and_open_nothing(qapp, tmp_path, monkeypatch, fakes):
+    opened, shown = fakes
+    tab = _tab(qapp, tmp_path, monkeypatch)
+    window = BuildCheckWindow(progress.build_check_view((_forward(None),), scoped=True))
+    tab.ask_claude(window)  # no folder known for "P"
+    assert opened == []
+    assert shown == [("information",
+                      "None of these rows has a folder a session could work in: P.")]
+    window.close()
+    _drop(tab)
+
+
+def test_copy_prompt_through_the_page_says_so_in_the_window(qapp, tmp_path, lab, monkeypatch,
+                                                            fakes):
+    opened, _shown = fakes
+    monkeypatch.setattr(land_resolve, "cwd_listing", lambda: [("claude", "77", lab)])
+
+    def exec_and_copy(dialog):
+        dialog.blocks[0].copy_button.click()
+        return 0
+    monkeypatch.setattr(HandoffDialog, "exec", exec_and_copy)
+    tab = _tab(qapp, tmp_path, monkeypatch)
+    window = BuildCheckWindow(progress.build_check_view((_forward(lab),), scoped=True))
+    window.handoff_paths["P"] = lab
+    tab.ask_claude(window)
+    assert opened == []
+    assert "Folder: " + str(lab.resolve()) in QApplication.clipboard().text()
+    assert window.handoff_note.text().startswith("Copied the prompt for repo")
+    assert not window.handoff_note.isHidden()  # readable at Review (review P2-3)
+    window.close()
+    _drop(tab)

@@ -439,6 +439,7 @@ class LandResult:
     notes: tuple[str, ...] = field(default_factory=tuple)
     archived: int = 0  # branches kept as archive tags in this run
     quarantined: int = 0  # files moved to quarantine in this run
+    stopped: bool = False  # the owner pressed Stop before this repo landed
 
     @property
     def landed(self) -> bool:

@@ -1,6 +1,6 @@
 # Spec: hand what Lab Hub cannot fix to a Claude Code session
 
-Status: **Define approved by the owner 2026-11-17 ("Approve, use defaults"): §6 takes every recommended option. Architect approved by the owner 2026-11-17 ("Approve architecture"). Next: Plan and Build.** Phase: Define (`product-manager`). Drafted in worktree `zealous-benz-97c752`, branch `claude/resolve-button-5dc32f`.
+Status: **Define approved by the owner 2026-11-17 ("Approve, use defaults"): §6 takes every recommended option. Architect approved by the owner 2026-11-17 ("Approve architecture"). Built (`69aa809`); review findings fixed with the limit changes below, approved by the owner 2026-11-18 ("Fix all as proposed"). Next: Verify.** Phase: Define (`product-manager`). Drafted in worktree `zealous-benz-97c752`, branch `claude/resolve-button-5dc32f`.
 
 In-flight check (`session_start.py --inflight`, 2026-11-17):
 - `tile-resolve` is superseded by `land-from-tiles`.
@@ -59,11 +59,17 @@ Apps that share a repo get one session, with all their rows in it: Lab Hub's own
 1. Never sign or record a legal or tax sign-off. Never run `legal_gate.py sign`, never edit `docs/legal/signoff.jsonl`, never record an approval for the owner (`record_approval.py`).
 2. Never accept anything on the owner's behalf: a gate, a contract, terms, a client's acceptance.
 3. Never push, merge into the default branch, tag a release, or install, unless the owner says yes in that session for that step.
-4. Work only in this repo's checkout and its own worktrees. Never another repo's.
+4. Work only in this repo's checkout, its own worktrees, and a folder a row's own command names (Lab Hub added it to this session). Never another repo's. *(Amended 2026-11-18, review P2-4: Provisio's release clone lives outside its checkout.)*
 5. Do not run Lab Hub's Update now or Land, and do not run `build_app.sh` while another build is running (§4.3).
 6. Anything only the owner can do goes into a short list for the owner at the end. Do not attempt it: a legal or tax sign-off, a password, a payment, an App Store or notarisation login, a choice the spec leaves to the owner.
 
-Limits 1 to 3 are also held by the session's permission mode (decision 3 in §6). The prompt alone is not trusted to hold them.
+Limits 1 to 3 are also held by the session's permission settings (decision 3 in §6), for the commands the session runs:
+- every command asks first (`manual` mode);
+- push, merge, tag and install ask even where a settings file would allow them;
+- the sign-off and approval commands, and any command naming `signoff.jsonl`, are refused;
+- the repo's own `settings.local.json` is not loaded (`--setting-sources user,project`), so its broad allow rules (e.g. `python3 -c '…'`) do not apply.
+
+A command that reaches git or a sign-off file indirectly (a script, inline Python) is held only by `manual` mode: the owner sees it and answers. *(Reworded 2026-11-18, review P1-1.)* Archived branches are named in the prompt as information only (decision 5).
 
 ### 4.3 Concurrency
 - **Disabled while a job runs.** The button is disabled while Update now is rebuilding or Land is planning or running (success measure 2).
@@ -138,7 +144,7 @@ Limits 1 to 3 are also held by the session's permission mode (decision 3 in §6)
 See ADR `docs/adr/0004-claude-handoff-terminal-session.md`. Radar check, Claude Code 2.1.304 (`claude --help`):
 - the positional `[prompt]` starts an interactive session with that first message;
 - `--permission-mode` offers `manual`;
-- `--settings <file>`, `--append-system-prompt <text>` and `-n <name>` are available;
+- `--settings <file>`, `--setting-sources <user,project,local>`, `--add-dir <dir>`, `--append-system-prompt <text>` and `-n <name>` are available;
 - there is no `--append-system-prompt-file`;
 - a running session's process shows as `claude` in `lsof -F c`.
 
@@ -168,7 +174,7 @@ See ADR `docs/adr/0004-claude-handoff-terminal-session.md`. Radar check, Claude 
     - `ask` for `Bash(git push:*)`, `Bash(git merge:*)`, `Bash(git tag:*)`, `Bash(*build_app.sh*--install*)` and `Bash(*install*.sh*)`;
     - `deny` for `Bash(*legal_gate.py sign*)`, `Bash(*record_approval.py*)`, `Edit(**/docs/legal/signoff.jsonl)` and `Write(**/docs/legal/signoff.jsonl)`.
 - **The one line Lab Hub composes.** Every value is passed through `shlex.quote`; repo text never reaches the line except through `$(cat …)`:
-  `cd -- <repo> && <claude> --permission-mode manual --settings <settings.json> --append-system-prompt "$(cat -- <limits.md>)" -n <"Lab Hub: " + repo name> "$(cat -- <prompt.md>)"`
+  `cd -- <repo> && <claude> --permission-mode manual --setting-sources user,project --settings <settings.json> [--add-dir <a row command's folder outside the repo>] --append-system-prompt "$(cat -- <limits.md>)" -n <"Lab Hub: " + repo name> "$(cat -- <prompt.md>)"`
 - **Which `claude`.** It is `claude_resolve.find_claude()`, the absolute path. If it is missing, the dialog says so and nothing opens.
 - **Clean-up.** The `.command` file removes itself. Folders older than 24 h are removed at the next launch, and only folders whose name matches the stamp pattern.
 
