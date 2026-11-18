@@ -8,6 +8,22 @@
 
 ## v2 — complete (2026-09-14)
 
+- [x] `P1` `feature` `@ai` **Ask Claude… in Check builds and the Land window (2026-11-18).**
+  - Spec `docs/specs/claude-handoff.md`: Define "Approve, use defaults", Architect "Approve architecture", fixes "Fix all as proposed" and "Fix as proposed". ADR `docs/adr/0004-claude-handoff-terminal-session.md`.
+  - Why: the owner relayed every "Needs you" / "Not rebuilt" / Land stop row to Claude by hand, across several sessions.
+  - What it does: one Claude Code session per repo, in Terminal, after a confirmation with the cost. Manual permission mode, inline ask/deny rules, seven limits.
+  - Code: `lab_hub/handoff.py`, `ui/handoff_dialog.py` (new); `ui/progress_window.py`, `ui/apps_tab.py`, `ui/main_window.py`, `ui/lander.py`, `lab_hub/land.py`.
+  - Reviews:
+    - `docs/audit/claude-handoff-code-review.md` (1 P1, 7 P2, fixed);
+    - `docs/audit/claude-handoff-qa.md` (13 mutants, fixed);
+    - `docs/audit/claude-handoff-security.md` (1 P2, P3s, fixed).
+- [ ] `P1` `testing` `@me` **Real-Mac check of Ask Claude.** Follow `docs/audit/claude-handoff-qa.md` §2.7:
+  - `git push` asks;
+  - `legal_gate.py sign` is refused;
+  - a Provisio row ends clean;
+  - record the session's cost with `model_use.py --purpose eval`.
+
+  It needs a Lab Hub build with branch `claude/resolve-button-5dc32f`, so it comes after merge and Update now.
 - [x] `P1` `feature` `@ai` **Lab Hub updates itself from Check builds (2026-11-17).**
   - Spec `docs/specs/self-update.md`; Define "Approve as recommended", Architect "Approve architecture". ADR `docs/adr/0003-self-update-helper.md`.
   - Why: the installed v2.172 lacked the Land progress window, and updating meant a terminal, `kill` and a menu bar click.

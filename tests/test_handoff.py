@@ -137,6 +137,8 @@ def test_the_limits_are_the_specs_word_for_word():
              if re.match(r"^\d\. ", line)]
     assert len(lines) == 7
     assert handoff.LIMITS.splitlines()[1:] == lines
+    readme = (Path(__file__).parent.parent / "README.md").read_text()
+    assert all(line in readme.splitlines() for line in lines)  # and in the README
 
 
 def test_the_limits_name_every_hard_rule():
