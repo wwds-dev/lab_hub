@@ -372,12 +372,14 @@ copies be one.
 
 ## v3 — later
 
-- [ ] `P3` `testing` `@ai` **Code-level readiness audit (promises vs code).** Check every promise in the
+- [x] `P3` `testing` `@ai` **Code-level readiness audit (promises vs code).** Check every promise in the
   README and `docs/foundry/app-context.md` against the code (launcher, Land, self-update, narrator
   converter); classify each Delivered / Narrower / Stub; findings to `docs/audit/` and this file. Own
   chat, Opus high, ~30–60 min. Requested 2026-11-18 after the lab-wide doc sweep.
+  - Done 2026-11-18: `docs/audit/2026-11-18-readiness-audit.md` (1 Blocker, 3 High, 9 Medium, 8 Low). New items below under "Readiness audit 2026-11-18".
 
 - [ ] `P1` `bug` `@ai` **Land: stop a branch that already contains a folder link (follow-up to `land-update-gaps`, 2026-11-17).**
+  - Audit 2026-11-18 (B1): release blocker. Also cover `claude_resolve.py:1289` (`merge --ff-only`) and prep's `git switch` (`land_resolve.py:705`), not only `repo_tidy.apply`'s merge (`:919-924`).
   - Why: Land no longer commits a `.venv` symlink itself (6d04df6). But a link an agent committed on its own branch (`git add -A`, with only `.venv/` in `.gitignore`) still lands. Updating the main checkout then replaces the real, ignored `.venv` with the link, which is the SONAR data loss of 17 Nov.
   - Idea: an outgoing check next to `outgoing_findings` in `lab_hub/land_resolve.py`. It stops a branch whose diff adds a symlink (mode 120000) where the target checkout has a real folder, or a name the default branch ignores as a folder. Reuse `never_commit_link` / `ignored_as_folder`.
   - Start: Define a new spec (owner gate). Context: `docs/specs/land-update-gaps.md` §10.1, `docs/audit/land-update-gaps-code-review.md` P2-2. Suggested setup: Opus, high, about 60–90 min.
@@ -488,7 +490,7 @@ copies be one.
   Terminal) has nothing to map the red close button or Escape onto, so both were dead
   ends. Added an explicit `Close` button (`RejectRole`, also the escape/default button).
   `tests/test_apps_tab.py::test_build_check_dialog_can_be_dismissed`.
-- [ ] `P1` `testing` `@ai` Update the tests that still pin Backstage as Tools-only: `test_registry.py` (suites list, `tools_only == ["backstage"]`), `test_tab_groups.py`, `test_tray.py`, `test_tools_tab.py`. 31dbb9d moved it to `suites`; by reading, these now fail (suite not run 2026-10-19).
+- [x] `P1` `testing` `@ai` (2026-11-18 audit: they pass; they now assert the suite placement) Update the tests that still pin Backstage as Tools-only: `test_registry.py` (suites list, `tools_only == ["backstage"]`), `test_tab_groups.py`, `test_tray.py`, `test_tools_tab.py`. 31dbb9d moved it to `suites`; by reading, these now fail (suite not run 2026-10-19).
 - [ ] `P2` `feature` `@me` Confirm Backstage on the Apps tab and in the menu bar is wanted: 31dbb9d reverses the 2026-09-27 choice to keep it Tools-only.
 - [ ] `P3` `design` `@ai` Remove the leftover Backstage page from the Tools stack (`MainWindow.backstage_tab`, now empty) and the stale Backstage mentions in `ui/tools_tab.py` hint/docstring and `ui/apps_tab.py:584`.
 - [ ] `P2` `bug` `@ai` WWDS Websites tile: a `file://` URL has no HTTP status, so `classify()` reports *Unreachable*; show *Local file* / *File missing* instead, and drop the hard-coded `/Users/as` path.
@@ -496,6 +498,27 @@ copies be one.
 - [ ] `P3` `infra` `@ai` Rebuild and reinstall Lab Hub: the bundle is stamped from bbf1077 (v2.094), and `sites.py` (WWDS) is compiled in, unlike `apps.toml`.
 - [ ] `P2` `docs` `@ai` Fill `docs/foundry/app-context.md` (still the Foundry skeleton) from the README; the owner signs off the Invariants.
 - [ ] `P3` `infra` `@ai` Run `/harden lab_hub` to wire CI, ruff ratchet, gitleaks and dependabot from `docs/foundry/tooling/`; branch protection and the git hook stay with the owner.
+
+## Readiness audit 2026-11-18 — open
+
+From `docs/audit/2026-11-18-readiness-audit.md`. Items already in this file (folder-link Land stop, WWDS `file://` tile, app-context skeleton, `/harden`, Backstage decision, old screenshots) are not repeated.
+
+- [ ] `P1` `bug` `@ai` **Land: don't commit another live session's edits (audit H1).**
+  - Why: "a process inside" is only an `lsof` cwd inside the tree (`land_resolve.py:487-530`); a session working from `~/Documents/lab` or a lab-root worktree is invisible, so prep commits its half-done files (`land_resolve.py:645-650`, `repo_tidy.py:927-932`) and Land pushes them. `cc56bb6`/`9e669a1` here are Land's own "commit open work" commits.
+  - Idea: busy when files changed in the last N minutes or a `claude` process's folder is an ancestor; list the files to be committed in the confirm dialog. Start with Define (owner gate).
+- [ ] `P1` `security` `@me` **Decide: real-lab images and `/Users/as` paths in the public repo (audit H2).**
+  - `docs/audit/progress-windows-real-builds.png` (`1272be9`, shows `/Users/as/Releases/...` and every app version) and `progress-windows-real-land.png` (private repo names); `/Users/as` in README, TODO and five audit/spec docs.
+  - Make `wwds-dev/lab_hub` private (then tier `internal`), or remove them and decide on a history rewrite together with the older screenshot item.
+- [ ] `P2` `bug` `@ai` **Apply the 24-hour recent-use rule to every linked worktree, not only `.claude/worktrees/` (audit M1).** `repo_tidy.py:40, 437-445`; lab-root `worktrees/` session trees can be removed or archived while their session idles.
+- [ ] `P2` `docs` `@ai` **Say what "up to date" means on the Lab Hub row (audit M3).** It is level with the local checkout, never origin (`self_update.py:154-188`); add the note, or warn when `@{u}` is ahead without fetching.
+- [ ] `P2` `bug` `@ai` **Make `build_app.sh --install` safe (audit M4).** `rm -rf` then `cp -R` with no rollback or running check (`build_app.sh:79-83`); refuse while Lab Hub runs, or reuse the self-update helper.
+- [ ] `P2` `testing` `@ai` **Add an `appkit_guard.py` drift test (audit M5).** Lab rule requires one per repo; compare code with docstrings stripped, like `tests/test_converter_drift.py`.
+- [ ] `P2` `bug` `@ai` **Video job: let Stop end ffmpeg so quit cannot abort the app (audit M6, unconfirmed).** `subprocess.run` in `lab_hub/tools/video.py:132` outlives `JobWorker.wait(15000)`; register the process as `calibre.py:157-175` does. Do not raise the wait.
+- [ ] `P2` `performance` `@ai` **Move the Check builds report off the UI thread (audit M7).** `show_build_report` runs `worktree_tree` (`git add -A` + `write-tree`, 60 s timeouts) per dirty checkout synchronously (`ui/apps_tab.py:771-779`).
+- [ ] `P3` `bug` `@ai` **Land hardening (audit L1-L3).** Merge/switch in the main checkout under `NETWORK_TIMEOUT`, not the 30 s `GIT_TIMEOUT` (`repo_tidy.py:42, 919`); `REGENERABLE` to match top-level names only (`repo_tidy.py:215-238`); say in the Review-branches dialog that it overrides the recent-use guard (`:1040-1044`).
+- [ ] `P3` `bug` `@ai` **Scrub `QTWEBENGINE*` in `child_env` (audit L4).** `lab_hub/launcher/control.py:43-70`.
+- [ ] `P3` `infra` `@me` **Decide: bundle ID `com.netrunner3000.labhub` (audit L6).** `build_app.sh:14` names the retired identity; changing it resets TCC/LaunchServices.
+- [ ] `P3` `docs` `@ai` **Refresh stale docs (audit M2, L7, L8).** `lab-wide-build-marker.md` and `release-root-behind.md` statuses; README:869-872 "expected to fail" Backstage note; app-context's "no `LICENSE`" evidence; the duplicate Backstage-leftover items in this file; delete tracked `_to_delete/`.
 
 ## Out of scope, deliberately
 
