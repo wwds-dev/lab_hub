@@ -903,7 +903,12 @@ def test_the_launchpad_report_ends_with_lab_hub_and_a_scoped_one_has_none(
         def __init__(self, view, root, parent):
             seen.append(view)
             self.copy_requested = type("S", (), {"connect": lambda *a: None})()
+            self.handoff_requested = self.copy_requested  # Ask Claude (claude-handoff)
+            self.handoff_paths, self.handoff_commands = {}, {}
             self.choice = None
+
+        def set_handoff_busy(self, busy):
+            pass
 
         def ask(self):
             return None

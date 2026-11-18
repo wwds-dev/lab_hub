@@ -26,3 +26,5 @@
 {"ts": "2026-11-17T20:09:59", "gate": "release", "by": "owner", "words": "yes, push main and release lab hub", "recorded_by": "agent", "spec": "land-fast"}
 {"ts": "2026-11-17T20:40:17", "gate": "define", "by": "owner", "words": "Build option B", "recorded_by": "agent", "spec": "land-update-gaps"}
 {"ts": "2026-11-17T21:00:35", "gate": "release", "by": "owner", "words": "release lab hub", "recorded_by": "agent", "spec": "land-confirm-dialog"}
+{"ts": "2026-11-17T21:17:46", "gate": "define", "by": "owner", "words": "Approve, use defaults", "recorded_by": "agent", "spec": "claude-handoff"}
+{"ts": "2026-11-17T21:19:51", "gate": "architect", "by": "owner", "words": "Approve architecture", "recorded_by": "agent", "spec": "claude-handoff"}

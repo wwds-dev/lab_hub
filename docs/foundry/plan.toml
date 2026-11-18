@@ -13,3 +13,8 @@ name = "Progress windows for Land and Check builds"
 due = "2026-11-18"
 start = "2026-11-17"
 spec = "progress-windows"
+
+[[milestone]]
+name = "Ask Claude button in Check builds and Land"
+due = "2026-11-20"
+spec = "claude-handoff"

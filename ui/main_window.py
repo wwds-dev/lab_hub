@@ -224,6 +224,8 @@ class MainWindow(QMainWindow):
         # page lands or any tool runs.
         for page in self._app_pages():
             page.busy_reasons = self.busy_reasons
+            page.land_jobs = self.land_jobs  # Ask Claude (spec claude-handoff §4.3)
+            page.land_state_changed = self.land_state_changed
         self.apps_tab.restart_requested.connect(self.restart_for_update)
         self._pending_update = None  # a self_update.Staged waiting for idle
         self._restart_timer = QTimer(self)
@@ -388,6 +390,18 @@ class MainWindow(QMainWindow):
     def _app_pages(self) -> tuple[AppsTab, ...]:
         return (self.apps_tab, self.backup_sync_tab, self.unblock_tracker_tab,
                 self.backstage_tab)
+
+    def land_state_changed(self) -> None:
+        """A Land started or ended on some page: every page's Ask Claude follows."""
+        for page in self._app_pages():
+            page.refresh_handoff_buttons()
+
+    def land_jobs(self) -> list[str]:
+        """Land planning or running on any page."""
+        reasons = []
+        for page in self._app_pages():
+            reasons.extend(r for r in page._own_busy_reasons() if r not in reasons)
+        return reasons
 
     def busy_reasons(self) -> list[str]:
         """Everything running in this process that quitting would end."""

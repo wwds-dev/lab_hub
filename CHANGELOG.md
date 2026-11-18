@@ -16,6 +16,17 @@ README and the specs in `docs/specs/` describe them.
 ## Unreleased
 
 ### Added
+- **Ask Claude…** in Check builds (Review and Done) and the Land window (after
+  the run):
+  - It opens one Claude Code session per repo in Terminal for the rows Lab Hub
+    could not clear: Needs you, Not now, Cannot check, Not rebuilt, a Land stop,
+    archived branches. Each row goes in word for word.
+  - A confirmation with tick boxes and the cost comes first.
+  - Sessions run in manual permission mode with Lab Hub's ask/deny rules and
+    seven written limits. They never sign, accept, push or merge without your
+    yes in that session.
+  - The button is off while Land or Update now runs. If Claude Code is already
+    running in that repo, it offers Copy prompt instead.
 - **Lab Hub updates itself** from Check builds:
   - The launchpad's report ends with a **Lab Hub (this app)** row, and Update
     now builds it last.

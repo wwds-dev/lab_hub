@@ -41,7 +41,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from lab_hub import durations, progress
+from lab_hub import durations, handoff, progress
 
 from . import theme
 
@@ -87,6 +87,10 @@ def _set_prop(widget: QWidget, prop: str, value: str) -> None:
 def _set_text(widget: QLabel, text: str) -> None:
     if widget.text() != text:
         widget.setText(text)
+
+
+def land_n(count: int) -> str:
+    return f"{count} branch" if count == 1 else f"{count} branches"
 
 
 def _clear(layout) -> None:
@@ -577,6 +581,55 @@ class _Run:
     def _after_render(self, snap: progress.Snapshot) -> None:
         pass
 
+    # -- Ask Claude (spec claude-handoff §9) ----------------------------------
+    def _make_handoff_button(self) -> QPushButton:
+        """Ask Claude…: never the default; shown only while a row qualifies."""
+        button = QPushButton("Ask Claude…")
+        button.setAutoDefault(False)
+        button.hide()
+        button.clicked.connect(lambda _=False: self.handoff_requested.emit())
+        self.ask_claude_button = button
+        # What Ask Claude did, where it can be read at any step (review P2-3).
+        self.handoff_note = _label("", "hint", wrap=True)
+        self.handoff_note.hide()
+        self.handoff_paths: dict = {}  # row name -> its folder (or None)
+        self.handoff_commands: dict = {}  # row name -> the command the window shows
+        self._handoff_open = False  # the step allows it (Review, Done, Land's end)
+        self._handoff_busy = ""  # set by the page: the job now running
+        return button
+
+    def handoff_rows(self) -> list[progress.RowView]:
+        """The rows on screen that Lab Hub could not clear, in their own words."""
+        if self.model is None or not self._handoff_open:
+            return []
+        return [r for r in self.model.snapshot().rows if handoff.qualifies(r)]
+
+    def set_handoff_busy(self, busy: str) -> None:
+        self._handoff_busy = busy
+        self.refresh_handoff()
+
+    def refresh_handoff(self) -> None:
+        rows = self.handoff_rows()
+        button = self.ask_claude_button
+        button.setVisible(bool(rows))
+        button.setEnabled(bool(rows) and not self._handoff_busy)
+        if self._handoff_busy:
+            tip = f"Not now: {self._handoff_busy}."
+        else:
+            n = len(rows)
+            tip = (f"Open a Claude Code session per repo for the {n} row"
+                   f"{'' if n == 1 else 's'} Lab Hub could not clear. Each session is paid; "
+                   "you confirm first.")
+        button.setToolTip(_plain_tip(tip))
+
+    def show_handoff_note(self, line: str) -> None:
+        """Say what Ask Claude did, under the rows, and in the live output."""
+        self.handoff_note.setText(line)
+        self.handoff_note.show()
+        if self.model is not None:
+            self.model.on_output(line)
+            self.changed()
+
     def _shown(self) -> None:
         if self.model is not None:
             self.draw()
@@ -594,6 +647,7 @@ class LandWindow(QWidget, _Run):
     and landing goes on; the page's Show progress brings it back."""
 
     stop_requested = Signal()
+    handoff_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None, *, clock=time.monotonic,
                  wall=datetime.now) -> None:
@@ -619,7 +673,9 @@ class LandWindow(QWidget, _Run):
                                     "everything after it. Work already landed stays landed.")
         self.stop_button.clicked.connect(self._stop)
         buttons.addWidget(self.note)
-        buttons.addStretch(1)
+        buttons.addWidget(self._make_handoff_button())
+        buttons.addWidget(self.handoff_note, 1)
+        buttons.addStretch(1)  # keeps Hide and Stop right while the note is hidden
         buttons.addWidget(self.hide_button)
         buttons.addWidget(self.stop_button)
         layout.addWidget(footer)
@@ -629,6 +685,10 @@ class LandWindow(QWidget, _Run):
     def start(self, plans) -> None:
         self.model = progress.LandModel(plans, durations.load(), clock=self.clock,
                                         wall=self.wall)
+        self.results: dict[str, object] = {}
+        self.handoff_paths = {progress.plain(p.name): p.path for p in plans}
+        self._handoff_open = False
+        self.refresh_handoff()
         self._reset_rows()
         self.stop_button.setEnabled(True)
         self.stop_button.setText("Stop landing")
@@ -660,6 +720,7 @@ class LandWindow(QWidget, _Run):
     def on_repo_done(self, name: str, result) -> None:
         if self.model is None:
             return
+        self.results[progress.plain(name)] = result
         self.model.on_repo_done(name, result)
         self.changed()
 
@@ -678,8 +739,33 @@ class LandWindow(QWidget, _Run):
         self.stop_button.hide()
         self.note.setText("")
         self.hide_button.setText("Close")
+        self._handoff_open = True
+        self.refresh_handoff()
         if self.isVisible():
             self.draw()
+
+    def handoff_rows(self) -> list[progress.RowView]:
+        """As shown, plus a landed row's archived branches, which only its
+        tile line names (spec claude-handoff §1)."""
+        if self.model is None or not self._handoff_open:
+            return []
+        rows = []
+        for view in self.model.snapshot().rows:
+            result = self.results.get(view.name)
+            if result is not None and getattr(result, "stopped", False):
+                continue  # the owner stopped it: not Claude's to finish (review P2-1)
+            archived = getattr(result, "archived", 0) if result is not None else 0
+            if view.icon == "done" and archived:
+                view = progress.RowView(view.name, view.icon, status=result.line,
+                                        reason="kept as local archive/<branch>/<date> "
+                                               "tags; Review branches can restore them")
+            elif archived and handoff.qualifies(view):  # review P3-6
+                view = progress.RowView(
+                    view.name, view.icon, status=view.status,
+                    reason=f"{view.reason} · {land_n(archived)} archived".lstrip(" ·"))
+            if handoff.qualifies(view):
+                rows.append(view)
+        return rows
 
     def _stop(self) -> None:
         self.stop_requested.emit()
@@ -765,6 +851,7 @@ class BuildCheckWindow(QDialog, _Run):
     # A signal rather than a stored callback: a closure over the page kept on
     # this child window would free the page while the window is being deleted.
     copy_requested = Signal(list)
+    handoff_requested = Signal()
 
     def __init__(self, view: progress.BuildCheckView, lab_root: Path | None = None,
                  parent: QWidget | None = None, *, clock=time.monotonic,
@@ -813,7 +900,9 @@ class BuildCheckWindow(QDialog, _Run):
         for button in (copy, terminal, folder):
             if button is not None:
                 self._buttons.addWidget(button)
-        self._buttons.addStretch(1)
+        self._buttons.addWidget(self._make_handoff_button())
+        self._buttons.addWidget(self.handoff_note, 1)
+        self._buttons.addStretch(1)  # keeps Close and Update now right
         self._buttons.addWidget(self.close_button)
         if update is not None:
             update.setObjectName("primary")
@@ -836,6 +925,8 @@ class BuildCheckWindow(QDialog, _Run):
         self.model = progress.BuildModel(view, durations.load(), clock=clock, wall=wall)
         self._reset_rows()
         self.steps.set_step(1)
+        self._handoff_open = True  # Review
+        self.refresh_handoff()
         self.resize(720, 520)
         self.draw()
 
@@ -894,6 +985,8 @@ class BuildCheckWindow(QDialog, _Run):
     def begin_update(self) -> None:
         for button in self._review:
             button.hide()
+        self._handoff_open = False  # Update: the rows are still moving
+        self.refresh_handoff()
         self.update_copy.setVisible(self.view.show_copy)
         self.cancel_button.setText("Cancel")
         self.cancel_button.show()
@@ -994,6 +1087,8 @@ class BuildCheckWindow(QDialog, _Run):
         _set_name(self.cancel_button, "")  # nothing left to cancel: an ordinary Close
         if how == "failed":
             self.output.toggle.setChecked(True)
+        self._handoff_open = True  # Done
+        self.refresh_handoff()
         if self.isVisible():
             self.draw()
 

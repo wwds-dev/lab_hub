@@ -14,6 +14,7 @@ from __future__ import annotations
 import queue
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
@@ -100,11 +101,13 @@ class Lander(QObject):
         for plan in plans:
             name = plan.name
             if self._stopper.stopped:
-                result = land.LandResult(name, "not_landed", "it was stopped")
+                result = land.LandResult(name, "not_landed", "it was stopped", stopped=True)
             else:
                 result = land.land(plan, progress=lambda line, n=name: self._events.put(
                     ("progress", n, line)), stop=self._stopper,
                     events=lambda e: self._events.put(("step", e)), clock=self._clock)
+                if self._stopper.stopped and not result.landed:
+                    result = replace(result, stopped=True)  # Stop cut this one short
             results.append(result)
             self._events.put(("repo_done", name, result))
         self._events.put(("finished", results))
