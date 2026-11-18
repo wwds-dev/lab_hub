@@ -12,6 +12,12 @@ Status: `IDEA` · `CONSIDERING` · `PLANNED` · `DONE` · `REJECTED`
 | 8 | Drag-to-reorder the app list | design | S | IDEA |
 | 12 | Websites tab: certificate expiry and response-time trend per site | feature | S | IDEA — the check already holds the reply; a certificate within 14 days of expiry is the next thing that takes a site down unnoticed |
 | 13 | Read the Websites list from a catalog beside `dashboard_catalog.json`, the way the Dashboards tab already does | design | S | IDEA — a dashboard added to the catalog appears with no rebuild; a site still needs one, the same trap as #11 on a smaller scale |
+| 14 | One "Needs you" inbox across apps: `@me` items, sign-offs waiting, builds behind (extends #3) (portfolio review 2026-11-18) | feature | M | IDEA |
+| 15 | Cmd+K palette for apps, actions and docs (builds on #4) (portfolio review 2026-11-18) | feature | M | IDEA |
+| 16 | One home for each utility: stop carrying Convert Textfiles and Prepare Images as copies of toolbox's `convert_epub` and `image_tools` (portfolio review 2026-11-18) | design | M | IDEA |
+| 17 | Move Land and repo hygiene into the sync tool, so commits and worktree cleanup live in one place (git_autosync #8) (portfolio review 2026-11-18) | design | L | IDEA |
+| 18 | Make the repo private and the tier `internal`: nobody else uses the launcher, and the public tier brings the privacy note, name check and sign-off (portfolio review 2026-11-18) | infra | S | IDEA |
+| 19 | Lab Hub as Kaila's visual face: a chat and voice bar that answers "what is blocked?" and runs "build and land Imprint" through her guard (portfolio review 2026-11-18) | feature | L | IDEA |
 
 ## Done
 
