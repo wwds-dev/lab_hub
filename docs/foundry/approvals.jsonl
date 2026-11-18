@@ -28,5 +28,6 @@
 {"ts": "2026-11-17T21:00:35", "gate": "release", "by": "owner", "words": "release lab hub", "recorded_by": "agent", "spec": "land-confirm-dialog"}
 {"ts": "2026-11-17T21:17:46", "gate": "define", "by": "owner", "words": "Approve, use defaults", "recorded_by": "agent", "spec": "claude-handoff"}
 {"ts": "2026-11-17T21:19:51", "gate": "architect", "by": "owner", "words": "Approve architecture", "recorded_by": "agent", "spec": "claude-handoff"}
+{"ts": "2026-11-18T12:25:52", "gate": "define", "by": "owner", "words": "approve", "recorded_by": "agent", "spec": "scroll-sidebar-only"}
 {"ts": "2026-11-18T12:25:44", "gate": "define", "by": "owner", "words": "Approve as recommended", "recorded_by": "agent", "spec": "land-pick-and-time"}
 {"ts": "2026-11-18T12:28:18", "gate": "architect", "by": "owner", "words": "Approve architecture", "recorded_by": "agent", "spec": "land-pick-and-time"}
