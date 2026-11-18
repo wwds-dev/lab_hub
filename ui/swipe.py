@@ -108,7 +108,12 @@ class SwipeTabs(QObject):
     loop, once they are fully built.
     """
 
-    def __init__(self, *tab_widgets: QTabWidget | QStackedWidget, parent: QObject | None = None):
+    def __init__(
+        self,
+        *tab_widgets: QTabWidget | QStackedWidget,
+        vertical_zone: QWidget | None = None,
+        parent: QObject | None = None,
+    ):
         # Parented so the filter dies with the window that owns it. Qt removes
         # an event filter when the filter object is destroyed, and leaving that
         # to the garbage collector means a closed window's filter can still be
@@ -118,6 +123,9 @@ class SwipeTabs(QObject):
         # inner tabs moves them, and falls through to the outer ones only when
         # they run out. The window registers only its top row.
         self._tabs = list(tab_widgets)
+        # Where a vertical scroll or swipe may change tab: the sidebar that lists the pages.
+        # Anywhere else it only scrolls. None means anywhere (the filter used on its own).
+        self._vertical_zone = vertical_zone
         self._accumulated = 0.0
         self._armed = True
         self._last_event_at = 0.0
@@ -278,6 +286,12 @@ class SwipeTabs(QObject):
         # through rather than silently eating it.
         return False
 
+    def _in_vertical_zone(self, widget: QWidget) -> bool:
+        zone = self._vertical_zone
+        if zone is None:
+            return True
+        return shiboken6.isValid(zone) and (widget is zone or zone.isAncestorOf(widget))
+
     def _candidates(self, under_pointer: QWidget, *, vertical: bool = False):
         """Registered tab widgets above the pointer, innermost first.
 
@@ -286,6 +300,10 @@ class SwipeTabs(QObject):
         vertical two-finger swipe changes page only over a page that fits its
         window; on one that scrolls, it scrolls.
         """
+        if vertical and self._vertical_zone is not None:
+            # The sidebar sits beside the pages, not above them: over it, every registered
+            # tab widget is a candidate; anywhere else a vertical gesture only scrolls.
+            return list(self._tabs) if self._in_vertical_zone(under_pointer) else []
         can_scroll = _can_scroll_vertically if vertical else _can_scroll_horizontally
         found = []
         widget = under_pointer

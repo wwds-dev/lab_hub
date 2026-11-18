@@ -178,3 +178,7 @@
 {"ts": "2026-11-18T10:06:42", "phase": "secure", "state": "done", "spec": "claude-handoff"}
 {"ts": "2026-11-18T10:20:20", "phase": "document", "state": "start", "spec": "claude-handoff"}
 {"ts": "2026-11-18T10:20:56", "phase": "document", "state": "done", "spec": "claude-handoff"}
+{"ts": "2026-11-18T12:24:13", "phase": "define", "state": "start", "spec": "scroll-sidebar-only"}
+{"ts": "2026-11-18T12:24:33", "phase": "define", "state": "done", "spec": "scroll-sidebar-only"}
+{"ts": "2026-11-18T12:25:52", "phase": "build", "state": "start", "spec": "scroll-sidebar-only"}
+{"ts": "2026-11-18T14:57:06", "phase": "build", "state": "done", "spec": "scroll-sidebar-only"}

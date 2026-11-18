@@ -494,3 +494,58 @@ def test_a_mark_left_by_a_dead_filter_does_not_block_a_new_one(qapp):
     second.install()
     assert _filtered(page, second)
     w.deleteLater()
+
+
+# ---------------------------------------------------------------------------
+# Vertical scrolling changes section only over the sidebar (spec scroll-sidebar-only)
+# ---------------------------------------------------------------------------
+
+
+def _vertical(swipe, widget, dy):
+    send(swipe, widget, wheel(widget, 0, 0, Qt.ScrollBegin))
+    return send(swipe, widget, wheel(widget, 0, dy))
+
+
+def test_a_vertical_scroll_over_the_sidebar_changes_section(window):
+    window.tabs.setCurrentIndex(0)
+    assert _vertical(window.swipe, window.sidebar, -STEP) is True
+    assert window.sidebar.title_of(window.tabs.currentWidget()) == "Websites"
+
+
+def test_a_vertical_scroll_over_a_page_never_changes_section(window):
+    window.tabs.setCurrentIndex(1)
+    for target in (window.tabs.currentWidget(), window.apps_tab):
+        for dy in (-STEP, STEP):
+            assert _vertical(window.swipe, target, dy) is False
+            send(window.swipe, target, wheel(target, 0, 0, Qt.ScrollEnd))
+    assert window.tabs.currentIndex() == 1
+
+
+def test_a_vertical_scroll_at_the_end_of_a_scrolling_page_does_not_move_on(window):
+    area = QScrollArea()
+    inner = QLabel("x")
+    inner.setFixedHeight(4000)
+    area.setWidget(inner)
+    area.resize(200, 100)
+    window.tabs.addWidget(area)
+    window.tabs.setCurrentWidget(area)
+    area.show()
+    QApplication.processEvents()
+    area.verticalScrollBar().setValue(area.verticalScrollBar().maximum())
+    before = window.tabs.currentIndex()
+    assert _vertical(window.swipe, area.viewport(), -STEP) is False
+    assert window.tabs.currentIndex() == before
+
+
+def test_a_three_finger_vertical_swipe_over_a_page_does_not_change_section(window):
+    window.tabs.setCurrentIndex(1)
+    assert send(window.swipe, window.apps_tab, native_swipe(window.apps_tab, 90.0)) is False
+    assert window.tabs.currentIndex() == 1
+    assert send(window.swipe, window.sidebar, native_swipe(window.sidebar, 90.0)) is True
+    assert window.tabs.currentIndex() == 2
+
+
+def test_a_sideways_swipe_over_a_page_still_changes_section(window):
+    window.tabs.setCurrentIndex(0)
+    assert swipe_across(window.swipe, window.apps_tab, -STEP) is True
+    assert window.tabs.currentIndex() == 1

@@ -15,6 +15,11 @@ README and the specs in `docs/specs/` describe them.
 
 ## Unreleased
 
+### Changed
+- **Scrolling moves between sections only over the left sidebar.** Over a page, the
+  wheel or trackpad only scrolls that page, including at its top or bottom; it no
+  longer jumps to the next section. Sideways swipes are unchanged.
+
 ### Added
 - **Ask Claude…** in Check builds (Review and Done) and the Land window (after
   the run):
