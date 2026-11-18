@@ -372,6 +372,11 @@ copies be one.
 
 ## v3 — later
 
+- [ ] `P3` `testing` `@ai` **Code-level readiness audit (promises vs code).** Check every promise in the
+  README and `docs/foundry/app-context.md` against the code (launcher, Land, self-update, narrator
+  converter); classify each Delivered / Narrower / Stub; findings to `docs/audit/` and this file. Own
+  chat, Opus high, ~30–60 min. Requested 2026-11-18 after the lab-wide doc sweep.
+
 - [ ] `P1` `bug` `@ai` **Land: stop a branch that already contains a folder link (follow-up to `land-update-gaps`, 2026-11-17).**
   - Why: Land no longer commits a `.venv` symlink itself (6d04df6). But a link an agent committed on its own branch (`git add -A`, with only `.venv/` in `.gitignore`) still lands. Updating the main checkout then replaces the real, ignored `.venv` with the link, which is the SONAR data loss of 17 Nov.
   - Idea: an outgoing check next to `outgoing_findings` in `lab_hub/land_resolve.py`. It stops a branch whose diff adds a symlink (mode 120000) where the target checkout has a real folder, or a name the default branch ignores as a folder. Reuse `never_commit_link` / `ignored_as_folder`.
