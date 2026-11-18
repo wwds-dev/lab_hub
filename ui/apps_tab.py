@@ -1226,12 +1226,13 @@ class AppsTab(TilePage):
             self._landing_cards.clear()
             self._update_land_controls()
             return
+        from_land_all = len(plans) > 1
         plans = picked
         # The window opens after the confirmation. A single repo with nothing
         # to do (no confirmation either) says so on its tile alone, as before;
         # Land all always gets the window, whose end state is its summary.
         self._land_window_owns_run = False
-        if self.lander.run(plans) and (len(plans) > 1 or any(p.actions for p in plans)):
+        if self.lander.run(plans) and (from_land_all or any(p.actions for p in plans)):
             self._open_land_window(plans)
         self._update_land_controls()
 

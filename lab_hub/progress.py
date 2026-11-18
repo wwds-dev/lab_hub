@@ -420,11 +420,16 @@ def _steps_all(units: list[Unit], name: str = "") -> tuple[StepView, ...]:
     return tuple(shown)
 
 
+MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
 def earlier_line(runs) -> str:
     """The last three finished Lands, newest first; "" with none."""
     parts = []
     for run in list(runs)[-3:][::-1]:
-        text = (f"{run.at.day} {run.at:%b %H:%M}, {_n(run.repos, 'repo')}, "
+        # English month names whatever the system locale (review P3-3).
+        text = (f"{run.at.day} {MONTHS[run.at.month - 1]} {run.at:%H:%M}, "
+                f"{_n(run.repos, 'repo')}, "
                 f"{fmt_clock(run.seconds)}")
         parts.append(text + (", stopped" if run.stopped else ""))
     return ("Earlier: " + " · ".join(parts)) if parts else ""
@@ -508,6 +513,8 @@ class LandModel(RunModel):
             row.state, row.tone = NEEDS, "warn"
             # The bare word: Ask Claude matches it (handoff.STATUSES) and quotes it.
             row.status = "Stopped" if stopped and result.state != "landed" else "Needs you"
+            if row.status == "Stopped":
+                row.tone = "muted"  # §8.2: the owner stopped it; nothing went wrong
             if result.state == "landed":  # landed, yet branches are left for the owner
                 n = result.remaining
                 row.reason = f"{n} branch needs your decision" if n == 1 else \

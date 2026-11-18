@@ -86,7 +86,8 @@ class _Head(QWidget):
     clicked = Signal()
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802 (Qt override)
-        if event.button() == Qt.MouseButton.LeftButton:
+        if (event.button() == Qt.MouseButton.LeftButton
+                and self.rect().contains(event.position().toPoint())):  # review P3-8
             self.clicked.emit()
         super().mouseReleaseEvent(event)
 
@@ -312,6 +313,13 @@ class LandConfirmDialog(QDialog):
         self.details.setPlainText(details_text(chosen))
         self.land.setText("Land" if len(chosen) <= 1 else f"Land {len(chosen)} repos")
         self.land.setEnabled(bool(chosen))
+        self._refit()
+
+    def _refit(self) -> None:
+        """Folded cards give their room back (review P3-5)."""
+        self._fit()
+        if not self.details.isHidden():
+            self.scroll.setMinimumHeight(min(self._cards_height, CARDS_MIN_WITH_DETAILS))
 
     def _toggle_details(self) -> None:
         show = self.details.isHidden()

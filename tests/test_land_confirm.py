@@ -436,3 +436,34 @@ def test_a_click_on_the_header_toggles_and_return_still_presses_nothing(dialog):
     dialog.land.click()
     assert dialog.result() == QDialog.DialogCode.Accepted
     assert [p.name for p in dialog.chosen()] == ["lab_hub", "syndustryx"]
+
+
+# --- review findings (docs/audit/land-pick-and-time-review.md) ---------------
+def test_a_left_out_name_takes_the_hint_style_and_gets_it_back(dialog):
+    card = _card(dialog, "foundry")
+    card.check.setChecked(False)
+    assert card.name.objectName() == "hint"  # P2-1: the stylesheet colour, not the palette
+    card.check.setChecked(True)
+    assert card.name.objectName() == "appName"
+
+
+def test_a_press_dragged_off_the_header_does_not_toggle(dialog):
+    from PySide6.QtCore import QPoint
+
+    dialog.show()
+    card = _card(dialog, "foundry")
+    QTest.mousePress(card.head, Qt.MouseButton.LeftButton, pos=QPoint(5, 5))
+    QTest.mouseRelease(card.head, Qt.MouseButton.LeftButton,
+                       pos=QPoint(5, card.head.height() + 40))  # P3-8
+    assert card.check.isChecked()
+
+
+def test_folding_cards_gives_their_room_back(qapp, dialog):
+    dialog.show()
+    before = dialog.scroll.minimumHeight()
+    for name in ("lab_hub", "syndustryx"):
+        _card(dialog, name).check.setChecked(False)
+    assert dialog.scroll.minimumHeight() < before  # P3-5
+    for name in ("lab_hub", "syndustryx"):
+        _card(dialog, name).check.setChecked(True)
+    assert dialog.scroll.minimumHeight() >= before  # ticked again: the room comes back

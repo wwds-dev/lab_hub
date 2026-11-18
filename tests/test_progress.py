@@ -671,3 +671,29 @@ def test_earlier_line_is_the_last_three_newest_first():
     assert progress.earlier_line([durations.Run(datetime(2026, 1, 2, 3, 4), 1, 1, 9)]) == \
         "Earlier: 2 Jan 03:04, 1 repo, 0:09"
     assert progress.earlier_line([]) == ""
+
+
+# --- review findings (docs/audit/land-pick-and-time-review.md) ---------------
+def test_a_stopped_row_is_muted_not_amber():
+    clock = Clock()
+    model = progress.LandModel([_plan("a", "push")], {}, clock=clock, wall=Wall())
+    feed = Feed(model, clock)
+    feed.start("a", 0, "push"); clock.tick(3)
+    model.on_repo_done("a", LandResult("a", "not_landed", "stopped", stopped=True))
+    row = model.snapshot().rows[0]
+    assert (row.status, row.tone) == ("Stopped", "muted")  # review P3-2
+
+
+def test_month_names_stay_english_whatever_the_locale():
+    import locale
+
+    old = locale.setlocale(locale.LC_TIME)
+    try:
+        try:
+            locale.setlocale(locale.LC_TIME, "de_DE.UTF-8")
+        except locale.Error:
+            pytest.skip("no German locale here")
+        runs = [durations.Run(datetime(2026, 3, 5, 9, 10), 1, 1, 9)]
+        assert progress.earlier_line(runs) == "Earlier: 5 Mar 09:10, 1 repo, 0:09"
+    finally:
+        locale.setlocale(locale.LC_TIME, old)

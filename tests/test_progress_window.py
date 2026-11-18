@@ -387,3 +387,33 @@ def test_the_earlier_line_shows_past_runs_and_not_this_one(qapp):
     assert window.header.earlier.text() == "Earlier: 17 Nov 16:20, 6 repos, 1:32:05"
     assert window.header.earlier.isVisibleTo(window.header)
     window.close()
+
+
+# --- review findings (docs/audit/land-pick-and-time-review.md) ---------------
+def test_a_land_where_nothing_ran_is_not_logged(qapp):
+    window = _land_window(qapp)
+    window.on_repo_done("SONAR", LandResult("SONAR", "nothing"))
+    window.on_repo_done("Backstage", LandResult("Backstage", "nothing"))
+    window.finish([LandResult("SONAR", "nothing"), LandResult("Backstage", "nothing")], "x")
+    assert durations.load_runs() == []  # review P3-4: "0 repos" never pushes a real run out
+    window.close()
+
+
+def test_two_rows_with_the_same_name_open_one_at_a_time(qapp):
+    clock = Clock()
+    window = LandWindow(clock=clock, wall=lambda: WALL)
+    plans = [LandPlan("app", Path("/x"), (repo_tidy.Action("app", Path("/x"), "push", "b0",
+                                                           "why", branch="main"),))
+             for _ in range(2)]
+    window.start(plans)
+    for _ in range(2):
+        window.on_step(StepEvent("app", 0, 1, "push", "start", clock()))
+        clock.t += 2
+        window.on_step(StepEvent("app", 0, 1, "push", "end", clock(), clock() - 2, "done"))
+        window.on_repo_done("app", LandResult("app", "landed"))
+    window.finish([LandResult("app", "landed")] * 2, "x")
+    window.draw()
+    window.rows[1].opener.click()
+    assert window.rows[1].steps.isVisibleTo(window.rows[1])
+    assert not window.rows[0].steps.isVisibleTo(window.rows[0])  # review P3-7
+    window.close()

@@ -382,8 +382,7 @@ class Row(QFrame):
         self.opener.setFixedSize(16, 16)
         self.opener.hide()
         self.opener.toggled.connect(self._opener_toggled)
-        self.on_open = None  # set by the window: called with (name, opened)
-        self._view_name = ""
+        self.on_open = None  # set by the window: called with (row, opened)
         name_box = QWidget()
         name_box.setFixedWidth(NAME_W)
         name_line = QHBoxLayout(name_box)
@@ -432,12 +431,11 @@ class Row(QFrame):
     def _opener_toggled(self, on: bool) -> None:
         self.opener.setArrowType(Qt.ArrowType.DownArrow if on else Qt.ArrowType.RightArrow)
         if self.on_open is not None:
-            self.on_open(self._view_name, on)
+            self.on_open(self, on)
 
     def draw(self, view: progress.RowView, phase: int, opened: bool = False) -> None:
         self.icon.set_kind(view.icon, phase)
         _set_text(self.name, view.name)
-        self._view_name = view.name
         self.opener.setVisible(view.openable)
         if view.openable:
             self.opener.setAccessibleName(f"Show steps of {view.name}")
@@ -576,7 +574,7 @@ class _Run:
         out_wrap.addWidget(self.output)
         layout.addLayout(out_wrap)
         self.rows: list[Row] = []
-        self._open: set[str] = set()  # finished rows the owner opened
+        self._open: set[int] = set()  # finished rows the owner opened, by index (review P3-7)
 
     def _reset_rows(self) -> None:
         for row in self.rows:
@@ -589,11 +587,14 @@ class _Run:
             row.on_open = self._row_opened
             self._rows_box.addWidget(row)
 
-    def _row_opened(self, name: str, opened: bool) -> None:
+    def _row_opened(self, row: "Row", opened: bool) -> None:
+        if row not in self.rows:
+            return
+        index = self.rows.index(row)
         if opened:
-            self._open.add(name)
+            self._open.add(index)
         else:
-            self._open.discard(name)
+            self._open.discard(index)
         if self.model is not None:
             self.model.dirty = True
         self.draw()
@@ -626,8 +627,8 @@ class _Run:
         snap = self.model.snapshot()
         self.renders += 1
         self.header.draw(snap, self.phase)
-        for row, view in zip(self.rows, snap.rows):
-            row.draw(view, self.phase, view.name in self._open)
+        for index, (row, view) in enumerate(zip(self.rows, snap.rows)):
+            row.draw(view, self.phase, index in self._open)
         _set_text(self.current_line, ("✓  " + snap.current_line + "   — newest builds")
                   if snap.current_line else "")
         self.current_line.setVisible(bool(snap.current_line))

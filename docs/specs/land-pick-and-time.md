@@ -1,6 +1,6 @@
 # Spec: pick the repos to land, and see how long Land took
 
-Status: **Define approved by the owner 2026-11-18 ("Approve as recommended"): all four §5 decisions as recommended.** Design is the mockup below. Architect: §8, approved by the owner 2026-11-18 ("Approve architecture"), including the end title "Land finished · N repos". Build in progress.
+Status: **Define approved by the owner 2026-11-18 ("Approve as recommended"): all four §5 decisions as recommended.** Design is the mockup below. Architect: §8, approved by the owner 2026-11-18 ("Approve architecture"), including the end title "Land finished · N repos". Built; Review, Verify and Secure in `docs/audit/land-pick-and-time-*.md`.
 In-flight check (`session_start.py --inflight`, 2026-11-18): no spec owns choosing repos in the confirmation or the Land window's end state. `land-confirm-dialog` (released in build 199) owns the confirmation's look; this spec adds a choice to it. `progress-windows` (document done) owns the Land window; this spec changes only its finished state and lets finished rows open. `land-fast` and `land-from-tiles` own what Land does; nothing here changes that. Another session ("Land: let Claude edit .claude/ files; test main once") is changing `lab_hub/land.py`; this spec needs no change to `land.py`'s engine.
 Mockup: `docs/specs/land-pick-and-time-mockup.html` (filled with the data from the owner's build-199 screenshots).
 
@@ -90,3 +90,9 @@ Phase: Architect (`architect` role, by the orchestrator), 2026-11-18. **GATE: ne
 ### 8.5 Risks
 - Another session is editing Land code; Build re-reads `ui/apps_tab.py`, `ui/progress_window.py` and `lab_hub/progress.py` before each edit and stages by name.
 - Rebuilding the Claude Code box on toggle must not leave the old widget visible; a test checks only one box exists after several toggles.
+
+## 9. Build
+Phase: Build (`engineer` role, by the orchestrator), 2026-11-18. Files: `lab_hub/durations.py` (run log, `_read(limit)`, shared `_write_json`), `lab_hub/progress.py` (`fmt_clock` hours, `took_line`, `earlier_line`, `MONTHS`, `RowView.took`/`openable`, `Row.time_text`, end titles, stopped rows), `ui/progress_window.py` (finished header time, "Earlier" line, row opener, run recorded once per Land that ran a repo), `ui/land_confirm.py` (tick boxes, folding, `chosen()`, `_sync`, `_refit`), `ui/apps_tab.py` (`confirm_land` returns plans; `_land_planned` runs the choice). README, CHANGELOG. Version: `v<MAJOR>.<BUILD>` moves with the commit count.
+Existing tests changed to the approved behaviour, not loosened: `fmt_clock(3600)` reads `1:00:00`; the single-Land title reads "Land finished · repo"; `confirm_land` returns `[]`/`[plan]`; a "Needs you" pill carries its time; the pill list counts visible pills (the hidden "Left out" pill).
+**Wording for the owner:** the "Earlier" line uses commas inside a run and " · " between runs ("Earlier: 17 Nov 16:20, 6 repos, 1:32:05 · 17 Nov 09:10, 1 repo, 0:41"); with " · " everywhere, as §2 item 11 had it, three runs read as one chain. Review P3-1.
+Evidence: `docs/audit/land-pick-and-time-confirm.png` (one repo unticked, fixture data from the owner's screenshot) and `docs/audit/land-pick-and-time-window.png` (finished window with a run in the log and one row opened), rendered offscreen with a temporary support dir. Not verified: on a real display and a real Land all (the owner's next Land all gives the real "after" time).

@@ -686,3 +686,70 @@ def test_an_empty_choice_is_a_cancel(qapp, tmp_path, lab, monkeypatch):
     assert tab.land_window is None and tab._landing_cards == {}
     assert tab.cards[0].land_button.isEnabled()
     _drop(tab)
+
+
+# --- review findings (docs/audit/land-pick-and-time-review.md) ---------------
+def _planned_tab(qapp, tmp_path, monkeypatch):
+    tab = tab_for(qapp, tmp_path, ["repo"], monkeypatch)
+    ran, windows = [], []
+    tab.lander.run = lambda plans: ran.append([p.name for p in plans]) or True
+    tab._open_land_window = lambda plans: windows.append([p.name for p in plans])
+    return tab, ran, windows
+
+
+def test_a_partial_choice_keeps_the_nothing_to_land_rows_in_plan_order(qapp, tmp_path,
+                                                                       monkeypatch):
+    from .test_land_confirm import screenshot_plans
+
+    tab, ran, windows = _planned_tab(qapp, tmp_path, monkeypatch)
+    plans = screenshot_plans()  # lab_hub, foundry, syndustryx, Imprint (nothing to land)
+    tab.confirm_land = lambda ps: [p for p in ps if p.name == "foundry"]
+    tab._land_planned(plans)
+    assert ran == [["foundry", "Imprint"]] and windows == ran  # review P2-2
+    tab.confirm_land = lambda ps: []
+    tab._land_planned(screenshot_plans())
+    assert ran == [["foundry", "Imprint"]]  # Cancel runs nothing, not even Imprint
+    _drop(tab)
+
+
+def test_land_all_narrowed_to_one_repo_still_opens_the_window(qapp, tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from lab_hub import land_resolve
+
+    tab, ran, windows = _planned_tab(qapp, tmp_path, monkeypatch)
+    stop_only = land.LandPlan("a", Path("/a"), stops=(
+        land_resolve.Stop("a", "/a", "a process is running in it: close that terminal"),))
+    other = land.LandPlan("b", Path("/b"), stops=(
+        land_resolve.Stop("b", "/b", "a process is running in it: close that terminal"),))
+    tab.confirm_land = lambda ps: [stop_only]
+    tab._land_planned([stop_only, other])
+    assert ran == [["a"]] and windows == [["a"]]  # review P3-6: it came from Land all
+    _drop(tab)
+
+
+def test_the_real_dialog_choice_is_what_runs_and_what_is_disclosed(qapp, tmp_path,
+                                                                   monkeypatch):
+    """Spec §6 mitigation, end to end (review P3-9)."""
+    from ui.land_confirm import LandConfirmDialog
+
+    from .test_land_confirm import screenshot_plans
+
+    tab, ran, windows = _planned_tab(qapp, tmp_path, monkeypatch)
+    seen = {}
+
+    def exec_(self):
+        for card in self.cards:
+            if card.plan.cost.any:  # untick both repos that may use Claude Code
+                card.check.setChecked(False)
+        seen["claude"] = self.claude
+        seen["details"] = self.details.toPlainText()
+        return QDialog.DialogCode.Accepted
+
+    from PySide6.QtWidgets import QDialog
+
+    monkeypatch.setattr(LandConfirmDialog, "exec", exec_)
+    tab._land_planned(screenshot_plans())
+    assert seen["claude"] is None and "Anthropic" not in seen["details"]
+    assert ran == [["foundry", "Imprint"]]
+    _drop(tab)
