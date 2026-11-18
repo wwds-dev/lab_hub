@@ -390,6 +390,12 @@ copies be one.
   - Options (owner picks at Define): count every plain merge as a possible Claude merge and triage when `plan.claude` is set ("up to"); or show a fixed line that a merge turning into a conflict may use Claude Code; or enforce a run-time ceiling equal to the disclosed total.
   - Start: Define a new spec (owner gate). Suggested setup: Opus, medium, about 30–60 min.
 
+- [ ] `P2` `bug` `@ai` **Land window: some step times are never saved, so it stays on "Estimating…" (2026-11-18).**
+  - Found while defining `land-pick-and-time` (gap in `progress-windows`).
+  - Why: `lab_hub/durations.py:43-46` `KINDS` lists only the seven `repo_tidy.Action` kinds and the build stages. Land's prep and archive steps (`rescue`, `untracked`, `switch`, `archive`; mapped to stages in `lab_hub/progress.py:104-105`) are refused by `record()` and dropped by `load()`. Every run with a prep step therefore has a step with no history, and the time left reads "Estimating…" throughout (owner's build-199 screenshot, "0:05 elapsed · Estimating…").
+  - Fix: add the four kinds to `LAND_KINDS`, with a test that a finished `untracked` step is recorded and estimated next time; check that `progress-windows` §8.4's whitelist text still holds.
+  - Start: a small change in `progress-windows` (no new spec expected). Suggested setup: Sonnet, medium, about 15–25 min.
+
 - [ ] `P3` `security` `@me` **Decide: remove the real-lab Land confirmation screenshots from git history (2026-11-17).**
   - Why: commits `4072f72` and `b2c0ab5` added `docs/specs/land-confirm-dialog-screenshot*.png` taken on the real lab, showing repo names and local process names (`gk`, `node`, `zsh`, `claude`) and counts. No paths or usernames are shown. `d87d2f2` replaced them with demo data, but the old images stay in the public repo's history (security review P2-1, `docs/audit/land-confirm-dialog-security.md`).
   - Decision (owner): accept the exposure, or rewrite `main` (for example `git filter-repo --path docs/specs/land-confirm-dialog-screenshot.png --path docs/specs/land-confirm-dialog-screenshot-light.png --invert-paths`, then re-add the demo PNGs and force-push). A rewrite changes every commit hash after `4072f72`: every clone, worktree and open branch has to be re-synced. Do it while no other session is working in `lab_hub`.
