@@ -187,3 +187,5 @@
 {"ts": "2026-11-18T12:25:44", "phase": "architect", "state": "start", "spec": "land-pick-and-time"}
 {"ts": "2026-11-18T12:27:05", "phase": "architect", "state": "done", "spec": "land-pick-and-time"}
 {"ts": "2026-11-18T12:28:18", "phase": "build", "state": "start", "spec": "land-pick-and-time"}
+{"ts": "2026-11-18T22:11:43", "phase": "define", "state": "start", "spec": "land-folder-link-guard"}
+{"ts": "2026-11-18T22:12:54", "phase": "define", "state": "done", "spec": "land-folder-link-guard"}
