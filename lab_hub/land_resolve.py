@@ -23,11 +23,11 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
-import posixpath
 import re
 import shutil
 import subprocess
 import tempfile
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -368,48 +368,219 @@ def ignored_as_folder(worktree: Path, rel: str) -> bool:
 
 
 # ----------------------------------------------------------------------
-# A link a branch already contains (spec land-folder-link-guard)
+# A link or file a branch already contains (spec land-folder-link-guard)
 # ----------------------------------------------------------------------
 LINK_MODE = "120000"
-# The start of a merge's link stop; `claude_resolve.blocker_kind` keys on it.
-LINK_STOPS = ("it adds a link at ", "it may add a link")
+FILE_MODES = ("100644", "100755")
+# The start of a merge's stop; `claude_resolve.blocker_kind` keys on it.
+LINK_STOPS = ("it adds a link at ", "it adds a file at ", "it may add a link")
+MAX_HOPS = 40
 _OID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 
 
-def incoming_links(checkout: Path, old: str, new: str) -> list[tuple[str, str]] | None:
-    """(path, blob) for every path that is a symlink in `new` and was not the
-    same symlink in `old` (commits or trees); None when git cannot tell."""
-    rc, out, _ = rt.git(checkout, "diff-tree", "-r", "-z", "--no-renames", "--no-abbrev",
-                        old, new, strip=False)
+def is_link_stop(message: str) -> bool:
+    """A pull's or switch's outcome that `link_stop` wrote: "<ref> adds a link
+    at …". Only the words before the first path count (a ref has no spaces)."""
+    text = re.sub(r"^\s*(?:not pulled|failed|skipped)\s*—\s*", "", message or "")
+    return bool(re.match(r"\S+ (?:adds a (?:link|file) at |may add a link that git cannot)",
+                         text))
+
+
+class _CannotTell(Exception):
+    pass
+
+
+def _git_bytes(cwd: Path, *args: str, data: bytes | None = None) -> tuple[int, bytes, bytes]:
+    """`rt.git` without decoding: a branch's paths and link text need not be
+    UTF-8 (security P3-2). Never raises."""
+    try:
+        r = subprocess.run([rt._git_exe(), "-C", str(cwd), *args], input=data,
+                           capture_output=True, timeout=rt.GIT_TIMEOUT, env=rt._env(),
+                           start_new_session=True)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 1, b"", str(exc).encode()
+    return r.returncode, r.stdout, r.stderr
+
+
+def incoming(checkout: Path, old: str, new: str) -> list[tuple[str, str, str]] | None:
+    """(path, mode, blob) for each path that moving from `old` to `new`
+    (commits or trees) turns into a symlink or a changed symlink, or adds as a
+    file or turns from a link into a file; None when git cannot tell."""
+    rc, out, _ = _git_bytes(checkout, "diff-tree", "-r", "-z", "--no-renames", "--no-abbrev",
+                            old, new)
     if rc != 0:
         return None
-    parts = out.split("\0")
-    if parts and parts[-1] == "":
+    parts = out.split(b"\0")
+    if parts and parts[-1] == b"":
         parts.pop()
     if len(parts) % 2:
         return None
     found = []
-    for meta, rel in zip(parts[::2], parts[1::2]):
-        fields = meta.lstrip(":").split()
-        if len(fields) != 5 or not rel:
+    for meta, raw in zip(parts[::2], parts[1::2]):
+        fields = meta.decode("ascii", "replace").lstrip(":").split()
+        if len(fields) != 5 or not raw:
             return None
-        if fields[1] == LINK_MODE:
-            found.append((rel, fields[3]))
+        mode, blob, status = fields[1], fields[3], fields[4]
+        if mode == LINK_MODE or (mode in FILE_MODES and status in ("A", "T")):
+            found.append((os.fsdecode(raw), mode, blob))
     return found
 
 
 def _tracked(checkout: Path, rel: str) -> bool | None:
-    rc, out, _ = rt.git(checkout, "ls-files", "-z", "--", f":(literal){rel}", strip=False)
+    rc, out, _ = _git_bytes(checkout, "ls-files", "-z", "--", f":(literal){rel}")
     if rc != 0:
         return None
-    return rel in out.split("\0")
+    return os.fsencode(rel) in out.split(b"\0")
 
 
-def link_problem(checkout: Path, rel: str, blob: str) -> str:
-    """Why the link `rel` (its text in `blob`) must not reach `checkout`, or ""
-    (spec land-folder-link-guard §3.2). Its target is judged on the text only:
-    it need not exist yet. A link to a folder inside the repo passes (§2.3)."""
+def _blobs(checkout: Path, oids: list[str]) -> dict[str, bytes]:
+    """Blob contents by oid, in one `cat-file --batch`; _CannotTell if not."""
+    oids = sorted(set(oids))
+    if not oids:
+        return {}
+    rc, out, _ = _git_bytes(checkout, "cat-file", "--batch",
+                            data="".join(f"{o}\n" for o in oids).encode())
+    if rc != 0:
+        raise _CannotTell
+    found, pos = {}, 0
+    for oid in oids:
+        end = out.find(b"\n", pos)
+        head = out[pos:end].split() if end >= 0 else []
+        if len(head) != 3 or head[0].decode() != oid or head[1] != b"blob":
+            raise _CannotTell
+        size = int(head[2])
+        found[oid] = out[end + 1:end + 1 + size]
+        pos = end + 1 + size + 1
+    return found
+
+
+def _fold(rel: str) -> str:
+    # APFS: case- and normalisation-insensitive, as git's core.ignorecase.
+    return unicodedata.normalize("NFC", rel).casefold()
+
+
+@dataclass
+class _Tree:
+    """What the result tree holds: its links (text by path key) and its paths."""
+    links: dict[str, bytes]
+    paths: set[str]
+    gitignores: dict[str, bytes]  # folder ("" for the top) -> rules
+
+
+def _tree(checkout: Path, new: str) -> _Tree:
+    rc, out, _ = _git_bytes(checkout, "ls-tree", "-r", "-z", "--full-tree", new)
+    if rc != 0:
+        raise _CannotTell
+    links, ignores, paths = {}, {}, set()
+    for entry in out.split(b"\0"):
+        if not entry:
+            continue
+        meta, _, raw = entry.partition(b"\t")
+        fields = meta.decode("ascii", "replace").split()
+        if len(fields) != 3:
+            raise _CannotTell
+        rel = os.fsdecode(raw)
+        parts = rel.split("/")
+        paths.update(_fold("/".join(parts[:i])) for i in range(1, len(parts) + 1))
+        if fields[0] == LINK_MODE:
+            links[_fold(rel)] = fields[2]
+        elif fields[0] in FILE_MODES and parts[-1] == ".gitignore":
+            ignores["/".join(parts[:-1])] = fields[2]
+    texts = _blobs(checkout, list(links.values()) + list(ignores.values()))
+    return _Tree({k: texts[o] for k, o in links.items()}, paths,
+                 {d: texts[o] for d, o in ignores.items()})
+
+
+def _ignored_folders(checkout: Path, rels: list[str], rules: dict[str, bytes] | None) -> set[str]:
+    """The `rels` that git would ignore if each were a folder, by the
+    `.gitignore` files of the checkout (`rules` None) or of `rules`, in one
+    `check-ignore --stdin` over a mirror that holds only those files (see
+    `ignored_as_folder`). _CannotTell when git cannot tell."""
+    rc, git_dir, _ = rt.git(checkout, "rev-parse", "--absolute-git-dir")
+    if rc != 0 or not git_dir:
+        raise _CannotTell
+    try:
+        root = checkout.resolve()
+    except OSError:
+        raise _CannotTell from None
+    with tempfile.TemporaryDirectory(prefix="lab-hub-ignore-") as tmp:
+        mirror = Path(tmp)
+        try:
+            for rel in rels:
+                parts = Path(rel).parts
+                for depth in range(len(parts)):
+                    dest = mirror.joinpath(*parts[:depth], ".gitignore")
+                    if dest.exists():
+                        continue
+                    if rules is None:
+                        src = checkout.joinpath(*parts[:depth], ".gitignore")
+                        text = (src.read_bytes() if src.is_file() and not src.is_symlink()
+                                and src.resolve().is_relative_to(root) else None)
+                    else:
+                        text = rules.get("/".join(parts[:depth]))
+                    if text is not None:
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        dest.write_bytes(text)
+        except OSError:
+            raise _CannotTell from None
+        rc, out, err = _git_bytes(mirror, f"--git-dir={git_dir}", f"--work-tree={mirror}",
+                                  "check-ignore", "--no-index", "-z", "--stdin",
+                                  data=b"".join(os.fsencode(f"./{r}/") + b"\0" for r in rels))
+    if rc not in (0, 1) or err.strip():
+        raise _CannotTell
+    said = {os.fsdecode(p) for p in out.split(b"\0") if p}
+    return {r for r in rels if f"./{r}/" in said}
+
+
+def _resolve(checkout: Path, rel: str, text: str, tree: _Tree) -> str:
+    """Why the link `rel` -> `text` leads somewhere it must not, following the
+    links it passes through in the result tree and the checkout (security
+    P2-1), or ""."""
+    if os.path.isabs(text):
+        return "whose target is an absolute path"
+    cur = rel.split("/")[:-1]
+    todo = text.split("/")
+    hops = 0
+    while todo:
+        part = todo.pop(0)
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if not cur:
+                return "whose target is outside the repo"
+            cur.pop()
+            continue
+        cur.append(part)
+        here = "/".join(cur)
+        nxt = tree.links.get(_fold(here))
+        if nxt is None and _fold(here) not in tree.paths:
+            path = checkout / here
+            try:
+                nxt = os.fsencode(os.readlink(path)) if path.is_symlink() else None
+            except OSError:
+                return "whose target git cannot follow"
+        if nxt is None:
+            continue
+        hops += 1
+        nxt_text = os.fsdecode(nxt)
+        if hops > MAX_HOPS or not nxt_text or "\n" in nxt_text or "\0" in nxt_text:
+            return "whose target git cannot follow"
+        if os.path.isabs(nxt_text):
+            return "whose target is outside the repo"
+        cur.pop()
+        todo = nxt_text.split("/") + todo
+    if cur and _fold(cur[0]) == ".git":
+        return "whose target is inside .git"
+    return ""
+
+
+def _problem(checkout: Path, rel: str, mode: str, tree: _Tree, ignored: set[str]) -> str:
+    """Why `rel` must not reach `checkout`, or "" (spec §3.2, security P1-1):
+    for a link or a file, what it would replace and whether its name is
+    ignored as a folder; for a link, also where its text leads."""
     parts = Path(rel).parts
+    if not parts or Path(rel).is_absolute() or any(p in ("..", ".") for p in parts):
+        return "that git cannot check"
     try:
         for depth in range(1, len(parts)):
             if checkout.joinpath(*parts[:depth]).is_symlink():
@@ -417,7 +588,7 @@ def link_problem(checkout: Path, rel: str, blob: str) -> str:
         path = checkout / rel
         if path.is_dir() and not path.is_symlink():
             return "where this checkout has a real folder"
-        if os.path.lexists(path):
+        if mode == LINK_MODE and os.path.lexists(path):
             tracked = _tracked(checkout, rel)
             if tracked is None:
                 return "that git cannot check"
@@ -425,55 +596,68 @@ def link_problem(checkout: Path, rel: str, blob: str) -> str:
                 return "where this checkout has a file git does not track"
     except OSError:
         return "that git cannot check"
-    if ignored_as_folder(checkout, rel):
-        return "a name ignored as a folder here"
-    rc, text, _ = rt.git(checkout, "cat-file", "blob", blob, strip=False)
-    if rc != 0:
-        return "that git cannot check"
-    if not text or "\n" in text or "\0" in text:
+    if rel in ignored:
+        return ", a name ignored as a folder here"
+    if mode != LINK_MODE:
+        return ""
+    text = os.fsdecode(tree.links.get(_fold(rel), b""))
+    if (not text or "\n" in text or "\0" in text
+            or any("\udc80" <= c <= "\udcff" for c in text)):
         return "whose target git cannot read"
-    if os.path.isabs(text):
-        return "whose target is an absolute path"
     if text.endswith("/"):
         return "whose target ends in /"
-    target = posixpath.normpath(posixpath.join(posixpath.dirname(rel), text))
-    if target == ".." or target.startswith("../"):
-        return "whose target is outside the repo"
-    return ""
+    return _resolve(checkout, rel, text, tree)
 
 
 def _shown(rel: str) -> str:
-    """A branch's path, safe to show: no control characters, at most 120 long."""
-    text = re.sub(r"[\x00-\x1f\x7f]", "?", rel)
+    """A branch's path, safe to show: no control, format or separator
+    characters (security P3-4), at most 120 long."""
+    text = "".join("?" if unicodedata.category(c) in ("Cc", "Cf", "Cs", "Zl", "Zp") else c
+                   for c in rel)
     return text if len(text) <= 120 else text[:119] + "…"
 
 
 def link_stop(checkout: Path, old: str, new: str, who: str = "it",
               fix_in: str = "the branch") -> str:
     """The stop when moving `checkout` from `old` to `new` would bring a link
-    that §3.2 refuses, or "" when there is none."""
-    links = incoming_links(checkout, old, new)
-    if links is None:
-        return f"{who} may add a link that git cannot check: Land again, or land it by hand"
-    bad = [(rel, why) for rel, blob in links if (why := link_problem(checkout, rel, blob))]
+    or file that §3.2 refuses, or "" when there is none."""
+    cannot = f"{who} may add a link that git cannot check: Land again, or land it by hand"
+    found = incoming(checkout, old, new)
+    if found is None:
+        return cannot
+    if not found:
+        return ""
+    try:
+        tree = _tree(checkout, new)
+        rels = [rel for rel, _, _ in found
+                if Path(rel).parts and not any(p in ("..", ".") for p in Path(rel).parts)]
+        ignored = (_ignored_folders(checkout, rels, None)
+                   | _ignored_folders(checkout, rels, tree.gitignores))
+    except _CannotTell:
+        return cannot
+    bad = [(rel, mode, why) for rel, mode, _ in found
+           if (why := _problem(checkout, rel, mode, tree, ignored))]
     if not bad:
         return ""
-    rel, why = bad[0]
-    text = f"{who} adds a link at {_shown(rel)} {why}"
-    others = [_shown(r) for r, _ in bad[1:]]
+    rel, mode, why = bad[0]
+    what = "link" if mode == LINK_MODE else "file"
+    text = f"{who} adds a {what} at {_shown(rel)}{why if why[0] == ',' else ' ' + why}"
+    others = [_shown(r) for r, _, _ in bad[1:]]
     if others:
         text += f"; also at {', '.join(others[:2])}"
         if len(others) > 2:
             text += f" and {len(others) - 2} more"
-    return f"{text}: remove the link from {fix_in}, then Land again"
+    return f"{text}: remove the {what} from {fix_in}, then Land again"
 
 
 def merge_link_stop(repo: Path, default: str, branch: str) -> str:
-    """`link_stop` for merging `branch` into `default` in the main checkout,
-    judged on the merge result git would write (with or without conflicts)."""
+    """`link_stop` for merging `branch` (a ref or an exact commit) into
+    `default` in the main checkout, judged on the merge result git would
+    write (with or without conflicts)."""
     trees = rt.worktrees(repo)
-    rc, out, _ = rt.git(repo, "merge-tree", "--write-tree",
-                        f"refs/heads/{default}", f"refs/heads/{branch}")
+    rc, out, err = rt.git(repo, "merge-tree", "--write-tree", f"refs/heads/{default}", branch)
+    if rc not in (0, 1) and "unrelated histories" in err:
+        return ""  # git refuses that merge itself; the merge path says why (review P3-1)
     tree = out.splitlines()[0].strip() if out else ""
     if not trees or rc not in (0, 1) or not _OID.fullmatch(tree):
         return "it may add a link that git cannot check: Land again, or land it by hand"
@@ -817,7 +1001,11 @@ def apply_step(step: Step, log: Path | None = None, busy="fresh",
         if rc != 0:
             return False, f"failed — could not commit the open work on {was}: {err}"
         # git would replace an ignored real folder with a link (land-folder-link-guard).
-        why = link_stop(path, "HEAD", f"refs/heads/{default}", who=default, fix_in=default)
+        rc, oid, _ = rt.git(path, "rev-parse", "--verify", "--quiet", f"refs/heads/{default}^{{commit}}")
+        why = (link_stop(path, "HEAD", oid, who=default, fix_in=default) if rc == 0 and oid
+               else f"git cannot read {default}")
+        if not why and rt.tip(path, default) != oid:
+            why = f"{default} moved while Land checked it: Land again"
         if why:
             rt._log(f"NOT SWITCHED checkout {path} from {was} to {default}: {why}", log)
             return False, f"failed — {why}"

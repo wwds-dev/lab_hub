@@ -497,8 +497,13 @@ def test_a_symlink_out_of_the_repo_is_refused_before_claude(conflict, stub, tmp_
     sh(conflict, "add", "out")
     sh(conflict, "commit", "-qm", "link")
     sh(conflict, "checkout", "-q", "main")
-    _a, ok, msg = _land_result(conflict, stub, tmp_path)
-    assert not ok and "symlinks that point outside" in msg
+    # Since land-folder-link-guard the plan already refuses it (§3.2.3), so no
+    # Claude merge is offered at all.
+    p = plan(conflict, stub)
+    assert not any(a.kind == "claude_merge" for a in p.actions)
+    assert any(s.target == "feat" and "it adds a link at out whose target is an absolute path"
+               in s.reason for s in p.skipped)
+    run_all(p, stub, tmp_path / "log")
     assert not (tmp_path / "calls").exists()  # Claude never ran
 
 

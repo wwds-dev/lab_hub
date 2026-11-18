@@ -526,6 +526,9 @@ class _Run:
         self.tried: dict[tuple[str, str], str] = {}  # (branch, sha) -> why it did not land
         self.notes: list[str] = []  # branches Claude chose to land (security P2-4)
         self.push_failed: set[str] = set()  # not pushed in this run: not retried (review P2-6)
+        # The pull or prep's switch stopped for a link (land-folder-link-guard, review
+        # P1-2): every branch waits behind it, none is triaged or archived.
+        self.held: str = ""
         # (branch, sha) -> (kind, default, message): a merge that stopped for a
         # reason only a person can clear; never triaged or archived (land-fast §3)
         self.blocked: dict[tuple[str, str], tuple[str, str, str]] = {}
@@ -591,6 +594,8 @@ class _Run:
                 self.quarantined += len(step.quarantine)
             if not ok:
                 self.stops.append(land_resolve.Stop(plan.name, step.target, plain_reason(message)))
+                if step.kind == "switch" and land_resolve.is_link_stop(message):
+                    self.held = message
             self.outcome(ok, message)
 
     def actions(self, first: tuple[repo_tidy.Action, ...] | None = None) -> int:
@@ -605,7 +610,8 @@ class _Run:
         actions = [a for a in actions
                    if not (a.kind in MERGES and ((a.target, a.sha) in self.tried
                                                  or a.target in self.kept))
-                   and not (a.kind == "push" and a.target in self.push_failed)]
+                   and not (a.kind == "push" and a.target in self.push_failed)
+                   and not (a.kind == "pull" and self.held)]
         ran = 0
         for action in actions:
             if self.stopped:
@@ -630,6 +636,10 @@ class _Run:
                 self.tried[(action.target, action.sha)] = ""
             if action.kind == "push" and not ok:
                 self.push_failed.add(action.target)
+            if action.kind == "pull" and not ok and land_resolve.is_link_stop(message):
+                self.held = message
+                self.stops.append(land_resolve.Stop(plan.name, action.target,
+                                                    plain_reason(message)))
             self.outcome(ok, message)
         return ran
 
@@ -661,8 +671,8 @@ class _Run:
         plan = self.plan
         left = [b for b in land_resolve.unlanded(plan.path, plan.name)
                 if (b.branch, b.sha) not in self.blocked]
-        if not left or self.stopped:
-            return
+        if not left or self.stopped or self.held:
+            return  # held: the branches wait behind the pull or switch stop
         _, skips = repo_tidy.plan_repo(plan.name, plan.path, self._busy(), self.now,
                                        plan.claude, plan.claude_why, land_mode=True)
         why_by_branch = {s.target: s.reason.removeprefix("not merged: ") for s in skips}

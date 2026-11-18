@@ -581,7 +581,7 @@ def plan_repo(name: str, repo: Path, busy: tuple[Path, ...] | None = (),
         if source:
             skips.append(Skip(name, branch, f"not merged: {source}"))
             continue
-        links = _merge_link_stop(repo, default, branch)
+        links = _merge_link_stop(repo, default, f"refs/heads/{branch}")
         if links:
             skips.append(Skip(name, branch, f"not merged: {links}"))
             continue
@@ -663,10 +663,7 @@ def plan_repo(name: str, repo: Path, busy: tuple[Path, ...] | None = (),
                               "after the commit or merges above", land_mode=land_mode))
     else:
         ahead, behind = ahead_behind(repo) or (0, 0)
-        links = _pull_link_stop(repo, default) if behind else ""
-        if links:
-            skips.append(Skip(name, default, f"not pulled: {links}"))
-        elif behind:
+        if behind:
             actions.append(Action(name, repo, "pull", default,
                                   f"{behind} commit{'s' if behind != 1 else ''} behind, nothing local"))
         elif ahead:
@@ -676,21 +673,23 @@ def plan_repo(name: str, repo: Path, busy: tuple[Path, ...] | None = (),
     return actions, skips
 
 
-def _merge_link_stop(repo: Path, default: str, branch: str) -> str:
-    """A link the merge would bring over a real folder (land-folder-link-guard)."""
+def _merge_link_stop(repo: Path, default: str, rev: str) -> str:
+    """A link (or file) the merge of `rev` would bring over a real folder
+    (land-folder-link-guard)."""
     from .land_resolve import merge_link_stop
 
-    return merge_link_stop(repo, default, branch)
+    return merge_link_stop(repo, default, rev)
 
 
-def _pull_link_stop(repo: Path, default: str) -> str:
-    """The same for a pull, judged on the last-fetched origin/<default>."""
+def _pull_link_stop(repo: Path, default: str, rev: str = "") -> str:
+    """The same for a pull, judged on `rev` (the last-fetched origin/<default>
+    when not given)."""
     from .land_resolve import link_stop
 
     trees = worktrees(repo)
     if not trees:
         return "git cannot list its checkout"
-    return link_stop(trees[0].path, "HEAD", f"refs/remotes/origin/{default}",
+    return link_stop(trees[0].path, "HEAD", rev or f"refs/remotes/origin/{default}",
                      who=f"origin/{default}", fix_in=f"{default} on the remote")
 
 
@@ -844,7 +843,7 @@ def check(action: Action, busy: tuple[Path, ...] | None = (),
             return reason
         if action.kind == "merge" and not merges_cleanly(repo, default, branch):
             return f"it now conflicts with {default}"
-        reason = _merge_link_stop(repo, default, branch)
+        reason = _merge_link_stop(repo, default, action.sha)  # what apply merges (security P3-1)
         if reason:
             return reason
         if action.kind == "claude_merge":
@@ -892,10 +891,6 @@ def check(action: Action, busy: tuple[Path, ...] | None = (),
     ahead, behind = ahead_behind(repo) or (0, 0)
     if action.kind == "pull" and ahead:
         return "it has local commits now"
-    if action.kind == "pull":
-        reason = _pull_link_stop(repo, default)
-        if reason:
-            return reason
     if action.kind == "push" and behind:
         return f"the remote has {behind} new commit(s); pull first"
     if action.kind == "push" and not ahead:
@@ -976,11 +971,14 @@ def apply(action: Action, log: Path | None = None,
         rc, _, err = git(repo, "fetch", "--quiet", "origin",
                          f"+refs/heads/{action.target}:{remote}", timeout=NETWORK_TIMEOUT)
         if rc == 0:
-            why = _pull_link_stop(repo, action.target)
+            # One exact commit is checked and moved to (security P3-1).
+            rc, oid, err = git(repo, "rev-parse", "--verify", "--quiet", f"{remote}^{{commit}}")
+        if rc == 0:
+            why = _pull_link_stop(repo, action.target, oid)
             if why:
                 _log(f"NOT PULLED {action.target} in {repo}: {why}", log)
                 return False, f"not pulled — {why}"
-            rc, _, err = git(repo, "merge", "--ff-only", "--quiet", remote)
+            rc, _, err = git(repo, "merge", "--ff-only", "--quiet", oid)
         if rc == 0:
             _log(f"PULLED {action.target} in {repo}", log)
     else:  # push

@@ -6,6 +6,7 @@ ignored folder, before git replaces it. Real temporary git repos, no git mocks.
 from __future__ import annotations
 
 import os
+import subprocess
 
 import pytest
 
@@ -101,7 +102,7 @@ def test_a_name_ignored_as_a_folder_stops_even_without_the_folder(lab, tmp_path)
     link_branch(lab, tmp_path, "claude/agent", target="elsewhere")
     assert not os.path.lexists(lab / ".venv")
     _, skips = tidy.plan_repo("repo", lab, (), OLD)
-    assert any("a link at .venv a name ignored as a folder here" in s.reason for s in skips)
+    assert any("a link at .venv, a name ignored as a folder here" in s.reason for s in skips)
 
 
 # ------------------------------------------------------------ each route
@@ -166,6 +167,44 @@ def test_preps_switch_stops_when_the_default_branch_brings_the_link(lab, tmp_pat
     assert "remove the link from main, then Land again" in result.reason
 
 
+def test_a_switch_link_stop_holds_every_branch_and_archives_none(lab, tmp_path, quarantine,
+                                                                 monkeypatch):
+    ignore(lab, ".venv/\n", push=False)
+    os.symlink("x", lab / ".venv")
+    sh(lab, "add", ".venv")
+    sh(lab, "commit", "-qm", "a link on main")
+    sh(lab, "push", "-q")
+    sh(lab, "checkout", "-q", "-b", "feat")
+    commit(lab, "f.txt")
+    sh(lab, "checkout", "-q", "-b", "claude/redesign")
+    sh(lab, "rm", "-q", "--cached", ".venv")
+    (lab / ".venv").unlink()
+    sh(lab, "commit", "-qm", "untrack it here")
+    real_folder(lab)
+    asked = fixed_verdict(monkeypatch, land_it=False)
+    result = run(plan_for(lab, claude="/bin/false"), tmp_path)
+    assert intact(lab) and asked == [] and lr.archives([("repo", lab)]) == []
+    assert {"feat", "claude/redesign"} <= set(tidy.local_branches(lab))
+    assert "main adds a link at .venv" in result.reason
+
+
+def test_an_orphan_branch_is_left_to_the_merge_path(lab):
+    # Review P3-1: git refuses unrelated histories itself; no misleading link stop.
+    sh(lab, "checkout", "-q", "--orphan", "gh-pages")
+    sh(lab, "rm", "-rq", "--cached", ".")
+    commit(lab, "index.html")
+    sh(lab, "checkout", "-q", "-f", "main")
+    assert lr.merge_link_stop(lab, "main", "refs/heads/gh-pages") == ""
+
+
+def test_is_link_stop_reads_only_the_words_before_the_path():
+    assert lr.is_link_stop("not pulled — origin/main adds a link at .venv where x")
+    assert lr.is_link_stop("failed — main adds a file at .venv where x")
+    assert lr.is_link_stop("failed — main may add a link that git cannot check: Land again")
+    assert not lr.is_link_stop("failed — could not switch to main: x adds a link at y")
+    assert not lr.is_link_stop("not pulled — gitleaks found a secret")
+
+
 def push_link(lab, tmp_path):
     other = other_clone(lab, tmp_path)
     for key, value in (("user.name", "t"), ("user.email", "t@t")):
@@ -177,16 +216,37 @@ def push_link(lab, tmp_path):
     return other
 
 
-def test_a_pull_that_brings_the_link_is_not_planned(lab, tmp_path):
+def test_a_pull_link_stop_holds_every_branch_and_archives_none(lab, tmp_path, quarantine,
+                                                               monkeypatch):
+    # Review P1-2: the other branches wait behind the pull; none is triaged.
     ignore(lab, ".venv/\n")
     push_link(lab, tmp_path)
     sh(lab, "fetch", "-q")
     real_folder(lab)
-    actions, skips = tidy.plan_repo("repo", lab, (), OLD)
-    assert not any(a.kind == "pull" for a in actions)
-    assert any(s.target == "main" and s.reason.startswith(
-        "not pulled: origin/main adds a link at .venv where this checkout has a real folder")
-        and "remove the link from main on the remote" in s.reason for s in skips)
+    sh(lab, "checkout", "-q", "-b", "feat")
+    commit(lab, "f.txt")
+    sh(lab, "checkout", "-q", "main")
+    asked = fixed_verdict(monkeypatch, land_it=False)
+    result = run(plan_for(lab, claude="/bin/false"), tmp_path)
+    assert intact(lab) and asked == [] and lr.archives([("repo", lab)]) == []
+    assert "feat" in tidy.local_branches(lab)
+    assert result.state == "not_landed"
+    assert ("origin/main adds a link at .venv where this checkout has a real folder: remove "
+            "the link from main on the remote, then Land again") in result.reason
+
+
+def test_land_again_after_the_remote_is_fixed_pulls(lab, tmp_path, quarantine):
+    # Review P2-1: the pull is judged on what its own fetch brings, not a stale ref.
+    ignore(lab, ".venv/\n")
+    other = push_link(lab, tmp_path)
+    sh(lab, "fetch", "-q")  # the stale ref still has the link
+    real_folder(lab)
+    sh(other, "rm", "-q", ".venv")
+    sh(other, "commit", "-qm", "remove the link")
+    sh(other, "push", "-q")
+    result = run(plan_for(lab), tmp_path)
+    assert result.state == "landed", result
+    assert intact(lab) and tidy.ahead_behind(lab) == (0, 0)
 
 
 def test_a_pull_checks_what_it_fetched_before_it_moves(lab, tmp_path):
@@ -236,7 +296,33 @@ def test_a_wanted_link_inside_the_repo_still_lands(lab, tmp_path, quarantine):
 
 
 # ------------------------------------------------------------ the helpers
-def test_incoming_links_lists_only_paths_that_become_or_change_links(lab):
+def branch_with(repo, tmp_path, branch, links=(), files=()):
+    """A branch, made in its own worktree, that adds `links` (path, text)
+    and `files` (path, text); returns its tip."""
+    wt = tmp_path / f"wt-{branch}"
+    sh(repo, "worktree", "add", "-q", "-b", branch, str(wt))
+    for rel, text in files:
+        (wt / rel).parent.mkdir(parents=True, exist_ok=True)
+        (wt / rel).write_bytes(text if isinstance(text, bytes) else text.encode())
+    for rel, text in links:
+        (wt / rel).parent.mkdir(parents=True, exist_ok=True)
+        os.symlink(text, wt / rel)
+    sh(wt, "add", "-A")
+    sh(wt, "commit", "-qm", "branch")
+    sh(repo, "worktree", "remove", "--force", str(wt))
+    return tidy.tip(repo, branch)
+
+
+def _blob(repo, text):
+    return subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=repo, input=text,
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+
+def stop(repo, branch):
+    return lr.link_stop(repo, "HEAD", f"refs/heads/{branch}")
+
+
+def test_incoming_lists_new_files_and_paths_that_become_or_change_links(lab):
     os.symlink("a.txt", lab / "same")
     os.symlink("a.txt", lab / "retarget")
     sh(lab, "add", "same", "retarget")
@@ -245,81 +331,160 @@ def test_incoming_links_lists_only_paths_that_become_or_change_links(lab):
     os.symlink("a.txt", lab / "new")
     (lab / "retarget").unlink()
     os.symlink("b.txt", lab / "retarget")
-    (lab / "b.txt").unlink(missing_ok=True)
     os.remove(lab / "a.txt")
     os.symlink("same", lab / "a.txt")  # a file that becomes a link
     commit(lab, "plain.txt")
+    (lab / "same").unlink()
     sh(lab, "add", "-A")
     sh(lab, "commit", "-qm", "more")
-    found = dict(lr.incoming_links(lab, old, "HEAD"))
-    assert sorted(found) == ["a.txt", "new", "retarget"]
-    assert sh(lab, "cat-file", "blob", found["retarget"]) == "b.txt"
-    assert lr.incoming_links(lab, old, "no-such-ref") is None
+    found = {rel: mode for rel, mode, _ in lr.incoming(lab, old, "HEAD")}
+    assert found == {"a.txt": "120000", "new": "120000", "plain.txt": "100644",
+                     "retarget": "120000"}
+    assert lr.incoming(lab, old, "no-such-ref") is None
 
 
-@pytest.mark.parametrize("rel, text, why", [
-    ("abs", "/Users/someone/.ssh", "whose target is an absolute path"),
-    ("out", "../../elsewhere", "whose target is outside the repo"),
-    ("sub/out", "../../x", "whose target is outside the repo"),
-    ("slash", "folder/", "whose target ends in /"),
-    ("sub/fine", "../a.txt", ""),
+@pytest.mark.parametrize("links, why", [
+    ([("abs", "/Users/someone/.ssh")], "at abs whose target is an absolute path"),
+    ([("out", "../../elsewhere")], "at out whose target is outside the repo"),
+    ([("sub/out", "../../x")], "at sub/out whose target is outside the repo"),
+    ([("slash", "folder/")], "at slash whose target ends in /"),
+    ([("hooks", ".git/hooks")], "at hooks whose target is inside .git"),
+    ([("hooks", ".GIT/hooks")], "at hooks whose target is inside .git"),
+    # Security P2-1: a lexically harmless text that a link in the tree leads out.
+    ([("x/l2", ".."), ("l1", "x/l2/..")], "at l1 whose target is outside the repo"),
+    ([("x/l2", ".."), ("l1", "X/L2/..")], "at l1 whose target is outside the repo"),
+    ([("a", "b"), ("b", "a")], "whose target git cannot follow"),
 ])
-def test_link_text_is_judged_without_following_it(lab, rel, text, why):
-    blob = _blob(lab, text)
-    assert lr.link_problem(lab, rel, blob) == why
+def test_link_text_is_followed_through_the_tree_never_the_disk(lab, tmp_path, links, why):
+    branch_with(lab, tmp_path, "feat", links=links)
+    assert why in stop(lab, "feat")
 
 
-def _blob(repo, text):
-    import subprocess
+def test_a_link_through_a_link_main_already_tracks_is_followed(lab, tmp_path):
+    os.symlink("..", lab / "up")
+    sh(lab, "add", "up")
+    sh(lab, "commit", "-qm", "up")
+    branch_with(lab, tmp_path, "feat", links=[("l", "up/x")])
+    assert "at l whose target is outside the repo" in stop(lab, "feat")
 
-    return subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=repo, input=text,
-                          capture_output=True, text=True, check=True).stdout.strip()
+
+def test_a_wanted_link_inside_the_repo_passes(lab, tmp_path):
+    (lab / "docs").mkdir()
+    commit(lab, "docs/v1.md")
+    branch_with(lab, tmp_path, "feat", links=[("docs/latest", "v1.md"),
+                                               ("top", "docs/../a.txt")])
+    assert stop(lab, "feat") == ""
 
 
 def test_what_is_already_in_the_checkout_decides_first(lab, tmp_path):
-    blob = _blob(lab, "x")
+    branch_with(lab, tmp_path, "feat", links=[("folder", "a.txt"), ("loose.txt", "a.txt"),
+                                               ("linked/inner", "x"), ("loose-link", "a.txt")])
     (lab / "folder").mkdir()
-    assert lr.link_problem(lab, "folder", blob) == "where this checkout has a real folder"
+    assert stop(lab, "feat").startswith("it adds a link at folder where this checkout has a "
+                                        "real folder")
+    os.rmdir(lab / "folder")
     (lab / "loose.txt").write_text("local")
-    assert lr.link_problem(lab, "loose.txt", blob) == (
-        "where this checkout has a file git does not track")
-    assert lr.link_problem(lab, "a.txt", blob) == ""  # tracked: git owns it
+    assert stop(lab, "feat").startswith(
+        "it adds a link at loose.txt where this checkout has a file git does not track")
+    (lab / "loose.txt").unlink()
     os.symlink(str(tmp_path), lab / "linked")
-    assert lr.link_problem(lab, "linked/inner", blob) == "behind a link in this checkout"
+    assert stop(lab, "feat").startswith("it adds a link at linked/inner behind a link")
+    (lab / "linked").unlink()
     os.symlink("a.txt", lab / "loose-link")
-    assert lr.link_problem(lab, "loose-link", blob) == (
-        "where this checkout has a file git does not track")
+    assert stop(lab, "feat").startswith("it adds a link at loose-link where this checkout has "
+                                        "a file git does not track")
+
+
+# ------------------------------------------------------------ security review fixes
+def test_a_plain_file_named_like_the_folder_is_stopped_too(lab, tmp_path, quarantine):
+    # Security P1-1: `git add -A` adds a `.venv` *file* as readily as a link.
+    ignore(lab, ".venv/\n")
+    branch_with(lab, tmp_path, "claude/agent", files=[(".venv", "/usr/bin/python3\n")])
+    real_folder(lab)
+    result = run(plan_for(lab), tmp_path)
+    assert intact(lab) and result.state == "not_landed"
+    assert ("it adds a file at .venv where this checkout has a real folder: remove the file "
+            "from the branch, then Land again") in result.reason
+
+
+def test_a_file_named_like_an_ignored_folder_stops_without_the_folder(lab, tmp_path):
+    ignore(lab, ".venv/\n")
+    branch_with(lab, tmp_path, "feat", files=[(".venv", "x")])
+    assert "it adds a file at .venv, a name ignored as a folder here" in stop(lab, "feat")
+
+
+def test_an_ordinary_new_file_passes_even_over_an_ignored_file(lab, tmp_path):
+    ignore(lab, "local.cfg\n")
+    (lab / "local.cfg").write_text("mine")  # §5.1 A: file over file is left to git
+    branch_with(lab, tmp_path, "feat", files=[("new.txt", "x"), ("sub/deep.txt", "y")])
+    assert stop(lab, "feat") == ""
+
+
+def test_the_branchs_own_ignore_rule_counts_too(lab, tmp_path):
+    # Security P3-5: the rule and the link arrive together.
+    branch_with(lab, tmp_path, "feat", links=[(".venv", "x")], files=[(".gitignore", ".venv/\n")])
+    assert "a link at .venv, a name ignored as a folder here" in stop(lab, "feat")
+
+
+def test_bytes_that_are_not_utf8_are_a_stop_not_a_crash(lab, tmp_path):
+    # Security P3-2.
+    wt = tmp_path / "wt"
+    sh(lab, "worktree", "add", "-q", "-b", "feat", str(wt))
+    os.symlink(os.fsdecode(b"tgt\xff"), wt / "odd")
+    sh(wt, "add", "-A")
+    blob = _blob(wt, "x")  # APFS refuses such a name on disk: index it directly
+    subprocess.run([b"git", b"update-index", b"--add", b"--cacheinfo",
+                    b"100644," + blob.encode() + b",f\xff"], cwd=wt, check=True)
+    sh(wt, "commit", "-qm", "odd bytes")
+    sh(lab, "worktree", "remove", "--force", str(wt))
+    text = stop(lab, "feat")
+    assert "it adds a link at odd whose target git cannot read" in text
+    assert lr.merge_link_stop(lab, "main", "refs/heads/feat").startswith("it adds a link at odd")
 
 
 def test_the_stop_names_three_paths_and_counts_the_rest(lab, tmp_path):
-    old = tidy.tip(lab, "main")
-    for name in ("p1", "p2", "p3", "p4", "p5"):
-        os.symlink("/abs", lab / name)
-    sh(lab, "add", "-A")
-    sh(lab, "commit", "-qm", "five links")
-    text = lr.link_stop(lab, old, "HEAD")
-    assert text == ("it adds a link at p1 whose target is an absolute path; also at p2, p3 "
-                    "and 2 more: remove the link from the branch, then Land again")
+    branch_with(lab, tmp_path, "five", links=[(f"p{i}", "/abs") for i in range(1, 6)])
+    assert stop(lab, "five") == (
+        "it adds a link at p1 whose target is an absolute path; also at p2, p3 "
+        "and 2 more: remove the link from the branch, then Land again")
+    branch_with(lab, tmp_path, "four", links=[(f"q{i}", "/abs") for i in range(1, 5)])
+    assert "; also at q2, q3 and 1 more:" in stop(lab, "four")
+    branch_with(lab, tmp_path, "three", links=[(f"r{i}", "/abs") for i in range(1, 4)])
+    assert "; also at r2, r3: remove" in stop(lab, "three")
 
 
-def test_a_path_with_control_characters_is_shown_safely(lab):
-    old = tidy.tip(lab, "main")
-    os.symlink("/abs", lab / "bad\nname")
-    sh(lab, "add", "-A")
-    sh(lab, "commit", "-qm", "odd name")
-    text = lr.link_stop(lab, old, "HEAD")
-    assert "bad?name" in text and "\n" not in text
+@pytest.mark.parametrize("name, shown", [
+    ("bad\nname", "bad?name"),
+    ("rtl\u202eexe.txt", "rtl?exe.txt"),
+    ("zero\u200bwidth", "zero?width"),
+    ("line\u2028sep", "line?sep"),
+])
+def test_a_path_is_shown_without_control_or_format_characters(lab, tmp_path, name, shown):
+    branch_with(lab, tmp_path, "feat", links=[(name, "/abs")])
+    text = stop(lab, "feat")
+    assert f"at {shown} " in text and name not in text
 
 
-def test_git_that_cannot_tell_is_a_stop(lab, monkeypatch):
+def test_many_links_cost_a_few_git_calls_not_one_each(lab, tmp_path, monkeypatch):
+    # Security P2-2: 500 links once took 79 s.
+    branch_with(lab, tmp_path, "many", links=[(f"d/l{i}", f"../a.txt") for i in range(300)])
+    calls = []
+    real = lr._git_bytes
+    monkeypatch.setattr(lr, "_git_bytes", lambda *a, **k: calls.append(a[1]) or real(*a, **k))
+    assert stop(lab, "many") == ""
+    assert len(calls) <= 6, calls
+
+
+def test_git_that_cannot_tell_is_a_stop(lab):
     assert lr.link_stop(lab, "HEAD", "no-such-ref").startswith(
         "it may add a link that git cannot check")
     assert cr.blocker_kind("skipped — it may add a link that git cannot check") == "link"
-    assert lr.merge_link_stop(lab, "main", "no-such-branch").startswith("it may add a link")
+    assert cr.blocker_kind("skipped — it adds a file at .venv where") == "link"
+    assert lr.merge_link_stop(lab, "main", "refs/heads/no-such").startswith("it may add a link")
 
 
 def test_a_branch_without_links_passes(lab, tmp_path):
     sh(lab, "checkout", "-q", "-b", "feat")
     commit(lab, "f.txt")
     sh(lab, "checkout", "-q", "main")
-    assert lr.merge_link_stop(lab, "main", "feat") == ""
+    assert lr.merge_link_stop(lab, "main", "refs/heads/feat") == ""

@@ -353,8 +353,20 @@ Before that set runs, Land prepares the repo (`lab_hub/land_resolve.py`, ADR
   adds its exact path (`/.venv`) to `.gitignore`. Relative links to files inside
   the repo are committed as before. A folder link you do want in the repo (like
   `shopfront/website`) has to be committed by hand, after you remove that
-  line. This covers only files Land commits itself. A link an agent already
-  committed on its branch still merges as it is. Spec `land-update-gaps.md`.
+  line. Spec `land-update-gaps.md`.
+- **A link a branch already contains** (an agent's own `git add -A` committed
+  its `.venv` link) never replaces a folder. Before every merge, Claude merge,
+  switch back to the default branch and pull, Land lists the paths that become
+  a symlink. It stops when the checkout has a real folder or a file git does
+  not track there, when the name is ignored as a folder, or when the link's
+  text is absolute or leads out of the repo. Git would otherwise replace the
+  ignored folder silently. The stop names the paths ("it adds a link at .venv
+  where this checkout has a real folder: remove the link from the branch, then
+  Land again"), shows in the preview, and the branch stays a branch: it is
+  never sent to Claude's land-or-archive verdict. To clear it, on the branch:
+  `git rm --cached .venv`, add `/.venv` to `.gitignore`, commit, Land again.
+  A relative link to a file or folder inside the repo still lands. Spec
+  `land-folder-link-guard.md`.
 - **A checkout on a side branch** has its open work committed and is switched
   back to the default branch; the side branch then lands like any other.
 - **A detached HEAD** holding work no branch has is put on a branch
