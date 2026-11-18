@@ -637,13 +637,25 @@ def test_land_all_lands_only_the_ticked_repos(qapp, tmp_path, lab, monkeypatch):
     tab.refresh()
     ran = []
 
+    seen = {}
+
     def confirm(plans):
+        seen["asking"] = sorted(tab._landing_cards)  # both tiles wait on the answer
         return [p for p in plans if p.name == "other"]
+
+    def run(plans):
+        # QA G5: at once, inside the run, not after it ended (which clears the dict anyway)
+        seen["running"] = sorted(tab._landing_cards)
+        ran.append([p.name for p in plans])
+        return real_run(plans)
 
     tab.confirm_land = confirm
     real_run = tab.lander.run
-    tab.lander.run = lambda plans: ran.append([p.name for p in plans]) or real_run(plans)
+    tab.lander.run = run
     tab.land_all_button.click()
+    assert pump(lambda: "running" in seen)
+    assert seen["asking"] == ["other", "repo"]
+    assert seen["running"] == ["other"]
     assert pump(lambda: tab.land_window is not None and not tab.land_window.model.live)
     assert ran == [["other"]]
     assert (other / "g.txt").exists() and not (lab / "f.txt").exists()

@@ -602,6 +602,7 @@ def test_the_end_keeps_the_total_time_and_the_clock_span():
     wall.t = datetime(2026, 11, 18, 14, 9, 32)
     model.finish("Landed 1 of 1 repos.")
     clock.tick(500)  # time after the end does not count
+    wall.t = datetime(2026, 11, 18, 15, 30, 0)  # nor does the wall moving on (QA G3)
     snap = model.snapshot()
     assert snap.took == "Took 14:22 · 13:55 to 14:09"
     assert snap.title == "Land finished · a"

@@ -467,3 +467,37 @@ def test_folding_cards_gives_their_room_back(qapp, dialog):
     for name in ("lab_hub", "syndustryx"):
         _card(dialog, name).check.setChecked(True)
     assert dialog.scroll.minimumHeight() >= before  # ticked again: the room comes back
+
+
+# --- verify follow-up (docs/audit/land-pick-and-time-qa.md G4, G8) -----------
+def test_an_unticked_card_hides_its_step_stop_and_claude_pills(dialog):
+    dialog.show()
+    card = _card(dialog, "syndustryx")  # steps, a stop and a Claude Code merge
+    assert len(card._in_pills) >= 3
+    assert all(p.isVisibleTo(card) for p in card._in_pills)
+    card.check.setChecked(False)
+    assert not any(p.isVisibleTo(card) for p in card._in_pills)  # G4
+    assert card.left_out.isVisibleTo(card)
+    card.check.setChecked(True)
+    assert all(p.isVisibleTo(card) for p in card._in_pills)
+
+
+def test_space_toggles_the_tick_box(dialog):
+    dialog.show()
+    card = _card(dialog, "foundry")
+    card.check.setFocus()
+    QTest.keyClick(card.check, Qt.Key.Key_Space)
+    assert not card.check.isChecked()
+    QTest.keyClick(card.check, Qt.Key.Key_Space)
+    assert card.check.isChecked()  # G8
+
+
+def test_cancel_still_works_with_nothing_ticked(dialog):
+    dialog.show()
+    for card in dialog.cards:
+        card.check.setChecked(False)
+    assert dialog.cancel.isEnabled()
+    rejected = []
+    dialog.rejected.connect(lambda: rejected.append(True))
+    dialog.cancel.click()
+    assert rejected == [True] and not dialog.isVisible()  # G8
