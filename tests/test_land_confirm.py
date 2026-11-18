@@ -242,7 +242,8 @@ def test_one_card_per_repo_and_a_line_for_the_idle(dialog):
     assert dialog.claude is not None and dialog.land.objectName() == "primary"
     from ui.land_confirm import FOOTNOTE
 
-    pills = [[lb.text() for lb in card.findChildren(QLabel, "runPill")] for card in dialog.cards]
+    pills = [[lb.text() for lb in card.findChildren(QLabel, "runPill") if lb.isVisibleTo(card)]
+             for card in dialog.cards]
     assert pills == [["3 steps", "stops at 2", "Claude Code · up to $14"],
                      ["2 steps", "stops at 1"],
                      ["2 steps", "stops at 1", "Claude Code · up to $3"]]  # QA P3
@@ -345,3 +346,93 @@ def test_at_most_three_names_are_named():
     procs = tuple(f"{n} (pid {i})" for i, n in enumerate(["a", "b", "c", "d", "e"]))
     view = land.stop_view(busy_stop("r", LAB, procs), LAB)
     assert view.problem == "5 processes running in it, including a, b and c"
+
+
+# --- land-pick-and-time: a tick box per repo ---------------------------------
+def _card(dialog, name):
+    return next(c for c in dialog.cards if c.plan.name == name)
+
+
+def _visible_claude(dialog):
+    from ui.land_confirm import ClaudeBox
+
+    return [b for b in dialog.findChildren(ClaudeBox) if b.isVisibleTo(dialog)]
+
+
+def test_every_card_has_a_ticked_box_and_one_card_has_none(qapp, dialog):
+    assert all(c.check is not None and c.check.isChecked() for c in dialog.cards)
+    assert _card(dialog, "foundry").check.accessibleName() == "Land foundry"
+    assert dialog.chosen() == [c.plan for c in dialog.cards]
+    plan = screenshot_plans()[0]
+    one = LandConfirmDialog([plan])
+    assert one.cards[0].check is None and one.chosen() == [plan]
+    one.deleteLater()
+
+
+def test_unticking_folds_the_card_and_everything_counts_the_rest(dialog):
+    card = _card(dialog, "foundry")
+    card.check.setChecked(False)
+    assert card.body.isHidden() and not card.left_out.isHidden()
+    assert not card.name.isEnabled()
+    assert [p.name for p in dialog.chosen()] == ["lab_hub", "syndustryx"]
+    chosen = dialog.chosen()
+    assert (dialog.title.text(), dialog.summary.text()) == headline(chosen, 3)
+    assert dialog.title.text() == "Land 2 repos" and dialog.land.text() == "Land 2 repos"
+    assert dialog.details.toPlainText() == details_text(chosen)
+    assert "foundry" not in dialog.details.toPlainText()
+    card.check.setChecked(True)
+    assert not card.body.isHidden() and card.left_out.isHidden()
+    assert dialog.land.text() == "Land 3 repos"
+
+
+def test_the_claude_panel_covers_exactly_the_ticked_repos(dialog):
+    whole = land.claude_panel(dialog.chosen()).total
+    _card(dialog, "syndustryx").check.setChecked(False)
+    assert dialog.claude.findChildren(QLabel)[1].text() == \
+        land.claude_panel(dialog.chosen()).total != whole
+    _card(dialog, "lab_hub").check.setChecked(False)  # foundry alone uses no Claude Code
+    assert dialog.claude is None and _visible_claude(dialog) == []
+    for name in ("lab_hub", "syndustryx"):
+        _card(dialog, name).check.setChecked(True)
+    assert len(_visible_claude(dialog)) == 1 and dialog.claude is _visible_claude(dialog)[0]
+
+
+def test_the_chosen_set_reads_as_a_dialog_built_from_it_alone(qapp, dialog):
+    plans = screenshot_plans()
+    _card(dialog, "foundry").check.setChecked(False)
+    alone = LandConfirmDialog([p for p in plans if p.name != "foundry"])
+
+    def words(box):
+        claude = [lb.text() for lb in box.claude.findChildren(QLabel)] if box.claude else []
+        return (box.title.text(), box.summary.text(), box.land.text(),
+                box.details.toPlainText(), claude)
+
+    assert words(dialog) == words(alone)
+    alone.deleteLater()
+
+
+def test_none_ticked_disables_land_until_one_is(dialog):
+    for card in dialog.cards:
+        card.check.setChecked(False)
+    assert dialog.title.text() == "Nothing chosen"
+    assert dialog.summary.text() == "Tick a repo to land it."
+    assert not dialog.land.isEnabled() and dialog.claude is None
+    assert dialog.chosen() == []
+    dialog.cards[1].check.setChecked(True)
+    assert dialog.land.isEnabled() and dialog.title.text() == "Land foundry"
+    assert dialog.land.text() == "Land"
+
+
+def test_a_click_on_the_header_toggles_and_return_still_presses_nothing(dialog):
+    dialog.show()
+    card = _card(dialog, "foundry")
+    QTest.mouseClick(card.head, Qt.MouseButton.LeftButton)
+    assert not card.check.isChecked()
+    QTest.mouseClick(card.head, Qt.MouseButton.LeftButton)
+    assert card.check.isChecked()
+    card.check.setChecked(False)
+    QTest.keyClick(dialog, Qt.Key.Key_Return)
+    assert dialog.isVisible() and dialog.result() == 0
+    dialog.land.click()
+    assert dialog.result() == QDialog.DialogCode.Accepted
+    assert [p.name for p in dialog.chosen()] == ["lab_hub", "syndustryx"]

@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -226,6 +227,9 @@ class Header(QFrame):
         self.counts.setSpacing(theme.SPACE_M + 2)
         self._count_labels: list[QLabel] = []
         outer.addLayout(self.counts)
+        self.earlier = _label("", "hint", wrap=True)  # Land: the last few runs' times
+        self.earlier.hide()
+        outer.addWidget(self.earlier)
 
         self.outcome = _label("", "runStrong", wrap=True)
         self.details = _label("", "hint", wrap=True)
@@ -250,7 +254,7 @@ class Header(QFrame):
 
         self.percent.setVisible(snap.started)
         self.bar.setVisible(snap.started)
-        self.times.setVisible(snap.started and snap.live)
+        self.times.setVisible(snap.started and (snap.live or bool(snap.took)))
         _set_text(self.percent, f"{snap.percent}%")
         self.bar.setValue(snap.percent)
         _set_text(self.subtitle, snap.subtitle)
@@ -260,8 +264,14 @@ class Header(QFrame):
             parts.append(snap.left)
         if snap.done_around:
             parts.append(f"done around {snap.done_around}")
-        _set_text(self.times, " · ".join(parts))
-        _set_name(self.times, "stateWarn" if snap.overrun else "hint")
+        if snap.live:
+            _set_text(self.times, " · ".join(parts))
+            _set_name(self.times, "stateWarn" if snap.overrun else "hint")
+        else:  # the end: how long it took stays readable (spec land-pick-and-time)
+            _set_text(self.times, snap.took)
+            _set_name(self.times, "runStrong")
+        _set_text(self.earlier, snap.earlier)
+        self.earlier.setVisible(bool(snap.earlier))
 
         if len(self._count_labels) != len(snap.counts):
             _clear(self.counts)
@@ -363,12 +373,29 @@ class Row(QFrame):
         self.grid.setColumnMinimumWidth(6, STATUS_W)
         self.icon = StateIcon(16)
         self.name = _label("", "runStrong")
-        self.name.setFixedWidth(NAME_W)
+        # A finished Land row opens into its steps (spec land-pick-and-time §8.2).
+        self.opener = QToolButton()
+        self.opener.setObjectName("rowOpener")
+        self.opener.setAutoRaise(True)
+        self.opener.setCheckable(True)
+        self.opener.setArrowType(Qt.ArrowType.RightArrow)
+        self.opener.setFixedSize(16, 16)
+        self.opener.hide()
+        self.opener.toggled.connect(self._opener_toggled)
+        self.on_open = None  # set by the window: called with (name, opened)
+        self._view_name = ""
+        name_box = QWidget()
+        name_box.setFixedWidth(NAME_W)
+        name_line = QHBoxLayout(name_box)
+        name_line.setContentsMargins(0, 0, 0, 0)
+        name_line.setSpacing(2)
+        name_line.addWidget(self.opener)
+        name_line.addWidget(self.name, 1)
         self.detail = _label("", "hint", wrap=True)
         self.pill = _label("", "runPill")
         self.pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.grid.addWidget(self.icon, 0, 0)
-        self.grid.addWidget(self.name, 0, 1)
+        self.grid.addWidget(name_box, 0, 1)
         self.grid.addWidget(self.detail, 0, 2, 1, 4)
         self.grid.addWidget(self.pill, 0, 6,
                             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
@@ -402,9 +429,25 @@ class Row(QFrame):
             self.chips.append(chip)
             self.notes.append(note)
 
-    def draw(self, view: progress.RowView, phase: int) -> None:
+    def _opener_toggled(self, on: bool) -> None:
+        self.opener.setArrowType(Qt.ArrowType.DownArrow if on else Qt.ArrowType.RightArrow)
+        if self.on_open is not None:
+            self.on_open(self._view_name, on)
+
+    def draw(self, view: progress.RowView, phase: int, opened: bool = False) -> None:
         self.icon.set_kind(view.icon, phase)
         _set_text(self.name, view.name)
+        self._view_name = view.name
+        self.opener.setVisible(view.openable)
+        if view.openable:
+            self.opener.setAccessibleName(f"Show steps of {view.name}")
+            self.opener.setToolTip(_plain_tip(f"Show the steps of {view.name} and their times"))
+            if self.opener.isChecked() != opened:
+                self.opener.blockSignals(True)
+                self.opener.setChecked(opened)
+                self.opener.blockSignals(False)
+                self.opener.setArrowType(Qt.ArrowType.DownArrow if opened
+                                         else Qt.ArrowType.RightArrow)
         if len(view.stages) != len(self.chips):
             self._build_track(len(view.stages))
         for chip, note, stage in zip(self.chips, self.notes, view.stages):
@@ -420,13 +463,15 @@ class Row(QFrame):
             note.setVisible(view.stage_notes)
         self.detail.setVisible(not view.stages and bool(view.detail))
         _set_text(self.detail, view.detail)
-        _set_text(self.pill, view.status)
+        _set_text(self.pill, f"{view.status} · {view.took}" if view.status and view.took
+                  else view.status)
         _set_prop(self.pill, "tone", view.tone or "muted")
         self.pill.setVisible(bool(view.status))
         _set_text(self.reason, view.reason)
         _set_name(self.reason, _TONE_NAME.get(view.reason_tone, "hint") or "hint")
         self.reason.setVisible(bool(view.reason))
-        self.steps.setVisible(view.expanded and bool(view.steps or view.then))
+        expanded = view.expanded or (view.openable and opened)
+        self.steps.setVisible(expanded and bool(view.steps or view.then))
         if self.steps.isVisibleTo(self):
             self.steps.draw(view.steps, view.then, phase)
 
@@ -531,6 +576,7 @@ class _Run:
         out_wrap.addWidget(self.output)
         layout.addLayout(out_wrap)
         self.rows: list[Row] = []
+        self._open: set[str] = set()  # finished rows the owner opened
 
     def _reset_rows(self) -> None:
         for row in self.rows:
@@ -538,8 +584,19 @@ class _Run:
             row.hide()
             row.deleteLater()
         self.rows = [Row() for _ in self.model.rows]
+        self._open = set()
         for row in self.rows:
+            row.on_open = self._row_opened
             self._rows_box.addWidget(row)
+
+    def _row_opened(self, name: str, opened: bool) -> None:
+        if opened:
+            self._open.add(name)
+        else:
+            self._open.discard(name)
+        if self.model is not None:
+            self.model.dirty = True
+        self.draw()
 
     def changed(self) -> None:
         """The model moved: render within 100 ms, once, if anyone can see it."""
@@ -570,7 +627,7 @@ class _Run:
         self.renders += 1
         self.header.draw(snap, self.phase)
         for row, view in zip(self.rows, snap.rows):
-            row.draw(view, self.phase)
+            row.draw(view, self.phase, view.name in self._open)
         _set_text(self.current_line, ("✓  " + snap.current_line + "   — newest builds")
                   if snap.current_line else "")
         self.current_line.setVisible(bool(snap.current_line))
@@ -684,7 +741,8 @@ class LandWindow(QWidget, _Run):
     # -- driven by AppsTab from the Lander's signals --------------------------
     def start(self, plans) -> None:
         self.model = progress.LandModel(plans, durations.load(), clock=self.clock,
-                                        wall=self.wall)
+                                        wall=self.wall,
+                                        earlier=progress.earlier_line(durations.load_runs()))
         self.results: dict[str, object] = {}
         self.handoff_paths = {progress.plain(p.name): p.path for p in plans}
         self._handoff_open = False
@@ -735,7 +793,13 @@ class LandWindow(QWidget, _Run):
                 landed = sum(1 for r in results if r.state == "landed")
                 line = f"Landed {landed} of {len(results)} repos."
         bad = any(r.state != "landed" for r in results)
+        first_finish = self.model.live
         self.model.finish(line, "warn" if bad else "ok", details)
+        ran = [r for r in self.model.rows if r.state != progress.NOTHING]
+        if first_finish and ran:  # one entry per run that did something (review P3-4)
+            durations.record_run(self.model.ended_wall or self.wall(), len(ran),
+                                 sum(1 for r in results if r.state == "landed"),
+                                 self.model.elapsed(), self.model.stopped)
         self.stop_button.hide()
         self.note.setText("")
         self.hide_button.setText("Close")

@@ -26,6 +26,8 @@ import stat
 import statistics
 import tempfile
 import unicodedata
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from . import config
@@ -76,8 +78,8 @@ def _sample(value: object) -> float | None:
     return value
 
 
-def _read(file: Path) -> bytes | None:
-    """The file's bytes if it is a regular file of at most MAX_BYTES, else None.
+def _read(file: Path, limit: int = MAX_BYTES) -> bytes | None:
+    """The file's bytes if it is a regular file of at most `limit` bytes, else None.
 
     Opened without following a symlink and without blocking, then checked on
     the open descriptor: a FIFO, a device or a directory at the path is not
@@ -87,16 +89,16 @@ def _read(file: Path) -> bytes | None:
     fd = os.open(file, flags)
     try:
         info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_BYTES:
+        if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
             return None
         chunks, size = [], 0
-        while size <= MAX_BYTES:
-            chunk = os.read(fd, MAX_BYTES + 1 - size)
+        while size <= limit:
+            chunk = os.read(fd, limit + 1 - size)
             if not chunk:
                 break
             chunks.append(chunk)
             size += len(chunk)
-        return None if size > MAX_BYTES else b"".join(chunks)
+        return None if size > limit else b"".join(chunks)
     finally:
         os.close(fd)
 
@@ -148,14 +150,17 @@ def estimate(history: History, subject_key: str, kind: str) -> float | None:
 
 def save(history: History, *, path: Path | None = None) -> bool:
     """Write atomically. False (and nothing changed on disk) if it could not."""
-    file = path or _default()
+    return _write_json(path or _default(), {"version": VERSION, "subjects": history})
+
+
+def _write_json(file: Path, data: object) -> bool:
+    """Same-directory temp file (0600), fsync, os.replace. False if it could not."""
     tmp = None
     try:
         file.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=file.parent, prefix=".durations.", suffix=".tmp")
+        fd, tmp = tempfile.mkstemp(dir=file.parent, prefix=f".{file.stem}.", suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump({"version": VERSION, "subjects": history}, handle,
-                      separators=(",", ":"))
+            json.dump(data, handle, separators=(",", ":"))
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp, file)
@@ -185,3 +190,85 @@ def record(subject_key: str, kind: str, seconds: float, *,
     while len(history) > MAX_SUBJECTS:
         history.pop(next(iter(history)))
     return save(history, path=path)
+
+
+# ----------------------------------------------------------------------
+# Land run log (spec land-pick-and-time §8.3, ADR 0005)
+# ----------------------------------------------------------------------
+RUNS_KEEP = 10
+RUNS_MAX_BYTES = 64 * 1024
+RUNS_MAX_REPOS = 500
+
+
+@dataclass(frozen=True)
+class Run:
+    """One finished Land: when it ended (local time, to the minute), how many
+    repos it ran, how many landed, how long it took, and whether it was stopped.
+    No names or paths: the log says how long, not what."""
+    at: datetime
+    repos: int
+    landed: int
+    seconds: float
+    stopped: bool = False
+
+
+def runs_path() -> Path:
+    return config.SUPPORT_DIR / "land-runs.json"
+
+
+def _count(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if 0 <= value <= RUNS_MAX_REPOS else None
+
+
+def _run(entry: object) -> Run | None:
+    if not isinstance(entry, dict):
+        return None
+    at = entry.get("at")
+    if not isinstance(at, str) or len(at) > 32:
+        return None
+    try:
+        when = datetime.strptime(at, "%Y-%m-%dT%H:%M")
+    except ValueError:
+        return None
+    repos, landed = _count(entry.get("repos")), _count(entry.get("landed"))
+    seconds = _sample(entry.get("seconds"))
+    stopped = entry.get("stopped", False)
+    if repos is None or landed is None or seconds is None or not isinstance(stopped, bool):
+        return None
+    return Run(when, repos, min(landed, repos), seconds, stopped)
+
+
+def load_runs(*, path: Path | None = None) -> list[Run]:
+    """Finished Lands, oldest first, at most RUNS_KEEP. Never raises: anything
+    wrong with the file reads as no runs, and a bad entry is dropped."""
+    file = path or runs_path()
+    try:
+        raw = _read(file, RUNS_MAX_BYTES)
+        if raw is None:
+            return []
+        data = json.loads(raw.decode("utf-8"))
+        if not isinstance(data, dict) or data.get("version") != VERSION:
+            return []
+        entries = data.get("runs")
+        if not isinstance(entries, list):
+            return []
+        runs = [r for r in (_run(e) for e in entries) if r is not None]
+        return runs[-RUNS_KEEP:]
+    except Exception:  # noqa: BLE001 - a cache: missing, hostile, anything
+        return []
+
+
+def record_run(at: datetime, repos: int, landed: int, seconds: float, stopped: bool = False,
+               *, path: Path | None = None) -> bool:
+    """Add one finished Land. False if refused (bad values) or not saved."""
+    run = _run({"at": at.strftime("%Y-%m-%dT%H:%M"), "repos": repos, "landed": landed,
+                "seconds": seconds, "stopped": stopped})
+    if run is None:
+        return False
+    file = path or runs_path()
+    runs = (load_runs(path=file) + [run])[-RUNS_KEEP:]
+    return _write_json(file, {"version": VERSION, "runs": [
+        {"at": r.at.strftime("%Y-%m-%dT%H:%M"), "repos": r.repos, "landed": r.landed,
+         "seconds": r.seconds, "stopped": r.stopped} for r in runs]})

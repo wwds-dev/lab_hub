@@ -67,8 +67,10 @@ def cap(line: str) -> str:
 # Formatting
 # ----------------------------------------------------------------------
 def fmt_clock(seconds: float) -> str:
-    """m:ss, never negative."""
+    """m:ss, or h:mm:ss from an hour on; never negative."""
     s = max(0, int(seconds))
+    if s >= 3600:
+        return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}"
     return f"{s // 60}:{s % 60:02d}"
 
 
@@ -162,6 +164,8 @@ class RowView:
     steps: tuple[StepView, ...] = ()
     then: str = ""
     stage_notes: bool = False  # show each stage's time under its chip
+    took: str = ""  # Land: how long this repo took, shown in the pill after the status
+    openable: bool = False  # Land, finished: its steps can be opened
 
 
 @dataclass(frozen=True)
@@ -183,6 +187,8 @@ class Snapshot:
     details: tuple[str, ...]
     rows: tuple[RowView, ...]
     current_line: str = ""  # Check builds: the apps already up to date, on one line
+    took: str = ""  # Land, finished: "Took 14:22 · 13:55 to 14:09"
+    earlier: str = ""  # Land: "Earlier: 17 Nov 16:20, 6 repos, 1:32:05 · …"
 
 
 # ----------------------------------------------------------------------
@@ -211,6 +217,7 @@ class Row:
     reason_tone: str = "warn"
     started: float | None = None
     ended: float | None = None
+    time_text: str = ""  # Land: how long it took, set when done if any step of it ran
     # Check builds only
     category: str = ""
     note: str = ""
@@ -233,8 +240,10 @@ class RunModel:
         self.wall = wall
         self.rows: list[Row] = []
         self.started = clock()
+        self.started_wall = wall()
         self.last_activity = self.started
         self.ended: float | None = None
+        self.ended_wall: datetime | None = None
         self.outcome = ""
         self.outcome_tone = ""
         self.details: tuple[str, ...] = ()
@@ -258,6 +267,7 @@ class RunModel:
 
     def finish(self, line: str, tone: str = "", details: tuple[str, ...] = ()) -> None:
         self.ended = self.clock()
+        self.ended_wall = self.wall()
         self.outcome, self.outcome_tone = plain(line), tone
         self.details = tuple(plain(d) for d in details)
         self.dirty = True
@@ -332,8 +342,17 @@ class RunModel:
         text = "Next" if first else "Waiting"
         return (f"{text} · {fmt_left(left)}" if left is not None else text), "wait"
 
+    def took_line(self) -> str:
+        """After the end: how long it took, and from when to when."""
+        if self.live:
+            return ""
+        end = self.ended_wall or self.wall()
+        return (f"Took {fmt_clock(self.elapsed())} · {self.started_wall:%H:%M} "
+                f"to {end:%H:%M}")
+
     def _snapshot(self, *, title: str, started: bool, percent: int, subtitle: str,
-                  counts, rows, current_line: str = "") -> Snapshot:
+                  counts, rows, current_line: str = "", took: str = "",
+                  earlier: str = "") -> Snapshot:
         self.dirty = False
         left, around, overrun = self._times() if started else ("", "", False)
         activity, stale = self.activity() if (self.live and started) else ("", False)
@@ -343,7 +362,7 @@ class RunModel:
             left=left, done_around=around, overrun=overrun, counts=tuple(counts),
             activity=activity, stale=stale, outcome=self.outcome,
             outcome_tone=self.outcome_tone, details=self.details, rows=tuple(rows),
-            current_line=current_line)
+            current_line=current_line, took=took, earlier=earlier)
 
     def _percent(self, done: float, total: int) -> int:
         if not self.live:
@@ -388,6 +407,29 @@ def _steps_then(units: list[Unit], now: float, name: str = "") -> tuple[tuple[St
     return tuple(shown), then
 
 
+def _steps_all(units: list[Unit], name: str = "") -> tuple[StepView, ...]:
+    """A finished row's steps, every one that ran or was skipped, with its time."""
+    shown = []
+    for unit in units:
+        if unit.state == WAITING:
+            continue
+        time_ = ""
+        if unit.started is not None and unit.ended is not None:
+            time_ = fmt_took(unit.ended - unit.started)
+        shown.append(StepView(_short(unit.label, name), unit.state, time_))
+    return tuple(shown)
+
+
+def earlier_line(runs) -> str:
+    """The last three finished Lands, newest first; "" with none."""
+    parts = []
+    for run in list(runs)[-3:][::-1]:
+        text = (f"{run.at.day} {run.at:%b %H:%M}, {_n(run.repos, 'repo')}, "
+                f"{fmt_clock(run.seconds)}")
+        parts.append(text + (", stopped" if run.stopped else ""))
+    return ("Earlier: " + " · ".join(parts)) if parts else ""
+
+
 # ----------------------------------------------------------------------
 # Land
 # ----------------------------------------------------------------------
@@ -397,8 +439,11 @@ class LandModel(RunModel):
     adds after planning (a later round, an archive) arrives with the next
     index past the row's units and is added then."""
 
-    def __init__(self, plans, history=None, *, clock=time.monotonic, wall=datetime.now):
+    def __init__(self, plans, history=None, *, clock=time.monotonic, wall=datetime.now,
+                 earlier: str = ""):
         super().__init__(history, clock=clock, wall=wall)
+        self.earlier = earlier
+        self.stopped = False  # the owner pressed Stop before some repo landed
         for plan in plans:
             subject = durations.subject("repo", plan.name)
             units = [Unit(a.kind, a.label,
@@ -447,16 +492,22 @@ class LandModel(RunModel):
             if unit.state in (WAITING, RUNNING):
                 unit.state = SKIPPED  # stopped or never reached: the bar must not stall
         row.ended = self.clock()
+        ran = row.started is not None
         if row.started is None:
             row.started = row.ended
+        row.time_text = fmt_clock(row.ended - row.started) if ran else ""
         row.reason = ""
+        stopped = bool(getattr(result, "stopped", False))
+        self.stopped = self.stopped or stopped
         if result.state == "landed" and not result.remaining:
-            row.state, row.tone = DONE, "ok"
-            row.status = f"Landed · {fmt_clock(row.ended - row.started)}"
+            row.state, row.status, row.tone = DONE, "Landed", "ok"
         elif result.state == "nothing":
             row.state, row.status, row.tone = NOTHING, "Nothing to land", "muted"
+            row.time_text = ""
         else:
-            row.state, row.status, row.tone = NEEDS, "Needs you", "warn"
+            row.state, row.tone = NEEDS, "warn"
+            # The bare word: Ask Claude matches it (handoff.STATUSES) and quotes it.
+            row.status = "Stopped" if stopped and result.state != "landed" else "Needs you"
             if result.state == "landed":  # landed, yet branches are left for the owner
                 n = result.remaining
                 row.reason = f"{n} branch needs your decision" if n == 1 else \
@@ -507,10 +558,14 @@ class LandModel(RunModel):
             else:
                 status, tone = row.status, row.tone
                 icon = {DONE: "done", NOTHING: "nothing"}.get(row.state, "needs")
+            openable = (not self.live and row.ended is not None
+                        and any(u.started is not None for u in row.units))
+            if openable:
+                steps = _steps_all(row.units, row.name)
             rows.append(RowView(
                 name=row.name, icon=icon, stages=self._stages(row), status=status,
                 tone=tone, reason=row.reason, expanded=row.state == RUNNING,
-                steps=steps, then=then))
+                steps=steps, then=then, took=row.time_text, openable=openable))
         counts = (
             (f"{sum(r.state == DONE for r in self.rows)} landed", "ok"),
             (f"{sum(r.state == RUNNING for r in self.rows)} running", "run"),
@@ -524,11 +579,15 @@ class LandModel(RunModel):
             subtitle = f"{finished} of {total} steps"
         else:
             subtitle = f"{finished} of {total} steps finished"
-        title = (f"Landing {self.rows[0].name}" if len(self.rows) == 1
-                 else f"Landing {_n(len(self.rows), 'repo')}")
+        one = self.rows[0].name if len(self.rows) == 1 else _n(len(self.rows), 'repo')
+        if self.live:
+            title = f"Landing {one}"
+        else:
+            title = "Land stopped" if self.stopped else f"Land finished · {one}"
         return self._snapshot(title=title, started=True,
                               percent=self._percent(finished, total),
-                              subtitle=subtitle, counts=counts, rows=rows)
+                              subtitle=subtitle, counts=counts, rows=rows,
+                              took=self.took_line(), earlier=self.earlier)
 
 
 # ----------------------------------------------------------------------

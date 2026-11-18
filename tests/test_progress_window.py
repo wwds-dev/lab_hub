@@ -327,3 +327,63 @@ def test_the_open_in_terminal_tooltip_is_plain_text(qapp):
     tip = button.toolTip()
     assert "<b>" not in tip and "&lt;b&gt;N&lt;/b&gt;" in tip
     window.close()
+
+
+# ------------------------------------------- land-pick-and-time: the end of a Land
+def _finished_window(qapp):
+    clock = Clock()
+    window = _land_window(qapp, clock)
+    window.on_step(StepEvent("SONAR", 0, 3, "commit", "start", clock()))
+    clock.t += 4
+    window.on_step(StepEvent("SONAR", 0, 3, "commit", "end", clock(), clock() - 4, "done"))
+    window.on_repo_done("SONAR", LandResult("SONAR", "not_landed", "tests fail"))
+    window.on_repo_done("Backstage", LandResult("Backstage", "nothing"))
+    clock.t += 858
+    window.finish([LandResult("SONAR", "not_landed", "tests fail"),
+                   LandResult("Backstage", "nothing")], "Landed 0 of 2 repos.")
+    window.draw()
+    return window
+
+
+def test_the_finished_header_keeps_the_time_and_the_run_is_logged(qapp):
+    window = _finished_window(qapp)
+    assert window.header.times.isVisibleTo(window.header)
+    assert window.header.times.text() == "Took 14:22 · 14:00 to 14:00"
+    assert window.header.title.text() == "Land finished · 2 repos"
+    assert window.rows[0].pill.text() == "Needs you · 0:04"
+    runs = durations.load_runs()
+    assert [(r.repos, r.landed, r.seconds) for r in runs] == [(1, 0, 862.0)]
+    window.finish([], "again")  # a second finish adds no second entry
+    assert len(durations.load_runs()) == 1
+    window.close()
+
+
+def test_a_finished_row_opens_and_folds_with_its_button(qapp):
+    window = _finished_window(qapp)
+    row = window.rows[0]
+    assert row.opener.isVisibleTo(row) and not row.steps.isVisibleTo(row)
+    assert row.opener.accessibleName() == "Show steps of SONAR"
+    assert not window.rows[1].opener.isVisibleTo(window.rows[1])  # nothing ran there
+    row.opener.click()
+    assert row.steps.isVisibleTo(row)
+    lines = [(line[1].text(), line[3].text()) for line in row.steps._lines]
+    assert [t for _l, t in lines] == ["4s", "", ""]  # skipped steps have no time
+    assert lines[0][0].startswith("Commit") and lines[1][0].startswith("Merge")
+    window.draw()  # a later render keeps it open
+    assert row.steps.isVisibleTo(row)
+    row.opener.click()
+    assert not row.steps.isVisibleTo(row)
+    window.close()
+
+
+def test_the_earlier_line_shows_past_runs_and_not_this_one(qapp):
+    window = _land_window(qapp)
+    window.draw()
+    assert not window.header.earlier.isVisibleTo(window.header)  # no history yet
+    window.close()
+    durations.record_run(datetime(2026, 11, 17, 16, 20), 6, 5, 5525)
+    window = _land_window(qapp)
+    window.draw()
+    assert window.header.earlier.text() == "Earlier: 17 Nov 16:20, 6 repos, 1:32:05"
+    assert window.header.earlier.isVisibleTo(window.header)
+    window.close()
