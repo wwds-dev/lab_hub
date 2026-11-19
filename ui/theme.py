@@ -520,6 +520,11 @@ def stylesheet(p: Palette) -> str:
         border-radius: {r}px;
     }}
     QFrame#card QLabel {{ background: transparent; }}
+    /* A repo left out of this Land (spec land-pick-and-time §2): flat and dashed. */
+    QFrame#card[out="true"] {{
+        background: transparent;
+        border: 1px dashed {_rgba(p.text, 0.25)};
+    }}
 
     QLabel#sectionTitle {{
         color: {p.faint};

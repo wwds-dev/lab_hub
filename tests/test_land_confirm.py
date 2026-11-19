@@ -447,6 +447,17 @@ def test_a_left_out_name_takes_the_hint_style_and_gets_it_back(dialog):
     assert card.name.objectName() == "appName"
 
 
+def test_an_unticked_card_is_dimmed_by_a_stylesheet_rule(dialog):
+    from ui import theme
+    card = _card(dialog, "foundry")
+    card.check.setChecked(False)
+    assert card.property("out") == "true"
+    card.check.setChecked(True)
+    assert card.property("out") == "false"
+    for pal in (theme.GRAPHITE, theme.PAPER):
+        assert 'QFrame#card[out="true"]' in theme.stylesheet(pal)
+
+
 def test_a_press_dragged_off_the_header_does_not_toggle(dialog):
     from PySide6.QtCore import QPoint
 

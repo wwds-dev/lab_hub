@@ -178,6 +178,10 @@ every mutant below was killed.
 | G7 | `test_durations`: `test_a_valid_run_log_over_the_64_kib_cap_reads_as_no_runs`, `..._of_another_version_..._even_with_good_runs`, `test_a_hand_edited_run_log_keeps_its_last_ten`, `test_the_repo_count_limit_is_500_inclusive` | D4, D5, D3, D12 (and 501 accepted) |
 | G8 | `test_land_confirm::test_space_toggles_the_tick_box`, `::test_cancel_still_works_with_nothing_ticked` (asserts the `rejected` signal; `result()` is 0 before any answer, so it cannot prove Cancel) | box not checkable; Cancel not wired to `reject` |
 
-Not addressed (not in scope): the dead `out` property (G4's second half, C13) is left as is; it is
-production code and the owner has not chosen between a QSS rule and dropping it.
+Settled 2026-11-18 (C13, G4's second half): the owner chose a QSS rule. `ui/theme.py` now has
+`QFrame#card[out="true"]` (flat, dashed border), so an unticked card is dimmed, not only its name.
+`test_land_confirm::test_an_unticked_card_is_dimmed_by_a_stylesheet_rule` (property "true" when
+unticked, "false" when re-ticked, matching selector in both palettes) was run against two mutants,
+both killed: selector renamed (`[outx=...]`), and `setProperty("out", "false")` always. Files restored
+byte-for-byte (`cmp`).
 Full suite: `.venv/bin/python -m pytest -q`, every test passed (all dots, 100%, no F or E); the Cancel test was tightened after that run and re-run alone (`tests/test_land_confirm.py`, green).
