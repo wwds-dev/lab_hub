@@ -549,3 +549,37 @@ def test_a_sideways_swipe_over_a_page_still_changes_section(window):
     window.tabs.setCurrentIndex(0)
     assert swipe_across(window.swipe, window.apps_tab, -STEP) is True
     assert window.tabs.currentIndex() == 1
+
+
+def test_a_vertical_scroll_over_a_child_of_the_sidebar_changes_section(window):
+    """The pointer is usually on a nav button or the footer, not the bare sidebar."""
+    button = window.sidebar.button_for(window.tabs.widget(0))
+    assert button is not None and button is not window.sidebar
+    assert window.sidebar.isAncestorOf(button)
+    for child in (button, window.refresh_button):
+        assert window.sidebar.isAncestorOf(child)
+        window.tabs.setCurrentIndex(0)
+        assert _vertical(window.swipe, child, -STEP) is True
+        assert window.tabs.currentIndex() == 1
+        send(window.swipe, child, wheel(child, 0, 0, Qt.ScrollEnd))
+
+
+def test_a_three_finger_vertical_swipe_over_a_child_of_the_sidebar_changes_section(window):
+    button = window.sidebar.button_for(window.tabs.widget(0))
+    for child in (button, window.refresh_button):
+        window.tabs.setCurrentIndex(1)
+        assert send(window.swipe, child, native_swipe(child, 90.0)) is True
+        assert window.tabs.currentIndex() == 2
+
+
+def test_a_destroyed_vertical_zone_counts_as_outside_it(window):
+    import shiboken6
+
+    window.tabs.setCurrentIndex(1)
+    zone = window.swipe._vertical_zone
+    assert zone is window.sidebar
+    shiboken6.delete(zone)
+    assert not shiboken6.isValid(zone)
+    assert window.swipe._in_vertical_zone(window.apps_tab) is False
+    assert _vertical(window.swipe, window.apps_tab, -STEP) is False
+    assert window.tabs.currentIndex() == 1

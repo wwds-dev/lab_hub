@@ -203,3 +203,7 @@
 {"ts": "2026-11-19T23:46:08", "phase": "review", "state": "start", "spec": "land-pick-and-time"}
 {"ts": "2026-11-19T23:46:34", "phase": "review", "state": "done", "spec": "scroll-sidebar-only"}
 {"ts": "2026-11-19T23:46:34", "phase": "review", "state": "done", "spec": "land-pick-and-time"}
+{"ts": "2026-11-19T23:54:14", "phase": "verify", "state": "start", "spec": "scroll-sidebar-only"}
+{"ts": "2026-11-19T23:55:13", "phase": "verify", "state": "done", "spec": "scroll-sidebar-only"}
+{"ts": "2026-11-19T23:55:13", "phase": "document", "state": "start", "spec": "scroll-sidebar-only"}
+{"ts": "2026-11-19T23:55:18", "phase": "document", "state": "done", "spec": "scroll-sidebar-only"}
