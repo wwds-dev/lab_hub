@@ -378,6 +378,8 @@ copies be one.
   chat, Opus high, ~30–60 min. Requested 2026-11-18 after the lab-wide doc sweep.
   - Done 2026-11-18: `docs/audit/2026-11-18-readiness-audit.md` (1 Blocker, 3 High, 9 Medium, 8 Low). New items below under "Readiness audit 2026-11-18".
 
+- [ ] `P1` `infra` `@me` Decide the Define gate for spec `land-folder-link-guard` and land `claude/land-folder-link-guard` (3 commits, pushed, found unmerged 2026-11-19): it holds the fix for the Land folder-link blocker (audit B1) in the next item. Audit H1 ("don't commit another live session's edits") is not in those three commits and stays open.
+
 - [ ] `P1` `bug` `@ai` **Land: stop a branch that already contains a folder link (follow-up to `land-update-gaps`, 2026-11-17).**
   - Audit 2026-11-18 (B1): release blocker. Also cover `claude_resolve.py:1289` (`merge --ff-only`) and prep's `git switch` (`land_resolve.py:705`), not only `repo_tidy.apply`'s merge (`:919-924`).
   - Why: Land no longer commits a `.venv` symlink itself (6d04df6). But a link an agent committed on its own branch (`git add -A`, with only `.venv/` in `.gitignore`) still lands. Updating the main checkout then replaces the real, ignored `.venv` with the link, which is the SONAR data loss of 17 Nov.
