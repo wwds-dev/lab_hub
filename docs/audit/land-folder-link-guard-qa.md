@@ -37,3 +37,22 @@ Three mutations survived earlier runs and are killed now:
 
 ## Final tree suite
 - Final tree (`ca9ee3b` plus the M29/M32 tests), `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q -p no:cacheprovider`, 2026-11-20: 1327 passed, 1 skipped, 0 failed (exit 0).
+
+## Mac check (2026-11-20)
+Not a real on-screen Land run: the owner's installed Lab Hub read the real lab folder (a Land click went to the real
+SONAR, see below), so the rendering was done offscreen with Qt (`QT_QPA_PLATFORM=offscreen`, no app stylesheet, so
+fonts and colours differ from the app) on a throwaway repo: bare origin + clone, `.gitignore` = `.venv/`, a real
+`.venv/bin/python`, and a branch `claude/demo` that commits `.venv` as a symlink. Real code: `land.make_plan`,
+`LandConfirmDialog`, `land.land`, `LandWindow`. The demo repo was deleted afterwards.
+
+Seen (screenshots in `docs/audit/land-folder-link-guard-mac/`):
+- **Plan:** `Skip(target="claude/demo", reason="not merged: it adds a link at .venv where this checkout has a real folder: remove the link from the branch, then Land again")`. Exact wording as specified.
+- **Confirmation, Details open** (`confirm-details.png`): "Left alone: sonar: claude/demo — not merged: it adds a link at .venv where this checkout has a real folder: remove the link from the branch, then Land again". Correct, but the text sits at the bottom of the Details pane and was cut off until scrolled.
+- **Land window** (`land-window.png`, `confirm.png` for the card): row shows "Needs you", header "0 landed · 1 needs you", line "Not landed: it adds a link at .venv ...". Shown as a stop, not archived. After the run `.venv` was still a real folder, `claude/demo` still existed locally and on origin, `main` unchanged.
+
+Findings (no code changed):
+- **P2 (misleading):** the confirmation card (`confirm.png`) says "Land does all of it; nothing needs you", "WILL DO ✓ Then merge the 1 other branch not landed yet where they can; Claude Code decides ... up to $0.50", although the branch is certain to be stopped. The stop appears only after "Show details". Proposed fix: a card line "Left alone: claude/demo, adds a link at .venv ..." (or "needs you" instead of "nothing needs you") for a plan whose only unlanded branches are skipped, and no Claude Code cost for them.
+- **P3:** Land window shows "0 of 0 steps finished" and a full blue bar for a run that did nothing. Cosmetic.
+- **Not verified:** the stop text in the real, styled app window (macOS fonts, themed colours, wrapping).
+
+Incident (mine, not a product defect): a Land click in the installed Lab Hub at 13:05 ran on the real `sonar` and deleted 7 already-merged local branches (`claude/alarm-delivery-p0-5dbdfc`, `claude/architect-why-notable-card`, `claude/build-why-notable-card`, `claude/elastic-ramanujan-9fd5ad`, `claude/relaxed-swartz-f7a9a2`, `claude/spec-why-notable-card-1e63c8`, `merge-why-notable-card`); `main` stayed at `96b469c`, nothing pushed. Restore commands are in `~/Library/Application Support/Lab Hub/repo-tidy.log`.
