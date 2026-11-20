@@ -413,11 +413,34 @@ def test_a_file_named_like_an_ignored_folder_stops_without_the_folder(lab, tmp_p
     assert "it adds a file at .venv, a name ignored as a folder here" in stop(lab, "feat")
 
 
-def test_an_ordinary_new_file_passes_even_over_an_ignored_file(lab, tmp_path):
-    ignore(lab, "local.cfg\n")
-    (lab / "local.cfg").write_text("mine")  # §5.1 A: file over file is left to git
-    branch_with(lab, tmp_path, "feat", files=[("new.txt", "x"), ("sub/deep.txt", "y")])
+def test_a_new_file_over_a_local_file_is_left_to_git(lab, tmp_path):
+    # §5.1 A: only a folder at the path stops a file; file over file is git's call
+    # (it refuses an untracked one itself).
+    branch_with(lab, tmp_path, "feat", files=[("notes.txt", "x"), ("sub/deep.txt", "y")])
+    (lab / "notes.txt").write_text("mine, untracked")
     assert stop(lab, "feat") == ""
+
+
+def test_the_switch_stops_when_main_moves_while_it_is_checked(lab, tmp_path, monkeypatch):
+    # Security P3-1: the switch goes only to the commit that was checked.
+    sh(lab, "checkout", "-q", "-b", "claude/redesign")
+    commit(lab, "r.txt")
+    other = tidy.tip(lab, "main")
+    sh(lab, "checkout", "-q", "main")
+    moved = commit(lab, "later.txt")
+    sh(lab, "checkout", "-q", "claude/redesign")
+    sh(lab, "update-ref", "refs/heads/main", other)
+    real = lr.link_stop
+
+    def check_then_move(*a, **k):
+        why = real(*a, **k)
+        sh(lab, "update-ref", "refs/heads/main", moved)  # a fetch or agent moves main
+        return why
+
+    monkeypatch.setattr(lr, "link_stop", check_then_move)
+    ok, message = lr.apply_step(lr.Step("repo", lab, "switch", str(lab)), tmp_path / "log")
+    assert not ok and "main moved while Land checked it" in message
+    assert tidy.current_branch(lab) == "claude/redesign"
 
 
 def test_the_branchs_own_ignore_rule_counts_too(lab, tmp_path):
