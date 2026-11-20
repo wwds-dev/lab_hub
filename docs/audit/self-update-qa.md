@@ -407,3 +407,20 @@ clone at the commit its row recorded, so D no longer needs a quiet checkout. See
 
 Run by Claude Code in the owner's session, at the owner's request, from installed v2.236 (`dc84bc3`).
 This commit is the A2 "other session commits to main during the build" step.
+
+| Part | Result | Evidence |
+|---|---|---|
+| Preparation | Done | v2.236 (`dc84bc3`) installed by the snapshot session; the running v2.208 was quit and v2.236 opened from `/Applications` (pid 7521). `main` at `ccd1a6f`, 7 commits ahead. |
+| A. Update from Check builds | **Pass** | Update now rebuilt 8 apps, Lab Hub last (build 0:47, package 0:19). End line "Built and tested. Lab Hub restarts to install the new build when you close this window."; button **Close and restart**. `update.log` 12:45:43–12:45:51: waiting for 7521, copying `update/staged/Lab Hub.app`, self-testing, "ok: installed and self-tested". |
+| A2. Other sessions working meanwhile | **Pass** | The snapshot was cloned at 12:43:47 at `ccd1a6f`. At 12:43:57, during the build, `README.md` got an uncommitted edit and `main` moved to `54c63cd` (this section's first commit; another session also added `c8bf418`). After Close and restart: title "Lab Hub v2.243", stamp `ccd1a6f`, so the newer commits and the edit are not in it. `git worktree list` showed no snapshot; the checkout had no `dist.noindex/`. Check builds then offered the newer commit: "built at v2.243, but the source is 2 commits further on. Update now builds 54c63cd." Not run: the "only uncommitted edits, row up to date" case, because `main` had moved. |
+| B. Window in front | **Pass** | About 30 s after the install (Lab Hub starts slowly), the v2.243 window was the frontmost app (`lsappinfo front`: Lab Hub) without a click. |
+| C. Title and notice | **Pass**, except the menu bar notice | Title "Lab Hub v2.243"; status bar "Lab Hub updated to v2.243." (screenshot). `outcome.seen`: `ok` / `installed and self-tested` / `v2.243`; `update.log` mode 0600; `previous/Lab Hub.app` stamped v2.236 `dc84bc3`; `staged/` empty; no `lock`, no `.updating`; `snapshot/` empty. Backup Control Center kept running; git_autosync and Unblock Tracker were not running afterwards, and whether they were running before was not checked. The menu bar notification was not seen (UserNotificationCenter was briefly in front, so one was probably posted). |
+| D. Forced self-test failure and rollback | **Pass** | Update now built v2.245 from `54c63cd` in the snapshot; the stub was swapped into `update/snapshot/lab_hub/dist.noindex/…/MacOS/Lab Hub`; Close and restart at 12:48:26. `update.log`: copying, self-testing, then at 12:48:33 "rolled_back: the installed copy failed its self-test; the previous build is back". `outcome.seen`: `rolled_back` / `the installed copy failed its self-test; the previous build is back` / `v2.245`. `/Applications/Lab Hub.app` is v2.243 (`ccd1a6f`) with its real 14 MB executable and starts normally (window "Lab Hub v2.243"); no `.updating`; `snapshot/` empty. The status-bar text of the rollback notice was not caught: it had cleared before the screenshot. |
+
+**Finding (P3).** After the rollback, `update/staged/Lab Hub.app` still holds the failed build,
+stub included (14 MB). After a successful install `staged/` is empty. §6 D says "Nothing to clean
+up". The comment in `stage_build` says the next Update now clears it, so it is harmless, but the
+checklist and the behaviour disagree: either clear `staged/` on every outcome, or change §6 D.
+
+Installed afterwards: v2.243 (`ccd1a6f`), two commits behind `main`. The next Update now
+installs the newest build normally.
