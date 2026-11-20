@@ -1,6 +1,6 @@
 # Spec: Land stops a branch that already contains a folder link
 
-Status: **Define approved by the owner 2026-11-18 ("Approve as recommended"): §5 takes option A for all four decisions.** Owner of the spec: this
+Status: **Define approved by the owner 2026-11-18 ("Approve as recommended"): §5 takes option A for all four decisions. Architect (§8) and the widening to plain files (§9, P1-1) approved 2026-11-20 ("Approve and land").** Owner of the spec: this
 session (`land-folder-link-guard`, worktree `bold-merkle-831506`).
 In-flight check (`session_start.py --inflight`, 2026-11-18): no unreleased spec, `claude/*` branch
 or worktree covers this. `land-update-gaps` (build done) owns Land's untracked-file rule and left
@@ -162,3 +162,27 @@ untrusted branch content) → Document (README Land section, CHANGELOG). Design:
 text only, written here. Comply, Launch, Release: not in this change (no new data, claim or
 dependency; release is the owner's). Radar: scoped inline to the git features used (`merge-tree
 --write-tree`, `diff --raw`), both in the installed git 2.56.0; no new dependency.
+
+## 9. Review and Secure findings and what was done (2026-11-18)
+Reports: `docs/audit/land-folder-link-guard-code-review.md`, `docs/audit/land-folder-link-guard-security.md`. Fixed in 60186bf; tests in `tests/test_land_folder_link_guard.py`.
+
+| Finding | Done |
+|---|---|
+| Security P1-1: a plain *file* at `.venv` replaces the ignored folder too (`git add -A` adds it) | **Fixed, owner please confirm (see below).** Added files (and link→file) are checked for §3.2.1 "real folder" and §3.2.2 "ignored as a folder"; stop "it adds a file at .venv …: remove the file from the branch". A file over an untracked or ignored *file* is still left to git (§5.1 A unchanged). `test_a_plain_file_named_like_the_folder_is_stopped_too` |
+| Security P2-1: link chains (`x/l2 -> ..`, `l1 -> x/l2/..`) bypass the lexical outside check | Fixed: the text is followed through links in the result tree and in the checkout, case- and normalisation-folded, hop limit 40. Parametrised tests |
+| Security P2-2: one subprocess and mirror per link (500 links: 79 s) | Fixed: one `ls-tree`, one `cat-file --batch`, two batched `check-ignore --stdin` per check. Test: 300 links in at most 6 git calls |
+| Security P3-1, review P2-3: ref name checked, ref name moved to | Fixed: merge checks `action.sha`; pull and switch resolve one commit, check it and move to it (switch re-reads the tip before switching) |
+| Security P3-2, review P2-2: non-UTF-8 path or link text raises | Fixed: read as bytes; unreadable link text is a stop for that branch only |
+| Security P3-3: a link into `.git` | Fixed: stop "whose target is inside .git" (also `.GIT`) |
+| Security P3-4: format characters in the stop | Fixed: categories Cc, Cf, Cs, Zl, Zp shown as `?` |
+| Security P3-5: the branch's own `.gitignore` rule | Fixed: both the checkout's and the result tree's rules count |
+| Review P1-1: existing test red | Fixed: the test expects the plan-time skip and still asserts Claude never ran |
+| Review P1-2: a pull or switch link stop got other branches triaged and archived | Fixed: the stop holds the repo (`Lander.held`): no triage, no archive, no re-pull; the stop names the link. Tests for both with a second branch |
+| Review P2-1: Land again after the remote is fixed still stops (stale ref) | Fixed: the pull is judged only after its own fetch, so §3.5's preview no longer shows a pull stop (narrower); test `test_land_again_after_the_remote_is_fixed_pulls` |
+| Review P3-1: orphan branch gets a misleading stop | Fixed: unrelated histories are left to the merge path (git refuses them) |
+| Review P3-2: wording | Comma added ("a link at .venv, a name ignored as a folder here"). Held branches no longer get a separate "pull it first" stop: triage does not run |
+| Review P3-3: second `merge-tree` per branch | Not changed (cost is small next to the merge itself); §8's "read-only" means no checkout or ref changes (`merge-tree` writes objects only) |
+| Review P3-4: missing tests | Added except "no worktrees" (one line, `rt.worktrees` empty returns the cannot-tell stop) |
+
+**For the owner (P1-1):** this widens §3.2 from links to files at a folder's path. It stops a branch that adds a file named like an ignored folder (for example `.venv` with `.venv/` ignored, or a file `build` where the checkout has a real `build/`). Git would destroy that folder; no wanted case is known. Say if you want it back to links only.
+**Owner, 2026-11-18: "go ahead with the fixes"** (recorded in `approvals.jsonl`).

@@ -32,3 +32,5 @@
 {"ts": "2026-11-18T12:25:44", "gate": "define", "by": "owner", "words": "Approve as recommended", "recorded_by": "agent", "spec": "land-pick-and-time"}
 {"ts": "2026-11-18T12:28:18", "gate": "architect", "by": "owner", "words": "Approve architecture", "recorded_by": "agent", "spec": "land-pick-and-time"}
 {"ts": "2026-11-18T22:24:02", "gate": "define", "by": "owner", "words": "Approve as recommended", "recorded_by": "agent", "spec": "land-folder-link-guard"}
+{"ts": "2026-11-18T23:17:28", "gate": "define", "by": "owner", "words": "go ahead with the fixes", "recorded_by": "agent", "spec": "land-folder-link-guard"}
+{"ts": "2026-11-20T11:40:50", "gate": "architect", "by": "owner", "words": "Approve and land", "recorded_by": "agent", "spec": "land-folder-link-guard"}

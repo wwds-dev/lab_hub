@@ -114,8 +114,9 @@ README and the specs in `docs/specs/` describe them.
   the virtualenv. Land now checks every merge, Claude merge, switch and pull
   first and stops with "it adds a link at .venv where this checkout has a real
   folder: remove the link from the branch, then Land again". The same stop
-  covers a name ignored as a folder and a link to an absolute path or outside
-  the repo. Such a branch is never archived.
+  covers a plain file at a folder's path, a name ignored as a folder, and a
+  link to an absolute path, outside the repo or into `.git`. Such a branch is
+  never archived, and a stopped pull or switch holds the repo's other branches.
 - **The app now carries its licences.** `Lab Hub.app` ships `LICENSE` (GNU
   AGPL-3.0), `THIRD_PARTY_NOTICES.md` and the GNU LGPL-3.0 and GPL-3.0 texts
   that Qt's licence requires. **Settings → This build → Show licences** opens
