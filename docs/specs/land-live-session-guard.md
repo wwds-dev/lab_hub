@@ -1,8 +1,9 @@
 # Spec: Land does not commit files a session is still editing
 
-Status: **Define draft, waiting for the owner's gate.** No approval recorded. Branch
-`claude/land-live-session-guard`. Design does not apply to slice 1 (no new screen); Architect is a
-section here once Define is approved.
+Status: **Define approved by the owner 2026-11-20 ("Approve as recommended"):** §5 takes the
+recommendation for all four decisions (15 minutes, main checkout included, no override, no
+exception list in slice 1). Branch `claude/land-live-session-guard`. Design does not apply to
+slice 1 (no new screen). Architect: §9, no gate (no new state, concurrency or module boundary).
 In-flight check (`session_start.py --inflight`, 2026-11-20): no unreleased spec, `claude/*` branch
 or worktree covers this. `land-folder-link-guard` (document done) guards merges, not commits.
 `land-pick-and-time` (build start) owns the Land confirmation's cards and checkboxes, so this spec
