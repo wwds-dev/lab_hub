@@ -133,12 +133,18 @@ def build_command(project: Path, commit: str) -> str:
     A clone, not a worktree: a worktree is registered in the shared repository,
     where Land and Tidy would list it and could remove it mid-build (ADR 0006).
     A local clone hard-links the objects and copies none of the repository's
-    hooks or config; the checkout runs with hooks off all the same."""
+    hooks or config; clone and checkout run with hooks and templates off, so
+    no global hook runs either (review P3-1). The folders above the snapshot
+    must not be symlinks, so `rm -rf` cannot be pointed elsewhere (security
+    P3-1)."""
     if not _SHA.fullmatch(commit):
         raise ValueError(f"not a full commit: {commit!r}")
     q, snap = shlex.quote, snapshot()
-    return (f"/bin/rm -rf {q(str(snap))} && /bin/mkdir -p -m 700 {q(str(snap.parent))} && "
-            f"git clone --quiet --no-checkout -- {q(str(project))} {q(str(snap))} && "
+    update, parent = q(str(snap.parent.parent)), q(str(snap.parent))
+    return (f"[ ! -L {update} ] && [ ! -L {parent} ] && /bin/mkdir -p {parent} && "
+            f"/bin/chmod 700 {update} {parent} && /bin/rm -rf {q(str(snap))} && "
+            f"git -c core.hooksPath=/dev/null clone --template= --quiet --no-checkout "
+            f"-- {q(str(project))} {q(str(snap))} && "
             f"git -C {q(str(snap))} -c core.hooksPath=/dev/null "
             f"-c advice.detachedHead=false checkout --quiet --detach {commit} && "
             f"/bin/ln -s {q(str(project / '.venv'))} {q(str(snap / '.venv'))} && "
@@ -193,9 +199,11 @@ def self_status(lab_root: Path, *, running: object = _UNSET) -> BuildStatus:
     if not _same(bundle, installed_target()):
         return held(f"this copy runs from {bundle}, not {installed_target()}")
     installed = row.version.commit
-    if project is None or not installed or row.verdict not in (
-            "current", "behind", "uncommitted"):
+    if project is None or row.verdict not in ("current", "behind", "uncommitted"):
         return replace(row, command=None)
+    if not installed:
+        return held("the installed build does not record its commit; build and "
+                    "install it once by hand with ./build_app.sh --install")
     commit = main_commit(project)
     if commit is None:
         return held(f"git could not read {MAIN_BRANCH} in {project}")
@@ -208,6 +216,18 @@ def self_status(lab_root: Path, *, running: object = _UNSET) -> BuildStatus:
                     f"all Update now builds: uncommitted edits and other branches "
                     f"are in no build until they are committed to {MAIN_BRANCH}.")
         return replace(row, verdict="current", command=None, note=note)
+    if _git(project, "merge-base", "--is-ancestor", installed, commit)[0] == 1:
+        # Installed from commits main does not have (a branch built by hand):
+        # building main would replace it with an older build (review P2-1).
+        ahead = _git(project, "merge-base", "--is-ancestor", commit, installed)[0] == 0
+        reason = (f"the installed build ({installed}) has commits {MAIN_BRANCH} "
+                  f"({commit[:7]}) does not, and Update now builds only "
+                  f"{MAIN_BRANCH}, so it would replace it with an older build")
+        if ahead:
+            return replace(row, verdict="current", command=None,
+                           note=f"built from {installed}, ahead of {MAIN_BRANCH}. "
+                                f"Update now leaves Lab Hub alone: {reason}.")
+        return held(reason)
     note, version = row.note, row.version
     code, head = _git(project, "rev-parse", "HEAD")
     if row.verdict != "behind" or code != 0 or head != commit:
@@ -285,7 +305,14 @@ def stage_build(commit: str | None, *, ditto: str = "/usr/bin/ditto") -> Staged:
                             text=True, timeout=600)
     if copied.returncode != 0:
         raise ValueError(f"could not copy the new build: {copied.stderr.strip()[:200]}")
-    subprocess.run(["/bin/rm", "-rf", str(snap)], check=False, timeout=120)
+    # Best effort: the build is staged, and the next Update now clears the
+    # snapshot anyway (review P3-3). Checked again, as `ditto` can take minutes
+    # (security P3-1).
+    try:
+        if _no_symlinks(snap):
+            subprocess.run(["/bin/rm", "-rf", str(snap)], check=False, timeout=120)
+    except (OSError, subprocess.SubprocessError):
+        pass
     return Staged(staged, version, stamped)
 
 

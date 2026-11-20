@@ -462,10 +462,11 @@ def buildable(repo):
     return repo
 
 
-def _build(project: Path, commit: str) -> None:
+def _build(project: Path, commit: str, shell: str = "/bin/zsh", env=None) -> None:
+    """Runs the command as Rebuild does, through the owner's shell (zsh on macOS)."""
     command = self_update.build_command(project, commit)
-    subprocess.run(["/bin/bash", "-c", command], check=True, timeout=60,
-                   capture_output=True)
+    subprocess.run([shell, "-c", command], check=True, timeout=60,
+                   capture_output=True, env=env)
 
 
 def _dirty(repo: Path) -> None:
@@ -554,6 +555,63 @@ def test_a_stamp_that_is_not_the_recorded_commit_is_not_staged(lab, buildable):
     stamp.write_text(json.dumps({"major": "2", "build": 1, "commit": ""}))
     with pytest.raises(ValueError, match="unknown commit"):
         self_update.stage_build(commit)
+    assert self_update.built_bundle().exists()  # a refusal leaves the snapshot for the log
+
+
+@pytest.mark.parametrize("shell", ["/bin/zsh", "/bin/bash"])
+def test_the_build_runs_in_paths_with_spaces_and_quotes(lab, tmp_path, monkeypatch, shell):
+    """The real support folder is "Application Support/Lab Hub" (review P3-2)."""
+    monkeypatch.setattr(self_update, "UPDATE_DIR",
+                        tmp_path / "Application Support" / "it's Lab Hub" / "update")
+    project = tmp_path / "a lab $(touch pwned)" / "lab_hub"
+    project.parent.mkdir()
+    _git(project.parent, "init", "-q", "-b", "main", project.name)
+    (project / ".gitignore").write_text("dist.noindex\n.venv\n")
+    (project / "build_app.sh").write_text(FAKE_BUILD)
+    (project / "build_app.sh").chmod(0o755)
+    (project / "main.py").write_text("committed\n")
+    _git(project, "add", ".")
+    _git(project, "commit", "-q", "-m", "one")
+    (project / ".venv" / "bin").mkdir(parents=True)
+    (project / ".venv" / "bin" / "activate").write_text("")
+    commit = self_update.main_commit(project)
+    _build(project, commit, shell=shell)
+    assert _marker(self_update.stage_build(commit).bundle) == "committed\n"
+    assert not (tmp_path / "pwned").exists()
+    assert (self_update.UPDATE_DIR.stat().st_mode & 0o777) == 0o700
+
+
+def test_no_global_or_template_hook_runs_while_the_snapshot_is_made(lab, buildable, tmp_path):
+    """Review P3-1: the owner's global hooks and template stay out of the build."""
+    marker = tmp_path / "hook-ran"
+    hooks = tmp_path / "hooks"
+    template = tmp_path / "template" / "hooks"
+    for folder in (hooks, template):
+        folder.mkdir(parents=True)
+        for name in ("reference-transaction", "post-checkout", "post-merge"):
+            hook = folder / name
+            hook.write_text(f"#!/bin/sh\necho {name} >> '{marker}'\n")
+            hook.chmod(0o755)
+    config = tmp_path / "gitconfig"
+    config.write_text(f"[core]\n\thooksPath = {hooks}\n[init]\n\ttemplateDir = {template.parent}\n")
+    commit = self_update.main_commit(buildable)
+    _build(buildable, commit, env={**os.environ, "GIT_CONFIG_GLOBAL": str(config)})
+    assert not marker.exists()
+    assert not (self_update.snapshot() / ".git" / "hooks").exists()
+    assert self_update.stage_build(commit).commit == commit[:7]
+
+
+def test_a_symlinked_snapshot_folder_stops_the_build_before_removing_anything(
+        lab, buildable, tmp_path):
+    """Security P3-1: `rm -rf` must not follow a planted link to another lab_hub."""
+    elsewhere = tmp_path / "elsewhere"
+    (elsewhere / "lab_hub").mkdir(parents=True)
+    (elsewhere / "lab_hub" / "keep").write_text("precious")
+    lab["update"].mkdir(parents=True)
+    (lab["update"] / "snapshot").symlink_to(elsewhere)
+    with pytest.raises(subprocess.CalledProcessError):
+        _build(buildable, self_update.main_commit(buildable))
+    assert (elsewhere / "lab_hub" / "keep").read_text() == "precious"
 
 
 @pytest.mark.parametrize("commit", [None, "", "abc1234", "x" * 40])
@@ -686,6 +744,34 @@ def test_level_with_main_while_on_another_branch_is_current(row_for, lab, repo):
     assert row.verdict == "current" and row.command is None
 
 
+def _branch_commit(repo: Path) -> str:
+    _git(repo, "switch", "-q", "-c", "claude/feature")
+    (repo / "feature").write_text("")
+    _git(repo, "add", "feature")
+    _git(repo, "commit", "-q", "-m", "feature")
+    sha = _git(repo, "rev-parse", "--short=7", "HEAD")
+    _git(repo, "switch", "-q", "main")
+    return sha
+
+
+def test_a_build_ahead_of_main_is_not_offered_a_downgrade(row_for, lab, repo):
+    """Review P2-1: installed from a branch ahead of main, so main is older."""
+    ahead = _branch_commit(repo)
+    row = row_for(lab["target"], commit=ahead, verdict="current")
+    assert row.verdict == "current" and row.command is None and not row.needs_rebuild
+    assert "ahead of main" in row.note and "older build" in row.note
+
+
+def test_a_build_beside_main_is_held_not_replaced(row_for, lab, repo):
+    """Review P2-1: installed from a branch, main moved on separately."""
+    beside = _branch_commit(repo)
+    (repo / "main.py").write_text("later\n")
+    _git(repo, "commit", "-q", "-am", "later on main")
+    row = row_for(lab["target"], commit=beside)
+    assert row.command is None and row.needs_rebuild
+    assert "Update now leaves Lab Hub alone" in row.note and "older build" in row.note
+
+
 def test_without_main_the_row_says_why_and_offers_nothing(row_for, lab, repo):
     _git(repo, "branch", "-m", "main", "trunk")
     row = row_for(lab["target"])
@@ -699,9 +785,9 @@ def test_main_without_build_app_sh_offers_nothing(row_for, lab, repo):
     assert row.command is None and "has no build_app.sh" in row.note
 
 
-def test_an_installed_build_without_a_stamp_offers_nothing(row_for, lab):
+def test_an_installed_build_without_a_stamp_offers_nothing_and_says_why(row_for, lab):
     row = row_for(lab["target"], commit="")
-    assert row.command is None
+    assert row.command is None and "does not record its commit" in row.note
 
 
 def test_an_up_to_date_lab_hub_has_no_command(row_for, lab):
@@ -1032,7 +1118,7 @@ def test_a_build_that_cannot_be_staged_asks_for_no_restart(
     monkeypatch.setattr(apps_tab_module, "Rebuild", _FakeRun)
     monkeypatch.setattr(launcher, "source_dir", lambda app, root: tmp_path)
 
-    def refuse(project):
+    def refuse(commit):
         raise ValueError("the new build is from 1234567, not abcdef0")
 
     monkeypatch.setattr(self_update, "stage_build", refuse)

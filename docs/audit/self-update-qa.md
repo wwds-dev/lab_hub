@@ -123,21 +123,30 @@ Ranked gaps (P1 first). All are missing tests unless marked otherwise.
 ## 6. Manual checklist for the owner (real Mac)
 
 These cannot run in CI. Record a screenshot or the stated file contents for each.
+Updated 2026-11-20 for amendment 1 (spec §11, ADR 0006): Lab Hub now builds in a private clone,
+`update/snapshot/lab_hub`, at the `main` commit its row records, so the shared checkout may be
+dirty or move during the run; the new item A2 checks exactly that, and D no longer needs a quiet
+checkout.
 Updated in the second Verify (2026-11-17) for the staged copy, the `broken` outcome, the
 review-step wait note and the restart refusal; the support folder is
 `~/Library/Application Support/Lab Hub/update/` below.
 
 Preparation
-- [ ] Land this change so the `lab_hub` checkout is clean and on `main`.
+- [ ] Land this change on `main`. The shared checkout may stay dirty or on another branch.
 - [ ] Install it once by hand: `./build_app.sh --install`, then menu bar item > Quit, then open Lab Hub from `/Applications`. The copy that runs must already contain self-update, because the update is driven by the old copy.
 - [ ] Add one commit to `main` (for example a CHANGELOG line), so the installed build is behind. Note the title bar version (screenshot "before").
 
 A. Update from Check builds
-- [ ] Apps page > Check builds: the last row is "Lab Hub (this app)" with the installed version and "N commits older than its source".
-- [ ] Update now: any other behind app rebuilds first; Lab Hub's build runs last in the same window and the live output shows `build_app.sh` and its self-test.
+- [ ] Apps page > Check builds: the last row is "Lab Hub (this app)" with the installed version, "N commits further on" and, at the end of its note, "Update now builds <sha7>" with `main`'s commit.
+- [ ] Update now: any other behind app rebuilds first; Lab Hub's build runs last in the same window and the live output shows the `git clone` into `update/snapshot/lab_hub`, then `build_app.sh` and its self-test there.
 - [ ] End line: "Built and tested. Lab Hub restarts to install the new build when you close this window." Button: **Close and restart**.
-- [ ] Click it. Lab Hub first copies the build to `update/staged/Lab Hub.app` (a second or two), then quits; no Terminal opens; within about a minute Lab Hub starts again.
-- [ ] If instead a box "Lab Hub was not restarted" appears, note its text (for example "the checkout is now at <sha>": another session committed between the build and Close). Lab Hub must keep running and `/Applications` must be untouched.
+- [ ] Click it. Lab Hub first copies the build to `update/staged/Lab Hub.app` (a second or two) and removes `update/snapshot/lab_hub`, then quits; no Terminal opens; within about a minute Lab Hub starts again.
+- [ ] If instead a box "Lab Hub was not restarted" appears, note its text. Lab Hub must keep running and `/Applications` must be untouched. Another session's commits or edits must no longer cause it.
+
+A2. Other sessions working meanwhile (amendment 1)
+- [ ] During Lab Hub's build, edit a tracked file in the shared checkout without committing, and commit something else to `main` from another session. Then click **Close and restart**: Lab Hub restarts on the commit the row showed (title), not the newer one, and the edit is not in it.
+- [ ] `git -C <lab_hub checkout> worktree list` never shows the snapshot, and the checkout has no `dist.noindex/` from this run.
+- [ ] Check builds afterwards offers the newer `main` commit. With only uncommitted edits in the checkout, Lab Hub's row is up to date and says the edits are in no build until committed to `main`.
 
 B. Window in front
 - [ ] Without clicking the menu bar item or the Dock, the new Lab Hub window is in front and has focus (screenshot "after"). If it is not, note it: the spec's fallback (§6, a menu bar notice "Click to open") was not built.
@@ -150,11 +159,11 @@ C. Title and notice
 
 D. Forced self-test failure and rollback
 - [ ] Add another commit to `main`, run Update now and wait for **Close and restart**. Do not click yet.
-- [ ] In Terminal, make the new build fail its self-test: `cd <lab_hub checkout>/dist.noindex/Lab\ Hub.app/Contents/MacOS && mv "Lab Hub" "Lab Hub.real" && printf '#!/bin/sh\nexit 1\n' > "Lab Hub" && chmod +x "Lab Hub"`.
-- [ ] Click **Close and restart**. The stub is staged with the rest of the bundle (the checkout is still clean and the stamp still matches HEAD, since `dist.noindex/` is ignored). Lab Hub quits and comes back on the **old** version (title).
+- [ ] In Terminal, make the new build fail its self-test: `cd "$HOME/Library/Application Support/Lab Hub/update/snapshot/lab_hub/dist.noindex/Lab Hub.app/Contents/MacOS" && mv "Lab Hub" "Lab Hub.real" && printf '#!/bin/sh\nexit 1\n' > "Lab Hub" && chmod +x "Lab Hub"`.
+- [ ] Click **Close and restart**. The stub is staged with the rest of the bundle (the snapshot's HEAD and the stamp still match the recorded commit, whatever the shared checkout did meanwhile). Lab Hub quits and comes back on the **old** version (title).
 - [ ] The notice reads "The update to vNEW did not install (the installed copy failed its self-test; the previous build is back); you are on vOLD. Log: <path>", and `outcome.seen` starts with `rolled_back`.
 - [ ] `/Applications/Lab Hub.app` is the old build and starts normally; no `/Applications/Lab Hub.app.updating` is left.
-- [ ] Afterwards delete `<checkout>/dist.noindex` so the stub is gone.
+- [ ] Nothing to clean up: staging removed the snapshot, stub included.
 
 D2. If a `broken` notice ever appears (do not force it on the real `/Applications`)
 - [ ] A `broken` outcome means the helper could not put things right and **opened nothing**, so the notice is seen only when Lab Hub is next started by hand. It reads "The update to vNEW did not install (..., the previous build could not be put back; it is at <support>/update/previous/Lab Hub.app); you are on ...".
@@ -163,11 +172,52 @@ D2. If a `broken` notice ever appears (do not force it on the real `/Application
 E. A Land during Update now
 - [ ] Start Land all (or a Land on a repo with a long test run) on the Apps page, then open Check builds while it runs: the Lab Hub row's note ends "Will update after this finishes: Land is running." (or "Land is reading the repos" while it plans). Press Update now.
 - [ ] Other apps rebuild; the Lab Hub row then reads "Waiting" with the reason "Waiting: Land is running. Lab Hub builds when that finishes", the live output shows `[waiting — ...]` once, and no "No output for 1:00" appears however long it waits; Cancel is available.
-- [ ] If the Land leaves the checkout dirty or on another branch, Lab Hub's row ends "Not rebuilt" with the reason, the end line reads "Done. Lab Hub itself was not rebuilt; its row says why.", the button is **Close** and nothing restarts.
+- [ ] If the Land leaves the checkout dirty, moves `main` or switches branch, Lab Hub still builds the commit its row recorded and **Close and restart** is offered (amendment 1; before it, the row ended "Not rebuilt").
 - [ ] Lab Hub's build starts only after Land finishes; Land completes normally (nothing killed).
 - [ ] Repeat with the Land on another page (Backup & sync, Unblock tracker or Backstage) and with a tool (Convert, Images, Video or Narrator) running: the wait must name it too (the wiring is now tested; the end-to-end run is not, see N29 below).
 - [ ] Cancel while waiting: the run ends as cancelled, Lab Hub is not built and does not quit.
 - [ ] With a tool started after the build but before **Close and restart** (if the modal window allows it at all): the status bar says Lab Hub restarts when it finishes, and it restarts only then.
+
+## Verify of amendment 1: snapshot build (2026-11-20)
+
+Spec §11–§13, ADR 0006. Run by the orchestrating session after the independent code review and
+security review (`docs/audit/self-update-snapshot-code-review.md`, `…-security.md`); this pass is
+mechanical (mutants, suite, one real build), not an independent judgement.
+
+**Success measures against tests** (`tests/test_self_update.py`):
+
+| §11.2 | Test(s) |
+|---|---|
+| 1. builds the recorded commit in a snapshot | `test_update_now_builds_the_recorded_commit_in_a_private_snapshot`, `test_lab_hubs_row_builds_main_in_a_snapshot_without_install_and_restarts` |
+| 2. checkout cannot block or contaminate | `test_the_shared_checkout_changing_never_blocks_or_enters_the_update` (dirtied/moved × before/after the build), `test_a_dirty_checkout_no_longer_holds_the_update`, `test_on_another_branch_the_row_still_builds_main`, `test_the_apps_tab_hold_waits_for_busy_work_but_not_for_the_checkout` |
+| 3. Close and restart installs what was built | `test_close_and_restart_stages_the_recorded_commit_after_the_checkout_moved`, `test_a_build_from_another_commit_is_not_staged`, `test_a_stamp_that_is_not_the_recorded_commit_is_not_staged`, `test_close_and_restart_refuses_a_command_lab_hub_did_not_make` |
+| 4. uncommitted work is no reason to update; no downgrade | `test_uncommitted_edits_alone_are_no_reason_to_update`, `test_level_with_main_while_on_another_branch_is_current`, `test_a_build_ahead_of_main_is_not_offered_a_downgrade`, `test_a_build_beside_main_is_held_not_replaced` |
+| 5. nothing left behind, no worktree | `test_update_now_builds_the_recorded_commit_in_a_private_snapshot` (snapshot gone, `git worktree list` unchanged) |
+| 6. rest unchanged | the 65 earlier tests still pass |
+
+Hardening from review and security: `test_the_build_runs_in_paths_with_spaces_and_quotes[zsh|bash]`,
+`test_no_global_or_template_hook_runs_while_the_snapshot_is_made`,
+`test_a_symlinked_snapshot_folder_stops_the_build_before_removing_anything`.
+
+**Mutation check.** 15 mutants of `lab_hub/self_update.py`, each planted alone, the module's tests
+run, the file restored (SHA-256 compared): all 15 killed.
+M1 symlink guard removed · M2 clone without `core.hooksPath=/dev/null` · M3 clone without
+`--template=` · M4 no `chmod 700` · M5 build the working tree instead of the commit · M6
+`main_commit` reads `HEAD` · M7 staging skips the snapshot-HEAD check · M8 staging skips the stamp
+check · M9 snapshot not removed · M10 `planned_commit` trusts any match · M11 level-with-main not
+current · M12 ahead-of-main check skipped · M13 ahead treated as diverged · M14 unstamped build not
+explained · M15 staging accepts no recorded commit.
+
+**Real build.** `build_command` run through `/bin/zsh -c` against the shared checkout's `main`
+(`166be4e`), with `UPDATE_DIR` under a scratch `Application Support/Lab Hub/update` (spaces): the
+real `build_app.sh` (PyInstaller, prune, codesign) finished in 122 s, its self-test printed `OK`,
+`stage_build` staged v2.228 stamped `166be4e`, the snapshot was removed, and `git worktree list` of
+the shared repository showed no new entry. Nothing was installed.
+
+**Suite:** SUITE_RESULT
+
+**Not verified:** the real `/Applications` swap from a snapshot build and A2 and D of §6, which the
+owner runs on the real Mac.
 
 ## Second Verify (2026-11-17)
 

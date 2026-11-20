@@ -13,8 +13,10 @@ on 2026-11-18/19 the 10–20 minute build window was never quiet, so the update 
 ## Decision
 1. When Check builds offers Lab Hub's row, it records the full SHA of `refs/heads/main`.
 2. Update now's command clones the shared repository into `~/Library/Application Support/Lab Hub/update/snapshot/lab_hub`
-   (a local, hard-linked clone, not a worktree), checks out that SHA detached with hooks off, links
-   the checkout's `.venv`, and runs `build_app.sh` there.
+   (a local, hard-linked clone, not a worktree), with hooks and templates off for both the clone
+   and the checkout, checks out that SHA detached, links the checkout's `.venv`, and runs
+   `build_app.sh` there. It refuses to start if `update/` or `update/snapshot/` is a symlink, so its
+   `rm -rf` cannot be redirected, and sets both to 0700.
 3. Staging accepts the bundle only if the snapshot's `HEAD` and the bundle's stamp both match the
    recorded SHA, then removes the snapshot. The shared checkout is not consulted.
 4. The recorded SHA travels inside the command string; `planned_commit` recovers it only when the
