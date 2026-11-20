@@ -372,3 +372,29 @@ First attempt (20:58–21:10): stopped before the restart. While Update now was 
 owner's Lab Hub release in another session installed v2.199 (`a7bcc34`) directly with
 `build_app.sh --install`, so the self-update path never ran (no `update/` folder was made).
 Rerun from installed v2.199; this commit moves `main` ahead of it.
+
+### Results
+
+| Part | Result | Evidence |
+|---|---|---|
+| A. Update now, then Close and restart | **Pass** | 2026-11-17 21:14: v2.199 → v2.201 (`4bb2278`). `update.log`: "waiting for Lab Hub (69944) to quit", copy, self-test (`OK`), "ok: installed and self-tested" at 21:14:10. End line seen on 2026-11-19: "Built and tested. Lab Hub restarts to install the new build when you close this window." The first row read "built at v2.199, but the source is 2 commits further on", not §6's "N commits older than its source": wording only. |
+| B. Window comes to the front | **Not verified** | Nobody watched the 21:14 restart, and the window was restarted again before it could be checked. |
+| C. Title, notice and `update/` files | **Files pass; title and notice not verified** | `outcome.seen` = `ok` / `installed and self-tested` / `v2.201`; `update.log` mode 0600; `previous/Lab Hub.app` holds v2.199; `staged/` empty; no `lock`, no `.updating`. The status-bar and menu-bar notices were not seen. |
+| D. Forced self-test failure and rollback | **Not run** | Three attempts (2026-11-18 22:20, 2026-11-19 23:11 and 23:19) never reached the install; see below. |
+| "Lab Hub was not restarted" box | **Pass** | 2026-11-19 23:17: built at `596251f` with the stub swapped in; a Foundry rollout then committed `9f13596`. Close and restart showed "The new build was not installed: the new build is from 596251f, but the checkout is now at 9f13596. This copy keeps running." Lab Hub kept running (same pid), and nothing was staged. |
+
+### Finding: the shared checkout is almost never still long enough
+
+D needs the checkout clean and unmoved from the start of Lab Hub's build until Close and restart,
+about 10–20 minutes while Update now also rebuilds the other apps. Over two days it never was:
+- 2026-11-18: Update now held Lab Hub because land-pick-and-time edits appeared mid-run.
+- Those edits then stayed uncommitted overnight, from 22:20 until about 09:48.
+- 2026-11-19 23:17: the build finished, but a Foundry rollout committed before the click.
+- 23:22: on the rerun, `activity.jsonl` and `approvals.jsonl` changed three minutes in.
+
+The refusal is correct by design (spec §5.3), but in practice self-update can only run when no
+other session touches `main`. Building from a clean snapshot of `HEAD` (for example a temporary
+worktree) instead of the shared checkout would remove the dependency. This is an owner decision;
+it is not fixed here.
+
+`dist.noindex/` is gone: the last Update now cleared it, so there is no stub left behind.
