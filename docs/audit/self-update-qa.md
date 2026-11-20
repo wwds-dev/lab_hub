@@ -397,4 +397,8 @@ other session touches `main`. Building from a clean snapshot of `HEAD` (for exam
 worktree) instead of the shared checkout would remove the dependency. This is an owner decision;
 it is not fixed here.
 
+**Addressed 2026-11-20 by amendment 1** (spec §11–§13, ADR 0006): Lab Hub now builds in a private
+clone at the commit its row recorded, so D no longer needs a quiet checkout. See §6 A2 and D, and
+"Verify of amendment 1" above.
+
 `dist.noindex/` is gone: the last Update now cleared it, so there is no stub left behind.
