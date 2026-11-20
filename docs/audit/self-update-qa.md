@@ -214,7 +214,7 @@ real `build_app.sh` (PyInstaller, prune, codesign) finished in 122 s, its self-t
 `stage_build` staged v2.228 stamped `166be4e`, the snapshot was removed, and `git worktree list` of
 the shared repository showed no new entry. Nothing was installed.
 
-**Suite:** SUITE_RESULT
+**Suite:** full suite on `4fbaab7`'s code: 1284 passed, 1 skipped (8 min 59 s); `tests/test_self_update.py` 94 passed.
 
 **Not verified:** the real `/Applications` swap from a snapshot build and A2 and D of §6, which the
 owner runs on the real Mac.
