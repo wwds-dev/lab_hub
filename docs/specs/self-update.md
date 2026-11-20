@@ -1,7 +1,7 @@
 # Spec: Lab Hub updates itself from Check builds
 
 Status: **Define approved by the owner 2026-11-17 ("Approve as recommended"), all four §5 recommendations. Architect approved by the owner 2026-11-17 ("Approve architecture"). Built 2026-11-17; reviewed and secured, with all P1/P2 findings fixed (§10). Second Verify found no production defect and three missing tests (N29, N2, N10); these were added and each was confirmed to catch its planted mutant (§10). Not done: the owner's real-Mac check (`docs/audit/self-update-qa.md` §6), commit, merge and release.**
-**Amendment 1 (§11, 2026-11-20): build from a snapshot of `main`, not the shared checkout. Define drafted, waiting for the owner.**
+**Amendment 1 (§11, 2026-11-20): build from a snapshot of `main`, not the shared checkout. Define approved by the owner 2026-11-20 ("Approve as recommended"); Architect (§12, ADR 0006) waiting for the owner.**
 In-flight check (`session_start.py --inflight`, 2026-11-17): `lab-wide-build-marker`, `land-already-applied`, `land-from-tiles`, `land-resolve-all`, `progress-windows`, `release-root-behind`, `repo-tidy`, `update-now-terminal` (all document done, not released) and `tile-resolve` (superseded). None of them updates Lab Hub itself. This spec adds a row and a final step to the Check builds window that `progress-windows` built and that `update-now-terminal` and `release-root-behind` feed. It changes none of their rows, buttons or commands for the other apps. Worktrees: `bold-merkle-831506` (`land-cherry-shortcut`, Land's engine) and `zealous-benz-97c752` (progress windows, already merged in `e888bbf`). Neither touches self-update.
 
 ## 1. Problem and evidence
@@ -264,7 +264,7 @@ Reports:
 
 ## 11. Amendment 1: build from a snapshot, not the shared checkout (Define, 2026-11-20)
 
-Status: **Define drafted 2026-11-20, waiting for the owner's approval.** Owner of this amendment:
+Status: **Define approved by the owner 2026-11-20 ("Approve as recommended").** Owner of this amendment:
 session `intelligent-wright-6029ac`. The in-flight list shows `self-update` itself (document done,
 not released); this amendment is that spec's next change, asked for by the owner's session after
 the real-Mac run below. No other in-flight spec changes `lab_hub/self_update.py`.
@@ -342,3 +342,83 @@ helper script; the other apps' rows.
    - Alternative: a temporary `git worktree add --detach`. Cheaper, but it is registered in the
      shared repository, so it shows up in Land and Tidy lists for 10–20 minutes and could be
      removed by them mid-build.
+
+### 11.6 Owner's decision
+Approved by the owner 2026-11-20 ("Approve as recommended"): all three §11.5 recommendations.
+
+## 12. Amendment 1: architecture (architect, 2026-11-20)
+ADR: `docs/adr/0006-self-update-snapshot-build.md` (supersedes decision 2 of ADR 0003). It changes
+state (a new folder) and the build's boundary, so it needs the owner's Architect gate.
+
+### 12.1 Modules and boundaries
+All in `lab_hub/self_update.py` unless named; Qt-free as before.
+- **`SNAPSHOT_DIR = UPDATE_DIR / "snapshot"`**, a module constant (tests patch it like
+  `UPDATE_DIR`). The snapshot is `SNAPSHOT_DIR / "lab_hub"`: a private clone. Its build output is
+  `…/lab_hub/dist.noindex/Lab Hub.app`.
+- **`main_commit(project) -> str | None`:** `git rev-parse --verify --quiet refs/heads/main^{commit}`,
+  the full 40-hex SHA. Replaces `checkout_blocker` and `head_commit`; nothing reads the shared
+  checkout's branch or status any more.
+- **`build_command(project, commit) -> str`:** one fixed `&&` chain, every value `shlex.quote`d,
+  `commit` checked to be 40 lowercase hex first:
+  `/bin/rm -rf <snap> && /bin/mkdir -p <SNAPSHOT_DIR> && git clone --quiet --no-checkout -- <project> <snap>`
+  `&& git -C <snap> -c core.hooksPath=/dev/null -c advice.detachedHead=false checkout --quiet --detach <commit>`
+  `&& /bin/ln -s <project>/.venv <snap>/.venv && cd <snap> && ./build_app.sh`.
+  `git clone` of a local path hard-links the objects (about 10 MB of history, a second or two) and
+  does not copy the shared repository's hooks or config. The command is shown in the live output
+  and copied by Copy commands, as today.
+- **`planned_commit(command, project) -> str | None`:** the commit in a command, accepted only if
+  `build_command(project, commit)` rebuilds the very same string. This is how `_restart_on` learns
+  the recorded commit from the `restarts` command it already has; no new state is passed around.
+- **`self_status`:** the row is offered when the copy runs from `/Applications`, `main` resolves
+  and `build_app.sh` exists at that commit (`git cat-file -e <commit>:build_app.sh`). Its verdict for
+  Lab Hub is taken from the installed stamp against `main_commit`:
+  - stamp is a prefix of the `main` commit: `current`. If `build_status` said `uncommitted`, the note
+    says those edits are in no build until they are committed to `main` (§11.2.4).
+  - otherwise `behind`, with the `build_status` note when the checkout is on `main`, or "main is at
+    `<sha7>`" when it is not. The note ends "Update now builds `<sha7>`."
+  - stamp unknown: as today (no command).
+- **`stage_build(commit)`** (was `stage_build(project)`): checks the snapshot path has no symlink,
+  the executable exists, `git -C <snap> rev-parse HEAD` equals `commit`, and the bundle's stamp is a
+  prefix of `commit`; then `ditto`s to `staged/` as today and removes the snapshot. It never touches
+  the shared checkout. On a refusal the snapshot is left for the log and replaced by the next build.
+- **`ui/apps_tab.py`:** `_hold_for` keeps the busy wait and drops the checkout re-check (only "its
+  checkout is gone" still skips). `_restart_on(restarts)` calls
+  `stage_build(planned_commit(restarts, project))`, refusing with "the build command is not one Lab
+  Hub made" if that is None.
+- **Unchanged:** `build_app.sh`, `HELPER_SCRIPT`, `helper_paths`, `start_helper`, outcomes,
+  `main_window.restart_for_update`, the other apps' rows.
+
+### 12.2 State and concurrency
+- **One new folder,** `update/snapshot/`, mode 0700 like `update/`. Only Update now writes it; it is
+  cleared at the start of each build and after staging. Two Update nows cannot overlap: the Check
+  builds window is modal and `Rebuild` runs one command at a time.
+- **The shared checkout is read twice and never written:** at the row (`rev-parse`, `cat-file`) and by
+  `git clone` (reads objects and refs). Concurrent commits there are harmless: the clone reads
+  immutable objects for a SHA already recorded, and a ref moving mid-clone does not change that SHA.
+- **`.venv` is shared** (§11.4): `uv pip install -q pyinstaller` in `build_app.sh` still writes it,
+  as every Lab Hub build always has.
+- **Space in the path:** the snapshot sits under `Application Support/Lab Hub/`, two spaces.
+  `build_app.sh` quotes its paths and PyInstaller accepts them; Verify confirms with one real build
+  (without `--install`) in such a path.
+
+### 12.3 Rejected
+- **`git worktree add --detach`:** registered in the shared repository, so Land and Tidy list it and
+  can remove it mid-build (§11.5.3).
+- **`git archive | tar`:** no `.git`, so `stamp_version.py` (`rev-list --count`) cannot stamp it.
+- **Shallow clone:** `rev-list --count` would give the wrong build number.
+- **Snapshot at build start instead of at the row:** owner chose the reviewed commit (§11.5.1).
+
+### 12.4 Tests (Build)
+In `tests/test_self_update.py`, on fixture repos with a fake `build_app.sh` that writes a fake
+bundle stamped from its own `git rev-parse`, running the real `build_command` with `bash`:
+- the snapshot builds the recorded commit; uncommitted edits in the checkout are not in it;
+- the checkout dirtied, and separately moved one commit forward, before the build and after it: the
+  recorded commit is staged in all four cases (§11.2.2, §11.2.3);
+- a stamp that does not match the recorded commit, a snapshot `HEAD` that does not, and a symlinked
+  snapshot path: refused;
+- after staging the snapshot is gone and `git worktree list` is unchanged (§11.2.5);
+- `planned_commit` accepts only a command `build_command` made (changed path, short SHA, extra text);
+- `self_status`: dirty checkout level with `main` is `current` with the note; on another branch it
+  still builds `main`; `main` missing gives no command.
+In `tests/test_apps_tab.py`: the hold no longer skips Lab Hub for a dirty checkout; `_restart_on`
+stages from the recorded commit after the checkout moved.

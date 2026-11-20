@@ -33,3 +33,4 @@
 {"ts": "2026-11-18T12:28:18", "gate": "architect", "by": "owner", "words": "Approve architecture", "recorded_by": "agent", "spec": "land-pick-and-time"}
 {"ts": "2026-11-19T23:22:31", "gate": "release", "by": "owner", "words": "release lab hub", "recorded_by": "agent", "spec": "scroll-sidebar-only", "note": "owner said 'go on' after being told Review/Verify/Document were not logged for scroll-sidebar-only and the dim-unticked-card change in land-pick-and-time was unreviewed"}
 {"ts": "2026-11-19T23:22:31", "gate": "release", "by": "owner", "words": "release lab hub", "recorded_by": "agent", "spec": "land-pick-and-time", "note": "owner said 'go on' after being told Review/Verify/Document were not logged for scroll-sidebar-only and the dim-unticked-card change in land-pick-and-time was unreviewed"}
+{"ts": "2026-11-20T00:07:32", "gate": "define", "by": "owner", "words": "Approve as recommended", "recorded_by": "agent", "spec": "self-update"}
