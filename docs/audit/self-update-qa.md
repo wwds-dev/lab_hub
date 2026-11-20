@@ -163,7 +163,7 @@ D. Forced self-test failure and rollback
 - [ ] Click **Close and restart**. The stub is staged with the rest of the bundle (the snapshot's HEAD and the stamp still match the recorded commit, whatever the shared checkout did meanwhile). Lab Hub quits and comes back on the **old** version (title).
 - [ ] The notice reads "The update to vNEW did not install (the installed copy failed its self-test; the previous build is back); you are on vOLD. Log: <path>", and `outcome.seen` starts with `rolled_back`.
 - [ ] `/Applications/Lab Hub.app` is the old build and starts normally; no `/Applications/Lab Hub.app.updating` is left.
-- [ ] Nothing to clean up: staging removed the snapshot, stub included.
+- [ ] Nothing to clean up: staging removed the snapshot, and the helper removed the failed staged copy, stub included (`update/staged/` is empty).
 
 D2. If a `broken` notice ever appears (do not force it on the real `/Applications`)
 - [ ] A `broken` outcome means the helper could not put things right and **opened nothing**, so the notice is seen only when Lab Hub is next started by hand. It reads "The update to vNEW did not install (..., the previous build could not be put back; it is at <support>/update/previous/Lab Hub.app); you are on ...".
@@ -421,6 +421,9 @@ This commit is the A2 "other session commits to main during the build" step.
 stub included (14 MB). After a successful install `staged/` is empty. §6 D says "Nothing to clean
 up". The comment in `stage_build` says the next Update now clears it, so it is harmless, but the
 checklist and the behaviour disagree: either clear `staged/` on every outcome, or change §6 D.
+Fixed the same day: on `rolled_back` and `broken` the helper now removes the staged copy
+(`restore` in `HELPER_SCRIPT`); the two rollback tests assert it, and the mutant that drops the
+removal is killed.
 
 Installed afterwards: v2.243 (`ccd1a6f`), two commits behind `main`. The next Update now
 installs the newest build normally.

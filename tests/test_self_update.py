@@ -129,12 +129,15 @@ def test_the_helper_installs_the_new_build_keeps_the_old_and_opens_it(lab):
 
 
 def test_a_build_that_fails_its_installed_selftest_is_rolled_back(lab):
-    _run(lab, _stage(lab, selftest="exit 1"))
+    staged = _stage(lab, selftest="exit 1")
+    _run(lab, staged)
     assert _marker(lab["target"]) == "old"
     assert (lab["target"] / "Contents" / "MacOS" / "Lab Hub").is_file()
     assert _opened(lab) == [str(lab["target"])]
     outcome = _outcome(lab)
     assert outcome.token == "rolled_back" and "self-test" in outcome.message
+    # The failed build is not kept in staged/ (real-Mac check 2026-11-20, P3).
+    assert not staged.bundle.exists()
 
 
 def test_a_selftest_that_hangs_is_stopped_and_rolled_back(lab):
@@ -147,10 +150,12 @@ def test_a_failed_new_build_with_no_previous_build_opens_nothing(lab):
     import shutil
 
     shutil.rmtree(lab["target"])
-    _run(lab, _stage(lab, selftest="exit 1"))
+    staged = _stage(lab, selftest="exit 1")
+    _run(lab, staged)
     assert not lab["target"].exists()
     assert _opened(lab) == []
     assert _outcome(lab).token == "broken"
+    assert not staged.bundle.exists()
 
 
 def test_a_previous_build_that_cannot_be_cleared_means_nothing_is_replaced(lab):

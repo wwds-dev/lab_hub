@@ -167,7 +167,7 @@ ADR: `docs/adr/0003-self-update-helper.md`, which needs the owner's Architect ga
   1. Poll `kill -0 $pid` every 0.25 s for up to 60 s. If the old process is still alive, write `not_replaced`, replace nothing, start nothing (the old copy is still running) and exit.
   2. `ditto "$src" "$target.updating"`. This copies onto the same volume as `/Applications`, so step 3's renames are atomic on APFS. On failure, remove the partial copy, write `not_replaced`, `open "$target"` and exit.
   3. `rm -rf "$backup"`; `mv "$target" "$backup"`; `mv "$target.updating" "$target"`. If the second `mv` fails, move the backup back.
-  4. Run `"$target/Contents/MacOS/Lab Hub" --selftest`, killed after 120 s (a background job plus a wait loop, since macOS has no `timeout`). On failure, remove the new bundle, move the backup back, and write `rolled_back`.
+  4. Run `"$target/Contents/MacOS/Lab Hub" --selftest`, killed after 120 s (a background job plus a wait loop, since macOS has no `timeout`). On failure, remove the new bundle and its staged copy in `update/staged/`, move the backup back, and write `rolled_back`.
   5. On success, write `ok`, `touch "$target"` (the Dock icon cache, as `build_app.sh` does) and remove `"$src"`.
   6. `open "$target"`. This is a foreground launch with no `--background` flag, so `run()` takes the normal-start branch: `show_in_dock`, `showMaximized`, `dock.activate()`.
 - **The helper refuses by name.** It exits before step 1 when `basename "$target"` is not `Lab Hub.app`, or when `$target.updating` or `$backup` would be `/` or empty. Every `rm -rf` runs only on those derived paths.

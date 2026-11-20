@@ -114,6 +114,9 @@ README and the specs in `docs/specs/` describe them.
   the file.
 
 ### Fixed
+- **A failed Lab Hub update no longer leaves its build behind.** When the new build fails
+  its self-test and the previous one is put back, the failed copy (about 14 MB) is now
+  deleted from `update/staged/` instead of waiting for the next Update now.
 - **Land no longer lets a branch's link replace a folder.** A symlink an agent
   committed on its branch (`.venv`, with only `.venv/` in `.gitignore`) used to
   replace the checkout's real, ignored `.venv` when Land merged it, which lost
