@@ -574,28 +574,28 @@ inline Python) is held only by `manual` mode: you see it and answer.
 `lab_hub/handoff.py`, `ui/handoff_dialog.py`.
 
 **Lab Hub updates itself the same way.** The launchpad's Check builds ends with
-a row for **Lab Hub (this app)**, comparing the installed build with its
-checkout like any frozen app. When it is behind, Update now builds it last, with
-`./build_app.sh` (its own self-test included, no `--install`):
+a row for **Lab Hub (this app)**, comparing the installed build with the
+commit `main` is at. When it is behind, the row ends "Update now builds
+<sha7>", and Update now builds that commit last, with `./build_app.sh` (its own
+self-test included, no `--install`):
 
 - **It waits for running work.** Before the build starts, Update now waits while
   a Land is planning or running on any page, or a tool (Convert, Images, Video,
   Narrator) is running. The row reads "Waiting: Land is running", and Cancel
   still works.
-- **It builds only from a clean checkout on `main`.** Several sessions share
-  this checkout, and their unfinished edits must not end up in the app that runs
-  Land. When that is not the case, the row says why ("the checkout has
-  uncommitted changes…", "the checkout is on claude/x, not main") and Update now
-  leaves Lab Hub alone. The check runs again after the wait.
+- **It builds in a private copy, never in the shared checkout.** Several
+  sessions share the checkout, and their unfinished edits must not end up in
+  the app that runs Land. So Update now clones the repository into
+  `~/Library/Application Support/Lab Hub/update/snapshot/lab_hub`, checks out
+  the commit the row showed, and builds there with the checkout's `.venv`.
+  Uncommitted edits, new commits or another branch in the shared checkout
+  neither stop the update nor get into it; the next Check builds offers the
+  newer commits. Edits not yet committed to `main` are no reason for the row to
+  say Lab Hub is behind.
 - **What gets installed is the build that passed.** As soon as it passes, Lab Hub
-  copies it out of the shared checkout to
-  `~/Library/Application Support/Lab Hub/update/staged/`. It does so only if the
-  checkout is still clean on `main` at the commit stamped into the build. A
-  later commit or build in the checkout cannot change what is installed.
-- **A refused Lab Hub is skipped, not failed.** If the checkout is not clean on
-  `main` when Lab Hub's turn comes, Lab Hub is skipped. The other rebuilds and
-  Terminal installers carry on as usual, and the window ends with "Lab Hub
-  itself was not rebuilt; its row says why".
+  copies it to `~/Library/Application Support/Lab Hub/update/staged/`, only if
+  the copy and the stamp in the build are both at the commit the row showed,
+  and then removes the copy.
 - **The restart happens when you close the window.** After the build passes, the
   window says so and its button reads **Close and restart**. Lab Hub quits
   only when nothing is running.
@@ -617,12 +617,10 @@ checkout like any frozen app. When it is behind, Update now builds it last, with
   v2.180 did not install (…); you are on v2.172", with where the log is
   (`update/update.log`).
 
-Unlike `--install`, an update leaves the checkout's `build/` and
-`dist.noindex/` in place; the next build replaces them.
-
 Apps Lab Hub started keep running across the restart. When Lab Hub runs from
 source, or from a copy other than `/Applications/Lab Hub.app`, its row offers
-no update. Spec `self-update.md`, ADR 0003; `lab_hub/self_update.py`.
+no update. Spec `self-update.md` (§11 for the private copy), ADRs 0003 and
+0006; `lab_hub/self_update.py`.
 
 An app whose bundle runs a **release clone** (Provisio: `~/Releases/provisio`) that
 is behind its source gets neither an installer nor Update now: the installer

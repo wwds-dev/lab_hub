@@ -207,6 +207,16 @@
 {"ts": "2026-11-19T23:55:13", "phase": "verify", "state": "done", "spec": "scroll-sidebar-only"}
 {"ts": "2026-11-19T23:55:13", "phase": "document", "state": "start", "spec": "scroll-sidebar-only"}
 {"ts": "2026-11-19T23:55:18", "phase": "document", "state": "done", "spec": "scroll-sidebar-only"}
+{"ts": "2026-11-20T00:03:05", "phase": "define", "state": "start", "spec": "self-update"}
+{"ts": "2026-11-20T00:07:32", "phase": "define", "state": "done", "spec": "self-update"}
+{"ts": "2026-11-20T00:07:32", "phase": "architect", "state": "start", "spec": "self-update"}
+{"ts": "2026-11-20T00:08:35", "phase": "architect", "state": "done", "spec": "self-update"}
+{"ts": "2026-11-20T00:09:21", "phase": "build", "state": "start", "spec": "self-update"}
+{"ts": "2026-11-20T00:22:38", "phase": "build", "state": "done", "spec": "self-update"}
+{"ts": "2026-11-20T11:44:25", "phase": "review", "state": "done", "spec": "self-update"}
+{"ts": "2026-11-20T11:44:25", "phase": "secure", "state": "done", "spec": "self-update"}
+{"ts": "2026-11-20T11:44:58", "phase": "verify", "state": "done", "spec": "self-update"}
+{"ts": "2026-11-20T11:44:58", "phase": "document", "state": "done", "spec": "self-update"}
 {"ts": "2026-11-18T22:11:43", "phase": "define", "state": "start", "spec": "land-folder-link-guard"}
 {"ts": "2026-11-18T22:12:54", "phase": "define", "state": "done", "spec": "land-folder-link-guard"}
 {"ts": "2026-11-18T22:24:02", "phase": "architect", "state": "start", "spec": "land-folder-link-guard"}

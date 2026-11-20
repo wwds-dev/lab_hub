@@ -1,6 +1,7 @@
 # ADR 0003: Lab Hub replaces its own bundle through a detached helper
 
 Status: accepted by the owner 2026-11-17 ("Approve architecture"); amended the same day after review (staged install, checked swap, `broken` outcome).
+Decision 2 is superseded by ADR 0006 (build from a snapshot of `main`), accepted 2026-11-20.
 Spec: `docs/specs/self-update.md` §9.
 
 ## Context

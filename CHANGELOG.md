@@ -16,6 +16,12 @@ README and the specs in `docs/specs/` describe them.
 ## Unreleased
 
 ### Changed
+- **Lab Hub updates itself even while other sessions work in its checkout.** Update
+  now builds Lab Hub in a private copy of the repository at the `main` commit its
+  row shows ("Update now builds `<sha>`"), not in the shared checkout, so
+  uncommitted edits or new commits there no longer stop Close and restart. Edits
+  that are not yet committed to `main` are no longer a reason for Lab Hub's row
+  to say it is behind.
 - **Scrolling moves between sections only over the left sidebar.** Over a page, the
   wheel or trackpad only scrolls that page, including at its top or bottom; it no
   longer jumps to the next section. Sideways swipes are unchanged.
