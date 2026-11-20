@@ -521,6 +521,7 @@ From `docs/audit/2026-11-18-readiness-audit.md`. Items already in this file (fol
 - [ ] `P0` `bug` `@ai` **Land: don't commit another live session's edits (audit H1).**
   - Why: "a process inside" is only an `lsof` cwd inside the tree (`land_resolve.py:487-530`); a session working from `~/Documents/lab` or a lab-root worktree is invisible, so prep commits its half-done files (`land_resolve.py:645-650`, `repo_tidy.py:927-932`) and Land pushes them. `cc56bb6`/`9e669a1` here are Land's own "commit open work" commits.
   - Idea: busy when files changed in the last N minutes or a `claude` process's folder is an ancestor; list the files to be committed in the confirm dialog. Start with Define (owner gate).
+  - Status 2026-11-20: Define draft written, `docs/specs/land-live-session-guard.md` on branch `claude/land-live-session-guard` (pushed). It waits for the owner's Define gate (four decisions; recommended: 15 minutes quiet time, main checkout included, no override, no exception list in slice 1). Build has not started.
 - [ ] `P1` `security` `@me` **Decide: real-lab images and `/Users/as` paths in the public repo (audit H2).**
   - `docs/audit/progress-windows-real-builds.png` (`1272be9`, shows `/Users/as/Releases/...` and every app version) and `progress-windows-real-land.png` (private repo names); `/Users/as` in README, TODO and five audit/spec docs.
   - Make `wwds-dev/lab_hub` private (then tier `internal`), or remove them and decide on a history rewrite together with the older screenshot item.
