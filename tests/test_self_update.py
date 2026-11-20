@@ -1,4 +1,4 @@
-"""Lab Hub updates itself (spec docs/specs/self-update.md, ADR 0003).
+"""Lab Hub updates itself (spec docs/specs/self-update.md, ADR 0003, ADR 0006).
 
 The helper is the real bash script, run against fixture bundles in tmp_path:
 nothing here touches /Applications or the real support folder, and `open` is
@@ -431,65 +431,181 @@ def repo(tmp_path):
     return path
 
 
-def test_a_clean_checkout_on_main_may_be_built(repo):
-    assert self_update.checkout_blocker(repo) is None
+FAKE_BUILD = r"""#!/bin/sh
+# Stands in for build_app.sh: needs the linked .venv, and builds a bundle whose
+# marker is main.py and whose stamp is the commit it was built from.
+set -e
+. .venv/bin/activate
+app="dist.noindex/Lab Hub.app/Contents"
+mkdir -p "$app/MacOS" "$app/Resources"
+printf '#!/bin/sh\nexit 0\n' > "$app/MacOS/Lab Hub"
+chmod +x "$app/MacOS/Lab Hub"
+cp main.py "$app/marker"
+printf '{"major": "2", "build": %s, "commit": "%s"}' \
+  "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)" > "$app/Resources/_build_info.json"
+"""
 
 
-def test_uncommitted_changes_hold_the_build(repo):
-    (repo / "main.py").write_text("x = 1\n")
-    assert "uncommitted" in self_update.checkout_blocker(repo)
+@pytest.fixture
+def buildable(repo):
+    """The fixture repo with a fake build_app.sh committed and a .venv beside it,
+    as the shared checkout has one (git-ignored)."""
+    (repo / ".gitignore").write_text("dist.noindex\n.venv\n")
+    script = repo / "build_app.sh"
+    script.write_text(FAKE_BUILD)
+    script.chmod(0o755)
+    (repo / "main.py").write_text("committed\n")
+    _git(repo, "add", ".gitignore", "build_app.sh", "main.py")
+    _git(repo, "commit", "-q", "-m", "buildable")
+    (repo / ".venv" / "bin").mkdir(parents=True)
+    (repo / ".venv" / "bin" / "activate").write_text("VENV_OK=1\n")
+    return repo
 
 
-def test_another_branch_or_a_detached_head_holds_the_build(repo):
+def _build(project: Path, commit: str) -> None:
+    command = self_update.build_command(project, commit)
+    subprocess.run(["/bin/bash", "-c", command], check=True, timeout=60,
+                   capture_output=True)
+
+
+def _dirty(repo: Path) -> None:
+    (repo / "main.py").write_text("another session's half-done edit\n")
+
+
+def _move(repo: Path) -> None:
+    (repo / "main.py").write_text("a later commit\n")
+    _git(repo, "commit", "-q", "-am", "later")
+
+
+def test_main_commit_is_the_full_sha_of_main_whatever_is_checked_out(repo):
+    sha = _git(repo, "rev-parse", "main")
+    assert self_update.main_commit(repo) == sha
     _git(repo, "switch", "-q", "-c", "claude/x")
-    assert "claude/x" in self_update.checkout_blocker(repo)
-    _git(repo, "switch", "-q", "--detach", "main")
-    assert "detached" in self_update.checkout_blocker(repo)
+    (repo / "x").write_text("")
+    _git(repo, "add", "x")
+    _git(repo, "commit", "-q", "-m", "x")
+    _dirty(repo)
+    assert self_update.main_commit(repo) == sha
 
 
-def test_a_folder_git_cannot_read_is_not_called_detached(tmp_path):
-    reason = self_update.checkout_blocker(tmp_path)
-    assert "detached" not in reason and "git could not" in reason
+def test_main_commit_is_none_without_main_or_git(repo, tmp_path):
+    _git(repo, "branch", "-m", "main", "trunk")
+    assert self_update.main_commit(repo) is None
+    assert self_update.main_commit(tmp_path / "nowhere") is None
 
 
-# -- staging the tested build ---------------------------------------------------
-def test_the_tested_build_is_staged_out_of_the_checkout(lab, repo):
-    head = _git(repo, "rev-parse", "--short=7", "HEAD")
-    _bundle(repo / self_update.DIST, "new", commit=head)
-    staged = self_update.stage_build(repo)
-    assert staged.bundle == self_update.staged_bundle()
-    assert _marker(staged.bundle) == "new" and staged.version == "v2.180"
-    (repo / self_update.DIST / "Lab Hub.app" / "Contents" / "marker").write_text("changed")
-    assert _marker(staged.bundle) == "new"  # later changes in the checkout do not reach it
+def test_update_now_builds_the_recorded_commit_in_a_private_snapshot(lab, buildable):
+    """§11.2.1 and §11.2.5: built at the recorded commit, none of the checkout's
+    edits in it, the checkout untouched and no worktree registered."""
+    commit = self_update.main_commit(buildable)
+    worktrees = _git(buildable, "worktree", "list", "--porcelain")
+    _dirty(buildable)
+    _build(buildable, commit)
+    assert self_update.snapshot().parent.parent == lab["update"]
+    staged = self_update.stage_build(commit)
+    assert _marker(staged.bundle) == "committed\n"
+    assert staged.commit == commit[:7] and staged.version.startswith("v2.")
+    assert not self_update.snapshot().exists()
+    assert not (buildable / self_update.DIST).exists()
+    assert (buildable / "main.py").read_text() == "another session's half-done edit\n"
+    assert _git(buildable, "worktree", "list", "--porcelain") == worktrees
 
 
-def test_a_build_from_another_commit_is_not_staged(lab, repo):
-    _bundle(repo / self_update.DIST, "new", commit="0000000")
-    with pytest.raises(ValueError, match="checkout is now at"):
-        self_update.stage_build(repo)
+@pytest.mark.parametrize("change", [_dirty, _move], ids=["dirtied", "moved"])
+@pytest.mark.parametrize("when", ["before the build", "after the build"])
+def test_the_shared_checkout_changing_never_blocks_or_enters_the_update(
+        lab, buildable, change, when):
+    """§11.2.2 and §11.2.3: in all four cases the recorded commit is staged."""
+    commit = self_update.main_commit(buildable)
+    if when == "before the build":
+        change(buildable)
+    _build(buildable, commit)
+    if when == "after the build":
+        change(buildable)
+    staged = self_update.stage_build(commit)
+    assert _marker(staged.bundle) == "committed\n" and staged.commit == commit[:7]
 
 
-def test_a_checkout_that_changed_after_the_build_is_not_staged(lab, repo):
-    head = _git(repo, "rev-parse", "--short=7", "HEAD")
-    _bundle(repo / self_update.DIST, "new", commit=head)
-    (repo / "main.py").write_text("x = 1\n")
-    with pytest.raises(ValueError, match="uncommitted"):
-        self_update.stage_build(repo)
+def test_a_new_update_replaces_a_snapshot_left_behind(lab, buildable):
+    first = self_update.main_commit(buildable)
+    _build(buildable, first)
+    _move(buildable)
+    second = self_update.main_commit(buildable)
+    _build(buildable, second)
+    assert _marker(self_update.stage_build(second).bundle) == "a later commit\n"
 
 
-def test_a_symlinked_build_folder_is_not_staged(lab, repo, tmp_path):
-    head = _git(repo, "rev-parse", "--short=7", "HEAD")
+def test_a_build_from_another_commit_is_not_staged(lab, buildable):
+    commit = self_update.main_commit(buildable)
+    _build(buildable, commit)
+    _move(buildable)
+    with pytest.raises(ValueError, match="build folder is at"):
+        self_update.stage_build(self_update.main_commit(buildable))
+    assert not self_update.staged_bundle().exists()
+
+
+def test_a_stamp_that_is_not_the_recorded_commit_is_not_staged(lab, buildable):
+    commit = self_update.main_commit(buildable)
+    _build(buildable, commit)
+    stamp = self_update.built_bundle() / "Contents" / "Resources" / "_build_info.json"
+    stamp.write_text(json.dumps({"major": "2", "build": 1, "commit": "0000000"}))
+    with pytest.raises(ValueError, match="new build is from 0000000"):
+        self_update.stage_build(commit)
+    stamp.write_text(json.dumps({"major": "2", "build": 1, "commit": ""}))
+    with pytest.raises(ValueError, match="unknown commit"):
+        self_update.stage_build(commit)
+
+
+@pytest.mark.parametrize("commit", [None, "", "abc1234", "x" * 40])
+def test_staging_needs_a_full_recorded_commit(lab, commit):
+    with pytest.raises(ValueError, match="not one Lab Hub made"):
+        self_update.stage_build(commit)
+
+
+def test_a_symlinked_snapshot_is_not_staged(lab, buildable, tmp_path):
+    commit = self_update.main_commit(buildable)
+    _build(buildable, commit)
     elsewhere = tmp_path / "elsewhere"
-    _bundle(elsewhere, "new", commit=head)
-    (repo / self_update.DIST).symlink_to(elsewhere)
+    self_update.snapshot().rename(elsewhere)
+    self_update.snapshot().symlink_to(elsewhere)
     with pytest.raises(ValueError, match="symlink"):
-        self_update.stage_build(repo)
+        self_update.stage_build(commit)
+
+
+def test_a_snapshot_without_a_build_is_not_staged(lab, buildable):
+    with pytest.raises(ValueError, match="no new build"):
+        self_update.stage_build(self_update.main_commit(buildable))
+
+
+def test_the_build_command_quotes_every_path_and_takes_only_a_full_sha(lab, tmp_path):
+    odd = tmp_path / "it's a $(touch pwned) checkout"
+    sha = "a" * 40
+    command = self_update.build_command(odd, sha)
+    assert command.endswith("&& ./build_app.sh") and "--install" not in command
+    assert "core.hooksPath=/dev/null" in command and "worktree" not in command
+    assert command.count("'") >= 8  # every path quoted
+    for bad in ("abc1234", "A" * 40, sha + "; rm -rf /", ""):
+        with pytest.raises(ValueError):
+            self_update.build_command(odd, bad)
+
+
+def test_planned_commit_accepts_only_a_command_lab_hub_made(lab, tmp_path):
+    project = tmp_path / "repo"
+    sha = "b" * 40
+    command = self_update.build_command(project, sha)
+    assert self_update.planned_commit(command, project) == sha
+    assert self_update.planned_commit(command, tmp_path / "other") is None
+    assert self_update.planned_commit(command + " && echo more", project) is None
+    assert self_update.planned_commit(command.replace("--detach ", "--detach  "), project) is None
+    assert self_update.planned_commit("cd x && ./build_app.sh", project) is None
+    assert self_update.planned_commit(None, project) is None
 
 
 # -- the build-report row -----------------------------------------------------
-def _behind(project: Path | None) -> launcher.BuildStatus:
+def _behind(project: Path | None, commit: str = "1234567",
+            verdict: str = "behind") -> launcher.BuildStatus:
     return launcher.BuildStatus(
-        self_update.SELF, launcher.Version(text="v2.172"), "behind",
+        self_update.SELF, launcher.Version(text="v2.172", commit=commit), verdict,
         "built at v2.172, but the source is 3 commits further on.",
         project / "build_app.sh" if project else None,
         "cd x && ./build_app.sh --install", project=project)
@@ -497,23 +613,31 @@ def _behind(project: Path | None) -> launcher.BuildStatus:
 
 @pytest.fixture
 def row_for(monkeypatch, repo, lab):
+    """Lab Hub's row over the fixture repo: installed from its first commit,
+    `main` one commit (adding build_app.sh) further on."""
+    installed = _git(repo, "rev-parse", "--short=7", "HEAD")
     (repo / "build_app.sh").write_text("")
     _git(repo, "add", "build_app.sh")
     _git(repo, "commit", "-q", "-m", "build")
 
-    def make(running, *, verdict_row=None):
-        monkeypatch.setattr(self_update, "build_status",
-                            lambda app, root: verdict_row or _behind(repo))
+    def make(running, *, verdict_row=None, commit=installed, verdict="behind"):
+        row = verdict_row or _behind(repo, commit, verdict)
+        monkeypatch.setattr(self_update, "build_status", lambda app, root: row)
         monkeypatch.setattr(self_update, "source_dir", lambda app, root: repo)
         return self_update.self_status(repo.parent, running=running)
     return make
 
 
-def test_lab_hubs_row_builds_without_install_and_restarts(row_for, lab):
+def test_lab_hubs_row_builds_main_in_a_snapshot_without_install_and_restarts(
+        row_for, lab, repo):
     row = row_for(lab["target"])
     assert row.restarts and row.runs_in_app
     assert row.command.endswith("&& ./build_app.sh")
     assert "--install" not in row.command
+    main = _git(repo, "rev-parse", "main")
+    assert self_update.planned_commit(row.command, repo) == main
+    assert row.note.startswith("built at v2.172, but the source is 3 commits")
+    assert row.note.endswith(f"Update now builds {main[:7]}.")
 
 
 def test_a_source_run_reads_as_running_the_checkout(row_for):
@@ -527,11 +651,57 @@ def test_another_copy_offers_no_update(row_for, tmp_path):
     assert row.command is None and "not" in row.note
 
 
-def test_a_dirty_checkout_offers_no_update_and_says_why(row_for, lab, repo):
+def test_a_dirty_checkout_no_longer_holds_the_update(row_for, lab, repo):
+    """§11.2.2: another session's edits do not stop Lab Hub's row."""
     (repo / "main.py").write_text("x = 1\n")
     row = row_for(lab["target"])
-    assert row.command is None and row.needs_rebuild
-    assert "uncommitted" in row.note
+    assert row.runs_in_app
+    assert self_update.planned_commit(row.command, repo) == _git(repo, "rev-parse", "main")
+
+
+def test_uncommitted_edits_alone_are_no_reason_to_update(row_for, lab, repo):
+    """§11.2.4: level with main, the checkout's edits are in no build."""
+    (repo / "main.py").write_text("x = 1\n")
+    level = _git(repo, "rev-parse", "--short=7", "main")
+    row = row_for(lab["target"], commit=level, verdict="uncommitted")
+    assert row.verdict == "current" and row.command is None and not row.needs_rebuild
+    assert "in no build until they are committed to main" in row.note
+
+
+def test_on_another_branch_the_row_still_builds_main(row_for, lab, repo):
+    main = _git(repo, "rev-parse", "main")
+    _git(repo, "switch", "-q", "-c", "claude/x")
+    (repo / "x").write_text("")
+    _git(repo, "add", "x")
+    _git(repo, "commit", "-q", "-m", "x")
+    row = row_for(lab["target"])
+    assert self_update.planned_commit(row.command, repo) == main
+    assert "but main is 1 commit further on." in row.note and row.version.behind == 1
+
+
+def test_level_with_main_while_on_another_branch_is_current(row_for, lab, repo):
+    level = _git(repo, "rev-parse", "--short=7", "main")
+    _git(repo, "switch", "-q", "-c", "claude/x")
+    row = row_for(lab["target"], commit=level)
+    assert row.verdict == "current" and row.command is None
+
+
+def test_without_main_the_row_says_why_and_offers_nothing(row_for, lab, repo):
+    _git(repo, "branch", "-m", "main", "trunk")
+    row = row_for(lab["target"])
+    assert row.command is None and "could not read main" in row.note
+
+
+def test_main_without_build_app_sh_offers_nothing(row_for, lab, repo):
+    _git(repo, "rm", "-q", "build_app.sh")
+    _git(repo, "commit", "-q", "-m", "drop")
+    row = row_for(lab["target"])
+    assert row.command is None and "has no build_app.sh" in row.note
+
+
+def test_an_installed_build_without_a_stamp_offers_nothing(row_for, lab):
+    row = row_for(lab["target"], commit="")
+    assert row.command is None
 
 
 def test_an_up_to_date_lab_hub_has_no_command(row_for, lab):
@@ -762,7 +932,7 @@ def _drop_tabs():
         shiboken6.delete(tab)
 
 
-def test_the_apps_tab_hold_waits_for_busy_work_then_checks_the_checkout(
+def test_the_apps_tab_hold_waits_for_busy_work_but_not_for_the_checkout(
         qapp, isolated_config, monkeypatch, repo):
     from ui.rebuild import Skipped
 
@@ -776,8 +946,13 @@ def test_the_apps_tab_hold_waits_for_busy_work_then_checks_the_checkout(
         tab.busy_reasons = lambda: []
         monkeypatch.setattr(launcher, "source_dir", lambda app, root: repo)
         assert hold("build lab hub") is None
+        # The build is a snapshot of the recorded commit (spec §11): another
+        # session's edits or branch no longer skip it.
         (repo / "main.py").write_text("x = 1\n")
-        with pytest.raises(Skipped, match="uncommitted"):
+        _git(repo, "switch", "-q", "-c", "claude/x")
+        assert hold("build lab hub") is None
+        monkeypatch.setattr(launcher, "source_dir", lambda app, root: None)
+        with pytest.raises(Skipped, match="checkout is gone"):
             hold("build lab hub")
     finally:
         tab._poll.stop()
@@ -858,7 +1033,7 @@ def test_a_build_that_cannot_be_staged_asks_for_no_restart(
     monkeypatch.setattr(launcher, "source_dir", lambda app, root: tmp_path)
 
     def refuse(project):
-        raise ValueError("the checkout is now at 1234567")
+        raise ValueError("the new build is from 1234567, not abcdef0")
 
     monkeypatch.setattr(self_update, "stage_build", refuse)
     warned = []
@@ -874,6 +1049,47 @@ def test_a_build_that_cannot_be_staged_asks_for_no_restart(
         tab._poll.stop()
         window.close()
     assert asked == [] and "1234567" in warned[0]
+
+
+def test_close_and_restart_stages_the_recorded_commit_after_the_checkout_moved(
+        qapp, isolated_config, monkeypatch, lab, buildable):
+    """§11.2.3 end to end in the tab: the build command Update now ran carries
+    its commit; the checkout dirtied and moved since changes nothing."""
+    monkeypatch.setattr(self_update, "UPDATE_DIR", lab["update"])
+    monkeypatch.setattr(launcher, "source_dir", lambda app, root: buildable)
+    commit = self_update.main_commit(buildable)
+    command = self_update.build_command(buildable, commit)
+    subprocess.run(["/bin/bash", "-c", command], check=True, timeout=60, capture_output=True)
+    _move(buildable)
+    _dirty(buildable)
+    tab = _tab(check_builds=True)
+    asked = []
+    tab.restart_requested.connect(asked.append)
+    try:
+        tab._restart_on(command)
+    finally:
+        tab._poll.stop()
+    assert len(asked) == 1 and asked[0].commit == commit[:7]
+    assert _marker(asked[0].bundle) == "committed\n"
+
+
+def test_close_and_restart_refuses_a_command_lab_hub_did_not_make(
+        qapp, isolated_config, monkeypatch, lab, buildable):
+    from ui import apps_tab as apps_tab_module
+
+    monkeypatch.setattr(self_update, "UPDATE_DIR", lab["update"])
+    monkeypatch.setattr(launcher, "source_dir", lambda app, root: buildable)
+    warned = []
+    monkeypatch.setattr(apps_tab_module.QMessageBox, "warning",
+                        lambda *a: warned.append(a[2]))
+    tab = _tab(check_builds=True)
+    asked = []
+    tab.restart_requested.connect(asked.append)
+    try:
+        tab._restart_on("cd x && ./build_app.sh")
+    finally:
+        tab._poll.stop()
+    assert asked == [] and "not one Lab Hub made" in warned[0]
 
 
 def test_a_rebuild_without_lab_hub_asks_for_no_restart(qapp, isolated_config, monkeypatch,

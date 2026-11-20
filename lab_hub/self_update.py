@@ -6,10 +6,12 @@ package.
 A running app cannot safely overwrite its own bundle: `build_app.sh --install`
 deletes `/Applications/Lab Hub.app` while the process may still load files from
 it. So Update now builds without `--install` (the script's own self-test still
-runs), and as soon as that build passes Lab Hub copies it out of the checkout
-into a folder of its own (`stage_build`): what is installed is the bundle that
-was built and tested, whatever another session does to the shared checkout
-afterwards. Once Lab Hub has quit, a detached helper does the swap:
+runs), and it builds in a private clone of the shared checkout at the commit
+`main` was at when the row was shown (spec §11, ADR 0006): other sessions'
+edits and commits there can neither block nor enter the update. As soon as that
+build passes Lab Hub copies it out of the clone into a folder of its own
+(`stage_build`), checked against that same commit. Once Lab Hub has quit, a
+detached helper does the swap:
 
 1. wait for the old process to exit (it must, or `SingleInstance` would turn
    the new copy away), replacing nothing if it does not;
@@ -31,6 +33,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -55,6 +58,7 @@ DIST = "dist.noindex"
 MAIN_BRANCH = "main"
 GIT_TIMEOUT_S = 10
 OUTCOME_MAX_BYTES = 4096
+_SHA = re.compile(r"[0-9a-f]{40}")
 _UNSET = object()  # "ask the running process", as opposed to an explicit None
 
 # Lab Hub as a build-report row. Never registered: no tile, no menu bar entry.
@@ -109,41 +113,52 @@ def _git(project: Path, *args: str) -> tuple[int | None, str]:
     return result.returncode, result.stdout.strip()
 
 
-def checkout_blocker(project: Path) -> str | None:
-    """Why Lab Hub must not be built from this checkout now, or None.
-
-    Several sessions share this checkout, and the build would install their
-    half-done edits into the app that runs Land (spec §5.3)."""
-    code, branch = _git(project, "symbolic-ref", "--quiet", "--short", "HEAD")
-    if code is None:
-        return "git could not be run in the checkout"
-    if code == 1:
-        return "the checkout is not on a branch (detached HEAD), not main"
-    if code != 0:
-        return "git could not read the checkout's branch"
-    if branch != MAIN_BRANCH:
-        return f"the checkout is on {branch}, not main"
-    code, status = _git(project, "status", "--porcelain")
-    if code != 0:
-        return "git could not read the checkout's status"
-    if status:
-        return ("the checkout has uncommitted changes, maybe another session's "
-                "work: Land them first")
-    return None
+def main_commit(project: Path) -> str | None:
+    """The full SHA `main` points at in the shared checkout, or None. Only the
+    ref is read: the checkout's branch, edits and status do not matter, since
+    Update now builds this commit in a clone of its own (spec §11)."""
+    code, out = _git(project, "rev-parse", "--verify", "--quiet", f"refs/heads/{MAIN_BRANCH}^{{commit}}")
+    return out if code == 0 and _SHA.fullmatch(out) else None
 
 
-def head_commit(project: Path) -> str | None:
-    code, out = _git(project, "rev-parse", "HEAD")
-    return out if code == 0 and out else None
+def snapshot() -> Path:
+    """The clone Update now builds Lab Hub in, under `update/snapshot/`."""
+    return UPDATE_DIR / "snapshot" / SELF.project
 
 
-def build_command(project: Path) -> str:
-    """Build and self-test only: the helper installs, after Lab Hub has quit."""
-    return f"cd {shlex.quote(str(project))} && ./build_app.sh"
+def build_command(project: Path, commit: str) -> str:
+    """Clone the shared checkout privately, check out `commit` and build there
+    (self-test included, no install: the helper installs after Lab Hub quits).
+
+    A clone, not a worktree: a worktree is registered in the shared repository,
+    where Land and Tidy would list it and could remove it mid-build (ADR 0006).
+    A local clone hard-links the objects and copies none of the repository's
+    hooks or config; the checkout runs with hooks off all the same."""
+    if not _SHA.fullmatch(commit):
+        raise ValueError(f"not a full commit: {commit!r}")
+    q, snap = shlex.quote, snapshot()
+    return (f"/bin/rm -rf {q(str(snap))} && /bin/mkdir -p -m 700 {q(str(snap.parent))} && "
+            f"git clone --quiet --no-checkout -- {q(str(project))} {q(str(snap))} && "
+            f"git -C {q(str(snap))} -c core.hooksPath=/dev/null "
+            f"-c advice.detachedHead=false checkout --quiet --detach {commit} && "
+            f"/bin/ln -s {q(str(project / '.venv'))} {q(str(snap / '.venv'))} && "
+            f"cd {q(str(snap))} && ./build_app.sh")
 
 
-def built_bundle(project: Path) -> Path:
-    return project / DIST / APP_BUNDLE
+_COMMIT_IN_COMMAND = re.compile(r" checkout --quiet --detach ([0-9a-f]{40}) && ")
+
+
+def planned_commit(command: str | None, project: Path) -> str | None:
+    """The commit a Lab Hub build command builds, or None when the command is
+    not exactly one `build_command` makes for this checkout."""
+    found = _COMMIT_IN_COMMAND.search(command or "")
+    if found is None or command != build_command(project, found.group(1)):
+        return None
+    return found.group(1)
+
+
+def built_bundle() -> Path:
+    return snapshot() / DIST / APP_BUNDLE
 
 
 def staged_bundle() -> Path:
@@ -177,15 +192,38 @@ def self_status(lab_root: Path, *, running: object = _UNSET) -> BuildStatus:
 
     if not _same(bundle, installed_target()):
         return held(f"this copy runs from {bundle}, not {installed_target()}")
-    if project is None or not row.needs_rebuild:
+    installed = row.version.commit
+    if project is None or not installed or row.verdict not in (
+            "current", "behind", "uncommitted"):
         return replace(row, command=None)
-    reason = checkout_blocker(project)
-    if reason is not None:
-        return held(reason)
-    if not (project / "build_app.sh").is_file():
-        return held(f"{project} has no build_app.sh")
-    return replace(row, command=build_command(project), by_hand=False,
-                   forward=False, guide=None)
+    commit = main_commit(project)
+    if commit is None:
+        return held(f"git could not read {MAIN_BRANCH} in {project}")
+    if commit.startswith(installed):
+        # Level with main: edits and other branches in the checkout are in no
+        # build until they are on main, so they are no reason to update (§11.2.4).
+        note = row.note
+        if row.needs_rebuild:
+            note = (f"{note} It is level with {MAIN_BRANCH} ({commit[:7]}), which is "
+                    f"all Update now builds: uncommitted edits and other branches "
+                    f"are in no build until they are committed to {MAIN_BRANCH}.")
+        return replace(row, verdict="current", command=None, note=note)
+    note, version = row.note, row.version
+    code, head = _git(project, "rev-parse", "HEAD")
+    if row.verdict != "behind" or code != 0 or head != commit:
+        code, count = _git(project, "rev-list", "--count", f"{installed}..{commit}")
+        behind = int(count) if code == 0 and count.isdigit() else 0
+        further = (f"{behind} commit{'' if behind == 1 else 's'} further on" if behind
+                   else f"at {commit[:7]}")
+        note = f"built at {version.text or installed}, but {MAIN_BRANCH} is {further}."
+        version = replace(version, behind=behind)
+    row = replace(row, verdict="behind", note=note, version=version)
+    code, _ = _git(project, "cat-file", "-e", f"{commit}:build_app.sh")
+    if code != 0:
+        return held(f"{MAIN_BRANCH} ({commit[:7]}) has no build_app.sh")
+    return replace(row, command=build_command(project, commit), by_hand=False,
+                   forward=False, guide=None,
+                   note=f"{note} Update now builds {commit[:7]}.")
 
 
 # -- staging the build that passed ------------------------------------------
@@ -211,24 +249,29 @@ def _no_symlinks(path: Path) -> bool:
     return os.path.realpath(path) == str(path.absolute())
 
 
-def stage_build(project: Path, *, ditto: str = "/usr/bin/ditto") -> Staged:
+def stage_build(commit: str | None, *, ditto: str = "/usr/bin/ditto") -> Staged:
     """Copy the bundle `build_app.sh` just built and self-tested out of the
-    shared checkout, so a later commit or build there cannot change what is
-    installed. Raises ValueError with the reason."""
-    src = built_bundle(project)
+    snapshot, if it was built from `commit` (the one Update now recorded), then
+    remove the snapshot. The shared checkout is not read: what it holds now
+    does not change what is installed. Raises ValueError with the reason."""
+    if not commit or not _SHA.fullmatch(commit):
+        raise ValueError("the build command is not one Lab Hub made")
+    snap, src = snapshot(), built_bundle()
     if not _no_symlinks(src):
         raise ValueError(f"{src} goes through a symlink")
     if not (src / "Contents" / "MacOS" / EXECUTABLE).is_file():
         raise ValueError(f"no new build at {src}")
-    blocker = checkout_blocker(project)
-    if blocker is not None:
-        raise ValueError(blocker)
-    stamp = _stamp(src) or {}
-    commit, head = str(stamp.get("commit") or ""), head_commit(project) or ""
-    if not commit or not head.startswith(commit):
+    code, head = _git(snap, "rev-parse", "HEAD")
+    if code != 0 or head != commit:
         raise ValueError(
-            f"the new build is from {commit or 'an unknown commit'}, but the "
-            f"checkout is now at {head[:7] or 'an unknown commit'}")
+            f"the build folder is at {head[:7] or 'an unknown commit'}, "
+            f"not {commit[:7]}")
+    stamp = _stamp(src) or {}
+    stamped = str(stamp.get("commit") or "")
+    if len(stamped) < 7 or not commit.startswith(stamped):
+        raise ValueError(
+            f"the new build is from {stamped or 'an unknown commit'}, "
+            f"not {commit[:7]}")
     try:
         version = f"v{stamp['major']}.{int(stamp['build']):03d}"
     except (KeyError, TypeError, ValueError):
@@ -242,7 +285,8 @@ def stage_build(project: Path, *, ditto: str = "/usr/bin/ditto") -> Staged:
                             text=True, timeout=600)
     if copied.returncode != 0:
         raise ValueError(f"could not copy the new build: {copied.stderr.strip()[:200]}")
-    return Staged(staged, version, commit)
+    subprocess.run(["/bin/rm", "-rf", str(snap)], check=False, timeout=120)
+    return Staged(staged, version, stamped)
 
 
 # -- the helper -------------------------------------------------------------

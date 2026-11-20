@@ -908,13 +908,14 @@ class AppsTab(TilePage):
             self._restart_on(restarts)
 
     def _restart_on(self, restarts: str) -> None:
-        """Lab Hub's own build passed: copy it out of the shared checkout now,
-        so what is installed is what was tested, then ask for the restart."""
+        """Lab Hub's own build passed: copy it out of its snapshot now, checked
+        against the commit the command recorded (spec §11), then ask for the
+        restart. The shared checkout's state since then does not matter."""
         project = launcher.source_dir(self_update.SELF, self.settings.resolved_lab_root())
         try:
             if project is None:
                 raise ValueError("its checkout is gone")
-            staged = self_update.stage_build(project)
+            staged = self_update.stage_build(self_update.planned_commit(restarts, project))
         except (ValueError, OSError, subprocess.SubprocessError) as error:
             QMessageBox.warning(self, "Lab Hub was not restarted",
                                 f"The new build was not installed: {error}. "
@@ -1044,8 +1045,10 @@ class AppsTab(TilePage):
         return []
 
     def _hold_for(self, restarts: str | None):
-        """Lab Hub's own build waits for anything a restart would end, then
-        checks its checkout again: a Land may have changed it (spec §5.2, §5.3)."""
+        """Lab Hub's own build waits for anything a restart would end (spec
+        §5.2). It builds the commit its row recorded in a snapshot of its own,
+        so what a Land did to the shared checkout meanwhile does not matter
+        (spec §11); only a checkout that is gone skips it."""
         if not restarts:
             return None
 
@@ -1057,10 +1060,8 @@ class AppsTab(TilePage):
                 return "; ".join(reasons) + ". Lab Hub builds when that finishes"
             project = launcher.source_dir(self_update.SELF,
                                           self.settings.resolved_lab_root())
-            blocker = (self_update.checkout_blocker(project) if project is not None
-                       else "its checkout is gone")
-            if blocker:
-                raise Skipped(f"Lab Hub was not rebuilt: {blocker}")
+            if project is None:
+                raise Skipped("Lab Hub was not rebuilt: its checkout is gone")
             return None
 
         return hold

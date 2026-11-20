@@ -1,6 +1,6 @@
 # ADR 0006: Lab Hub builds its update from a private snapshot of `main`
 
-Status: proposed 2026-11-20, waiting for the owner's Architect gate.
+Status: accepted by the owner 2026-11-20 ("Approve architecture").
 Spec: `docs/specs/self-update.md` §11–§12. Supersedes decision 2 of ADR 0003 (staging only while
 the shared checkout is clean, on `main` and at the built commit).
 
