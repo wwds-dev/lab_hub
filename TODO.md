@@ -34,6 +34,18 @@
   - Code: `lab_hub/self_update.py` (new), `ui/rebuild.py` (`hold`, `Skipped`), `ui/apps_tab.py`, `ui/main_window.py`, `lab_hub/progress.py`, `ui/progress_window.py`.
   - Reviews: `docs/audit/self-update-code-review.md` (1 P1, 3 P2, fixed), `docs/audit/self-update-security.md` (2 P2, fixed), `docs/audit/self-update-qa.md`.
   - Not done: the owner's real-Mac check (QA report §6: the swap, the window in front, a forced rollback), commit, merge and release. The first self-update has to come from a build that already has this feature: build and install it by hand once with `./build_app.sh --install` while Lab Hub is not running.
+- [ ] `P2` `testing` `@me` **Real-Mac check of Land's folder-link stop text.**
+  - Session "Mac check: Land's folder-link stop text" is waiting for you to confirm Sonnet, low effort (about 5–15 min).
+  - It follows the self-update and `land-folder-link-guard` work.
+- [ ] `P3` `testing` `@me` **Self-update: the last unchecked A2 case** (`docs/audit/self-update-qa.md` §6 A2, third item).
+  - The case: with only uncommitted edits in the checkout, Lab Hub's row reads up to date and says the edits are in no build.
+  - It was not run on 2026-11-20 because `main` had moved.
+  - The next routine Update now also installs `9bf3cdc` (the failed staged build is removed after a rollback).
+  - Otherwise the self-update Mac check passed on 2026-11-20 (A, A2, B, C, D).
+- [ ] `P3` `infra` `@me` **Provisio's release clone is 30 commits behind.**
+  - Check builds shows Provisio as "Needs you".
+  - Move `/Users/as/Releases/provisio` forward per its `docs/RUNBOOK-release.md`: CI, legal check, dependencies and selftest.
+  - Only needed before the next Provisio release.
 - [x] `P1` `feature` `@ai` **Land leaves nothing open (2026-11-17).**
   - Spec `docs/specs/land-resolve-all.md`, approved by the owner: "Approve, use defaults". ADR `docs/adr/0001-land-quarantine-and-archive-tags.md`.
   - Why: Land all landed 2 of 6 repos and left 25 branches "for your decision". The owner said: "all open items always have to be resolved".

@@ -432,7 +432,10 @@ if [ -e "$target" ]; then
 fi
 
 restore() {
-  # Put the previous build back, only onto a path that is now free.
+  # The new build failed: do not keep it staged (best effort; the next
+  # Update now clears it anyway). Then put the previous build back, only onto
+  # a path that is now free.
+  gone "$src" || say "could not remove the failed build at $src"
   if [ "$had_old" = 1 ] && gone "$target" && mv "$backup" "$target" \
      && [ -x "$target/Contents/MacOS/Lab Hub" ]; then
     finish rolled_back "$1; the previous build is back"
