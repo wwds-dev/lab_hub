@@ -38,6 +38,13 @@ NETWORK_TIMEOUT = 90
 # that is idle right now, with no process inside it for `lsof` to see (A2).
 RECENT_HOURS = 24
 AGENT_WORKTREES = Path(".claude") / "worktrees"
+# A file changed this recently may belong to a session that is still working,
+# with no process inside the worktree for `lsof` to see: a session opened in
+# the lab root edits active/<app> from outside it, and the main checkout was
+# never tested at all (audit H1, spec land-live-session-guard). 0 turns the
+# rule off (the test suite's default, tests/conftest.py).
+QUIET_MINUTES = 15
+SETTLING_MAX_FILES = 2000
 # A frozen app has a minimal PATH.
 _SEARCH_PATH = "/usr/bin:/usr/sbin:/opt/homebrew/bin:/usr/local/bin"
 
@@ -269,6 +276,115 @@ def has_conflicts(path: Path) -> bool:
     return rc != 0 or bool(out)
 
 
+def _open_files(path: Path) -> list[str] | None:
+    """Every file git reports as changed or untracked in this worktree, or
+    None when git cannot tell. A rename counts under its new name."""
+    rc, out, _ = git(path, "status", "--porcelain=v1", "-z", "--untracked-files=all",
+                     strip=False)
+    if rc != 0:
+        return None
+    files: list[str] = []
+    fields = out.split("\0")
+    i = 0
+    while i < len(fields):
+        entry = fields[i]
+        i += 1
+        if len(entry) < 4:
+            continue
+        files.append(entry[3:])
+        if "R" in entry[:2] or "C" in entry[:2]:
+            # The name it was renamed or copied from follows, for a staged
+            # rename (first letter) and for an intent-to-add one (second).
+            i += 1
+    return files
+
+
+def _changed_at(root: Path, rel: str) -> tuple[float, bool] | None:
+    """When this file last changed, and whether that is a folder's time: its
+    own time, or for a deleted file the time of the nearest folder that still
+    exists (a delete updates it). None when that cannot be read."""
+    target = root / rel
+    by_folder = False
+    while True:
+        try:
+            return target.lstat().st_mtime, by_folder
+        except FileNotFoundError:
+            if target == root:
+                return None
+            target = target.parent
+            by_folder = True
+        except OSError:
+            return None
+
+
+# When Lab Hub itself last wrote into a worktree. Land's untracked step moves
+# files to quarantine and may create a .gitignore, and both change a folder's
+# time. A deleted file is timed by its folder, so without this Land would read
+# its own write as a session's and stop itself (review 2026-11-20).
+_OWN_WRITES: dict[str, float] = {}
+
+
+def _own_key(path: Path) -> str:
+    try:
+        return str(path.resolve())
+    except OSError:
+        return str(path)
+
+
+def note_own_write(path: Path) -> None:
+    """Lab Hub has just finished writing in this worktree."""
+    _OWN_WRITES[_own_key(path)] = time.time()
+
+
+def settling(path: Path, now: float | None = None) -> str:
+    """Why this worktree's open work must be left alone for now, or "".
+
+    Open work is every file git reports as changed or untracked. While the
+    newest of them changed less than QUIET_MINUTES ago, a session may still be
+    writing here, whether or not a process sits inside the worktree. Fails
+    closed: when git cannot list the files, when there are more than
+    SETTLING_MAX_FILES, or when a file's time cannot be read, the answer is a
+    reason, never "".
+    """
+    if QUIET_MINUTES <= 0:
+        return ""
+    files = _open_files(path)
+    if files is None:
+        return "could not list its changed files"
+    if not files:
+        return ""
+    if len(files) > SETTLING_MAX_FILES:
+        return (f"it has more than {SETTLING_MAX_FILES} changed files, too many to check "
+                "when they last changed: commit them yourself")
+    now = time.time() if now is None else now
+    own_write = _OWN_WRITES.get(_own_key(path))
+    newest, newest_at = "", 0.0
+    for rel in files:
+        found = _changed_at(path, rel)
+        if found is None:
+            return f"could not read when {rel} last changed"
+        at, by_folder = found
+        if by_folder and own_write is not None and at <= own_write:
+            continue  # the folder last changed by Lab Hub's own write, not a session's
+        if not newest or at > newest_at:
+            newest, newest_at = rel, at
+    if not newest:
+        return ""
+    if newest_at - now > 60:
+        return (f"{newest} is dated in the future, so nobody can tell when it changed: "
+                "check the clock, or commit it yourself")
+    age = max(0.0, now - newest_at)
+    quiet = QUIET_MINUTES * 60
+    if age >= quiet:
+        return ""
+    minutes = int(age // 60)
+    ago = ("less than a minute ago" if minutes == 0
+           else f"{minutes} minute{'s' if minutes != 1 else ''} ago")
+    left = max(1, -int(-(quiet - age) // 60))
+    return (f"{newest} changed {ago}: a session may still be working here. Try again in "
+            f"{left} minute{'s' if left != 1 else ''}, or commit it yourself")
+
+
 def commit_blocker(repo: Path, wt: Worktree, busy: tuple[Path, ...] | None,
                    now: float | None = None, land_mode: bool = False) -> str:
     """Why tracked changes in this worktree must not be committed, or "".
@@ -292,7 +408,8 @@ def commit_blocker(repo: Path, wt: Worktree, busy: tuple[Path, ...] | None,
             return "a process is running in it"
         if not land_mode and recent_agent_worktree(repo, wt.path, now):
             return f"an agent worktree used in the last {RECENT_HOURS} hours"
-    return ""
+    # The main checkout too: a session elsewhere may be editing it right now.
+    return settling(wt.path, now)
 
 
 def merges_cleanly(repo: Path, default: str, branch: str) -> bool:

@@ -308,7 +308,9 @@ the default branch is level with origin; "Landed · 2 branches archived · 1 fil
 quarantined" says what it put aside. "Not landed" is left only for what a
 person must clear, and names the one action: gitleaks or a signed-in Claude
 Code missing, a paused merge or rebase, a process inside a checkout Land must
-commit in or switch, a rejected push, an app path that is neither a repo nor
+commit in or switch, a file there that changed in the last 15 minutes (a session
+may still be editing it, even one working from another folder; Land names the
+file and says when to try again), a rejected push, an app path that is neither a repo nor
 a link to one, a default branch whose own tests fail (tested once per Land; the
 branches waiting on it stay), or a conflict in a `.claude/` file Claude Code may
 not edit (spec `docs/specs/land-fast.md`). In an app Foundry installed into,

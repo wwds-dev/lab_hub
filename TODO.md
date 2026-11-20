@@ -518,10 +518,13 @@ copies be one.
 
 From `docs/audit/2026-11-18-readiness-audit.md`. Items already in this file (folder-link Land stop, WWDS `file://` tile, app-context skeleton, `/harden`, Backstage decision, old screenshots) are not repeated.
 
-- [ ] `P0` `bug` `@ai` **Land: don't commit another live session's edits (audit H1).**
+- [x] `P0` `bug` `@ai` **Land: don't commit another live session's edits (audit H1).**
   - Why: "a process inside" is only an `lsof` cwd inside the tree (`land_resolve.py:487-530`); a session working from `~/Documents/lab` or a lab-root worktree is invisible, so prep commits its half-done files (`land_resolve.py:645-650`, `repo_tidy.py:927-932`) and Land pushes them. `cc56bb6`/`9e669a1` here are Land's own "commit open work" commits.
   - Idea: busy when files changed in the last N minutes or a `claude` process's folder is an ancestor; list the files to be committed in the confirm dialog. Start with Define (owner gate).
   - Status 2026-11-20: Define draft written, `docs/specs/land-live-session-guard.md` on branch `claude/land-live-session-guard` (pushed). It waits for the owner's Define gate (four decisions; recommended: 15 minutes quiet time, main checkout included, no override, no exception list in slice 1). Build has not started.
+  - **Done 2026-11-20 (slice 1; owner: "Approve as recommended"):** Land and Resolve leave a checkout or worktree alone while a changed or new file in it was modified in the last 15 minutes, the main checkout included (`repo_tidy.settling`, spec `docs/specs/land-live-session-guard.md`). 29 tests, full suite green, 20 of 23 mutants killed (3 equivalent), independent review with no P0/P1 (spec §10). Not built or installed: the installed Lab Hub gets it with the next Update now.
+- [ ] `P2` `bug` `@ai` **Land's quiet-time rule reads only a file's modification time** (review P2-3, spec land-live-session-guard §8): `cp -p`, `rsync -t`, `tar x` or a move from outside the repo keep the old time, so such a fresh file is not seen as fresh. Compare the inode change time as well, and decide what to do about stops after `chmod`.
+- [ ] `P3` `feature` `@ai` **Land live-session guard, slice 2** (after `land-pick-and-time` ships): list the files Land will commit in the confirmation, a per-repo "Land anyway", and a per-repo list of paths the rule ignores if a repo turns out to be stopped every time by a file that rewrites itself.
 - [ ] `P1` `security` `@me` **Decide: real-lab images and `/Users/as` paths in the public repo (audit H2).**
   - `docs/audit/progress-windows-real-builds.png` (`1272be9`, shows `/Users/as/Releases/...` and every app version) and `progress-windows-real-land.png` (private repo names); `/Users/as` in README, TODO and five audit/spec docs.
   - Make `wwds-dev/lab_hub` private (then tier `internal`), or remove them and decide on a history rewrite together with the older screenshot item.

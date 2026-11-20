@@ -16,6 +16,14 @@ README and the specs in `docs/specs/` describe them.
 ## Unreleased
 
 ### Changed
+- **Land and Resolve leave a repo alone while its files are still changing.** A
+  checkout or worktree with a changed or new file that was modified in the last
+  15 minutes is not committed, switched or cleaned up: a session may still be
+  editing it, including one that works from another folder, which Land could not
+  see before. This now covers each repo's main checkout too, which was never
+  checked. The stop names the newest file, how long ago it changed and when to
+  try again; you can also commit the file yourself. Other repos in the same
+  Land all are not held up.
 - **Lab Hub updates itself even while other sessions work in its checkout.** Update
   now builds Lab Hub in a private copy of the repository at the `main` commit its
   row shows ("Update now builds `<sha>`"), not in the shared checkout, so

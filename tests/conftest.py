@@ -50,6 +50,18 @@ def isolated_config(tmp_path, monkeypatch):
     return support
 
 
+@pytest.fixture(autouse=True)
+def no_quiet_time(monkeypatch):
+    """Tests make a file and land it at once. Land's quiet time (a file changed
+    in the last minutes may belong to a live session, audit H1) would stop every
+    one of them, so it is off here; tests/test_land_live_session_guard.py turns
+    it on and sets the file times it needs."""
+    from lab_hub import repo_tidy
+
+    monkeypatch.setattr(repo_tidy, "QUIET_MINUTES", 0)
+    monkeypatch.setattr(repo_tidy, "_OWN_WRITES", {})
+
+
 @pytest.fixture(scope="session", autouse=True)
 def no_site_checks():
     """Keep the Websites tab off the network for the whole session.

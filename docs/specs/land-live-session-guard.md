@@ -49,7 +49,9 @@ One new rule, applied wherever Land or Resolve would commit tracked changes or a
 
 > A worktree is **settling** while any file git reports as changed or untracked in it was modified
 > less than `QUIET_MINUTES` ago. Land stops at a settling worktree: it commits nothing there, adds
-> nothing, and does not merge or push that repo in this run.
+> nothing and does not switch it. A settling main checkout with changed tracked files is reported
+> "Not landed". Work that is already committed on other branches is still merged and pushed
+> (review P3-6: the first wording said the whole repo stops, which §4 contradicted).
 
 - The rule covers the main checkout as well as linked worktrees (closes the second gap).
 - The files examined are exactly those `git status --porcelain` lists, capped at a fixed number;
@@ -101,3 +103,46 @@ shows it is needed.
   says how long is left.
 - A session that last wrote more than the quiet time ago and is still mid-task is not caught. The
   rule narrows the gap; it does not prove a session has finished.
+- A tool that keeps a file's old time (`cp -p`, `rsync -t`, `mv` from outside the repo, `tar x`)
+  hides a fresh change from the rule (review P2-3). Not closed in slice 1: comparing the inode
+  change time as well would catch it, at the cost of stops after a `chmod` or an attribute change.
+- A deleted file has no time of its own and is timed by the nearest folder that still exists.
+  Anything created or removed in that folder, ignored files included, restarts its clock (review
+  P3-5): a false stop, never a missed one.
+
+## 9. Architecture (no gate)
+No new state on disk, no new thread and no new module boundary, so no Architect gate.
+- `repo_tidy.settling(path, now)` is the rule. `_open_files` reads
+  `git status --porcelain=v1 -z --untracked-files=all` (one call, the existing 30 s limit);
+  `_changed_at` reads one `lstat` per file, at most `SETTLING_MAX_FILES` (2000).
+- Call sites: the end of `repo_tidy.commit_blocker` (Resolve's and Land's commit of tracked
+  changes; now reached for the main checkout too) and the end of
+  `land_resolve._worktree_stop_full` (Land's prep and every re-check before a step). A clean
+  worktree has no open files, so removing or archiving one is never held up.
+- `repo_tidy._OWN_WRITES` remembers, per worktree and for this process only, when Lab Hub itself
+  last finished a prep step there (`land_resolve.apply_step`). A deletion whose folder has not
+  changed since that moment is Land's own doing and is not counted; a changed file is always
+  counted. Without it Land stopped itself after its untracked step (review P2-1).
+- All callers run off the UI thread (`ui/lander.py`'s worker, `repo_tidy_dialogs`' pool).
+- The test suite sets `QUIET_MINUTES` to 0 (`tests/conftest.py`): every existing test makes a file
+  and lands it at once. `tests/test_land_live_session_guard.py` turns the rule on.
+
+## 10. Review and Verify (2026-11-20)
+Review by an independent read-only agent, not the author. No P0 or P1.
+| # | Severity | Finding | Outcome |
+|---|---|---|---|
+| 1 | P2 | Land's untracked step (a quarantine move, a new `.gitignore`) changes a folder's time, so an old deletion read "changed less than a minute ago" and Land stopped itself | Fixed: `_OWN_WRITES`; a test runs the whole Land flow with the rule on |
+| 2 | P2 | An intent-to-add rename prints ` R new<NUL>old`; only the first status letter was read, so the next entry was swallowed and a fresh file went unexamined (fail open) | Fixed: both letters; test |
+| 3 | P2 | Only the modification time is read; tools that preserve it hide a change | Not fixed in slice 1 (§8); `TODO.md` |
+| 4 | P3 | A file dated in the future stopped Land with a misleading age | Fixed: the stop says so; test |
+| 5 | P3 | Folder-timed deletions restart on any change in that folder | Accepted (§8) |
+| 6 | P3 | §3 said the whole repo stops; §4 said otherwise | Spec corrected (§3) |
+| 7 | P3 | No test of the full Land flow or of a linked worktree with the rule on | Added. Measure 4 has no test of its own: Land all plans and lands each repo separately (`land.make_plan`, `land.land` take one repo) |
+
+Verify: 29 tests in `tests/test_land_live_session_guard.py`; the full suite passes with them
+(offscreen, exit 0). Mutation: 23 mutants on the rule, its two call sites, the own-write marker and
+the parser; 20 killed. The three survivors change nothing observable: `QUIET_MINUTES <= 0` to
+`< 0` (zero already means every age passes), `max(0, age)` to `abs(age)` (a time more than a
+minute ahead is reported separately, and under a minute both read "less than a minute ago"), and
+dropping the "nothing left to time" return (the age is then the whole clock, which passes).
+Measures 1 to 3 are met by tests; measure 5 is the owner's 30-day check.

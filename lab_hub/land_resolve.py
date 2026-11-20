@@ -824,7 +824,9 @@ def _worktree_stop_full(repo: Path, wt: rt.Worktree, busy,
         who = _first(found)
         return (f"a process is running in it{f' ({who})' if who else ''}: close that "
                 "terminal or session, then Land again"), tuple(found)
-    return "", ()
+    # No process inside it is not proof nobody works here: a session opened in
+    # another folder edits these files too (audit H1).
+    return rt.settling(wt.path), ()
 
 
 def _first(found: list[str], limit: int = 3) -> str:
@@ -959,6 +961,17 @@ def apply_step(step: Step, log: Path | None = None, busy="fresh",
     stop = _worktree_stop(step.repo, wt, busy)
     if stop:
         return False, f"skipped — {stop}"
+    try:
+        return _run_step(step, wt, log, busy, quarantine_root)
+    finally:
+        # The step may have moved files or written a .gitignore: the checks
+        # that follow must not read Land's own write as a session's
+        # (repo_tidy.settling times a deleted file by its folder).
+        rt.note_own_write(wt.path)
+
+
+def _run_step(step: Step, wt: rt.Worktree, log: Path | None, busy,
+              quarantine_root: Path | None) -> tuple[bool, str]:
     path = wt.path
     stamp = f"{_now():%Y-%m-%d %H:%M}"
     if step.kind == "rescue":
