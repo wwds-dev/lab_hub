@@ -324,3 +324,45 @@ def test_record_run_refuses_bad_values_and_a_failed_save_says_false(tmp_path, mo
     monkeypatch.setattr(durations.os, "replace", lambda *a: (_ for _ in ()).throw(OSError()))
     assert not durations.record_run(datetime(2026, 11, 18), 1, 1, 5, path=file)
     assert not file.exists() and not list(tmp_path.glob(".*.tmp"))
+
+
+# --- verify follow-up (docs/audit/land-pick-and-time-qa.md G7) ---------------
+def _good_run(i: int = 0) -> dict:
+    return {"at": f"2026-11-18T14:{i:02d}", "repos": 2, "landed": 2, "seconds": 30 + i,
+            "stopped": False}
+
+
+def _runs_file(tmp_path, data) -> object:
+    file = tmp_path / "runs.json"
+    file.write_text(json.dumps(data), encoding="utf-8")
+    return file
+
+
+def test_a_valid_run_log_over_the_64_kib_cap_reads_as_no_runs(tmp_path):
+    runs = [dict(_good_run(), pad="x" * 70_000)]  # well-formed JSON, valid entry, 70 KiB
+    file = _runs_file(tmp_path, {"version": durations.VERSION, "runs": runs})
+    assert 64 * 1024 < file.stat().st_size < durations.MAX_BYTES
+    assert durations.load_runs(path=file) == []
+    small = _runs_file(tmp_path, {"version": durations.VERSION, "runs": [_good_run()]})
+    assert len(durations.load_runs(path=small)) == 1
+
+
+def test_a_run_log_of_another_version_reads_as_no_runs_even_with_good_runs(tmp_path):
+    file = _runs_file(tmp_path, {"version": durations.VERSION + 1, "runs": [_good_run()]})
+    assert durations.load_runs(path=file) == []
+
+
+def test_a_hand_edited_run_log_keeps_its_last_ten(tmp_path):
+    file = _runs_file(tmp_path, {"version": durations.VERSION,
+                                 "runs": [_good_run(i) for i in range(12)]})
+    runs = durations.load_runs(path=file)
+    assert [r.seconds for r in runs] == [float(30 + i) for i in range(2, 12)]
+
+
+def test_the_repo_count_limit_is_500_inclusive(tmp_path):
+    def with_repos(n):
+        entry = dict(_good_run(), repos=n, landed=0)
+        return _runs_file(tmp_path, {"version": durations.VERSION, "runs": [entry]})
+
+    assert [r.repos for r in durations.load_runs(path=with_repos(500))] == [500]
+    assert durations.load_runs(path=with_repos(501)) == []

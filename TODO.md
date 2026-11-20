@@ -1,5 +1,7 @@
 # Lab Hub — TODO
 
+> **Testing first (owner, 2026-11-20).** `P0` now means: needed before the owner can test this app on his own Mac, or a security must. Everything else waits until after testing, and no new feature or redesign row starts unless the owner asks for it. These protect the other apps' checkouts while they are being tested.
+
 > **Legend** — priority `P0` critical · `P1` high · `P2` normal · `P3` low
 > categories `security` `bug` `feature` `performance` `design` `docs` `testing` `infra` `research`
 > owner `@me` (needs you — accounts, keys, money, judgement) · `@ai` (Claude can do this)
@@ -378,7 +380,8 @@ copies be one.
   chat, Opus high, ~30–60 min. Requested 2026-11-18 after the lab-wide doc sweep.
   - Done 2026-11-18: `docs/audit/2026-11-18-readiness-audit.md` (1 Blocker, 3 High, 9 Medium, 8 Low). New items below under "Readiness audit 2026-11-18".
 
-- [ ] `P1` `bug` `@ai` **Land: stop a branch that already contains a folder link (follow-up to `land-update-gaps`, 2026-11-17).**
+
+- [x] `P0` `bug` `@ai` **Land: stop a branch that already contains a folder link (follow-up to `land-update-gaps`, 2026-11-17).** Landed 2026-11-20 (spec `docs/specs/land-folder-link-guard.md`; Define and Architect approved by the owner, "Approve and land" also covers the widening to plain files). Every merge, Claude merge, prep switch and pull is checked before the main checkout moves; tests `tests/test_land_folder_link_guard.py`; reviews `docs/audit/land-folder-link-guard-code-review.md`, `-security.md`. Full suite green offscreen. Not done: Lab Hub rebuild, a real Land on the Mac.
   - Audit 2026-11-18 (B1): release blocker. Also cover `claude_resolve.py:1289` (`merge --ff-only`) and prep's `git switch` (`land_resolve.py:705`), not only `repo_tidy.apply`'s merge (`:919-924`).
   - Why: Land no longer commits a `.venv` symlink itself (6d04df6). But a link an agent committed on its own branch (`git add -A`, with only `.venv/` in `.gitignore`) still lands. Updating the main checkout then replaces the real, ignored `.venv` with the link, which is the SONAR data loss of 17 Nov.
   - Idea: an outgoing check next to `outgoing_findings` in `lab_hub/land_resolve.py`. It stops a branch whose diff adds a symlink (mode 120000) where the target checkout has a real folder, or a name the default branch ignores as a folder. Reuse `never_commit_link` / `ignored_as_folder`.
@@ -515,7 +518,7 @@ copies be one.
 
 From `docs/audit/2026-11-18-readiness-audit.md`. Items already in this file (folder-link Land stop, WWDS `file://` tile, app-context skeleton, `/harden`, Backstage decision, old screenshots) are not repeated.
 
-- [ ] `P1` `bug` `@ai` **Land: don't commit another live session's edits (audit H1).**
+- [ ] `P0` `bug` `@ai` **Land: don't commit another live session's edits (audit H1).**
   - Why: "a process inside" is only an `lsof` cwd inside the tree (`land_resolve.py:487-530`); a session working from `~/Documents/lab` or a lab-root worktree is invisible, so prep commits its half-done files (`land_resolve.py:645-650`, `repo_tidy.py:927-932`) and Land pushes them. `cc56bb6`/`9e669a1` here are Land's own "commit open work" commits.
   - Idea: busy when files changed in the last N minutes or a `claude` process's folder is an ancestor; list the files to be committed in the confirm dialog. Start with Define (owner gate).
 - [ ] `P1` `security` `@me` **Decide: real-lab images and `/Users/as` paths in the public repo (audit H2).**

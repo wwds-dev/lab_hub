@@ -161,3 +161,27 @@ five production files were `cmp`-identical to the repo's after the last mutant.
 Other files changed in the worktree during this session (`docs/specs/land-pick-and-time.md`,
 `docs/audit/land-pick-and-time-review.md`, new `docs/audit/land-pick-and-time-security.md`) were
 written by concurrent sessions, not by QA.
+
+## 5. Verify follow-up (2026-11-18)
+Tests only; no production file changed. Each new or fixed test was run once against its planted
+mutant in a scratch copy (the five production files `cmp`-identical to the repo's afterwards):
+every mutant below was killed.
+
+| Gap | Test | Mutant killed |
+|---|---|---|
+| G1 | `test_progress_window::test_a_land_where_nothing_ran_is_not_logged` (clock now advances 30 s before `finish`) | W2: `if first_finish:` without `ran` |
+| G2 | `test_progress_window::test_a_stopped_land_is_logged_as_stopped` | W11: `stopped` logged as `False` |
+| G3 | `test_progress::test_the_end_keeps_the_total_time_and_the_clock_span` (wall moves to 15:30 after `finish`) | P3: `took_line` uses `self.wall()` |
+| G4 | `test_land_confirm::test_an_unticked_card_hides_its_step_stop_and_claude_pills` | C12: in-pills stay visible |
+| G5 | `test_land_ui::test_land_all_lands_only_the_ticked_repos` (`_landing_cards` read inside the faked `confirm_land` and `lander.run`) | A5: left-out repo not popped |
+| G6 | `test_progress_window::test_a_second_start_forgets_which_rows_were_open` | W10: `start()` keeps `_open` |
+| G7 | `test_durations`: `test_a_valid_run_log_over_the_64_kib_cap_reads_as_no_runs`, `..._of_another_version_..._even_with_good_runs`, `test_a_hand_edited_run_log_keeps_its_last_ten`, `test_the_repo_count_limit_is_500_inclusive` | D4, D5, D3, D12 (and 501 accepted) |
+| G8 | `test_land_confirm::test_space_toggles_the_tick_box`, `::test_cancel_still_works_with_nothing_ticked` (asserts the `rejected` signal; `result()` is 0 before any answer, so it cannot prove Cancel) | box not checkable; Cancel not wired to `reject` |
+
+Settled 2026-11-18 (C13, G4's second half): the owner chose a QSS rule. `ui/theme.py` now has
+`QFrame#card[out="true"]` (flat, dashed border), so an unticked card is dimmed, not only its name.
+`test_land_confirm::test_an_unticked_card_is_dimmed_by_a_stylesheet_rule` (property "true" when
+unticked, "false" when re-ticked, matching selector in both palettes) was run against two mutants,
+both killed: selector renamed (`[outx=...]`), and `setProperty("out", "false")` always. Files restored
+byte-for-byte (`cmp`).
+Full suite: `.venv/bin/python -m pytest -q`, every test passed (all dots, 100%, no F or E); the Cancel test was tightened after that run and re-run alone (`tests/test_land_confirm.py`, green).

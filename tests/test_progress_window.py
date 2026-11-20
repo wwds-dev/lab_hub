@@ -391,7 +391,9 @@ def test_the_earlier_line_shows_past_runs_and_not_this_one(qapp):
 
 # --- review findings (docs/audit/land-pick-and-time-review.md) ---------------
 def test_a_land_where_nothing_ran_is_not_logged(qapp):
-    window = _land_window(qapp)
+    clock = Clock()
+    window = _land_window(qapp, clock)
+    clock.t += 30  # time passed, so only the `ran` guard keeps the log empty (QA G1)
     window.on_repo_done("SONAR", LandResult("SONAR", "nothing"))
     window.on_repo_done("Backstage", LandResult("Backstage", "nothing"))
     window.finish([LandResult("SONAR", "nothing"), LandResult("Backstage", "nothing")], "x")
@@ -416,4 +418,36 @@ def test_two_rows_with_the_same_name_open_one_at_a_time(qapp):
     window.rows[1].opener.click()
     assert window.rows[1].steps.isVisibleTo(window.rows[1])
     assert not window.rows[0].steps.isVisibleTo(window.rows[0])  # review P3-7
+    window.close()
+
+
+# --- verify follow-up (docs/audit/land-pick-and-time-qa.md G2, G6) -----------
+def test_a_stopped_land_is_logged_as_stopped(qapp):
+    clock = Clock()
+    window = _land_window(qapp, clock)
+    window.on_step(StepEvent("SONAR", 0, 3, "commit", "start", clock()))
+    clock.t += 5
+    window.on_step(StepEvent("SONAR", 0, 3, "commit", "end", clock(), clock() - 5, "done"))
+    stopped = LandResult("SONAR", "not_landed", "stopped", stopped=True)
+    window.on_repo_done("SONAR", stopped)
+    window.on_repo_done("Backstage", LandResult("Backstage", "not_landed", "stopped",
+                                                stopped=True))
+    window.finish([stopped, LandResult("Backstage", "not_landed", "stopped", stopped=True)])
+    runs = durations.load_runs()
+    assert len(runs) == 1 and runs[0].stopped is True  # G2
+    window.close()
+
+
+def test_a_second_start_forgets_which_rows_were_open(qapp):
+    window = _finished_window(qapp)
+    window.rows[0].opener.click()
+    assert window._open == {0}
+    window.start(_plans())
+    assert window._open == set()  # G6
+    window.on_step(StepEvent("SONAR", 0, 3, "commit", "start", 0.0))
+    window.on_step(StepEvent("SONAR", 0, 3, "commit", "end", 1.0, 0.0, "done"))
+    window.on_repo_done("SONAR", LandResult("SONAR", "not_landed", "x"))
+    window.finish([LandResult("SONAR", "not_landed", "x")], "x")
+    window.draw()
+    assert not window.rows[0].steps.isVisibleTo(window.rows[0])
     window.close()
