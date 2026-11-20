@@ -402,3 +402,8 @@ clone at the commit its row recorded, so D no longer needs a quiet checkout. See
 "Verify of amendment 1" above.
 
 `dist.noindex/` is gone: the last Update now cleared it, so there is no stub left behind.
+
+## Owner's manual check of amendment 1, run 2026-11-20 (A2, D)
+
+Run by Claude Code in the owner's session, at the owner's request, from installed v2.236 (`dc84bc3`).
+This commit is the A2 "other session commits to main during the build" step.
