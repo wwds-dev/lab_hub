@@ -240,3 +240,7 @@
 {"ts": "2026-11-21T02:14:43", "phase": "build", "state": "done", "spec": "land-network-preflight"}
 {"ts": "2026-11-21T02:20:57", "phase": "define", "state": "start", "spec": "apps-discovery"}
 {"ts": "2026-11-21T02:21:53", "phase": "define", "state": "done", "spec": "apps-discovery"}
+{"ts": "2026-11-21T02:25:01", "phase": "design", "state": "start", "spec": "apps-discovery"}
+{"ts": "2026-11-21T02:25:01", "phase": "architect", "state": "start", "spec": "apps-discovery"}
+{"ts": "2026-11-21T02:28:14", "phase": "design", "state": "done", "spec": "apps-discovery"}
+{"ts": "2026-11-21T02:35:40", "phase": "architect", "state": "done", "spec": "apps-discovery"}
