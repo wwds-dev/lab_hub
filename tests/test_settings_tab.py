@@ -187,6 +187,38 @@ def test_the_card_stays_with_a_line_when_nothing_is_hidden(qapp, tmp_path):
     assert not tab.hidden_empty.isHidden()
 
 
+def test_a_damaged_answers_file_says_so_instead_of_claiming_nothing_is_hidden(qapp, tmp_path):
+    from lab_hub import discovery
+
+    discovery.dismissed_path().parent.mkdir(parents=True, exist_ok=True)
+    discovery.dismissed_path().write_text("{half saved")
+
+    tab = SettingsTab(config.Settings(lab_root=str(tmp_path)))
+
+    assert tab.hidden_unreadable.text() == (
+        "Your hidden-projects file could not be read, so nothing is hidden.")
+    assert tab.hidden_unreadable.objectName() == "hint"
+    assert tab.hidden_unreadable.isVisibleTo(tab)
+    assert not tab.hidden_empty.isVisibleTo(tab), "'No hidden projects.' would be untrue"
+    assert tab.hidden_items == []
+
+
+def test_the_damaged_file_line_follows_the_file_when_settings_is_shown_again(qapp, tmp_path):
+    from lab_hub import discovery
+
+    tab = SettingsTab(config.Settings(lab_root=str(tmp_path)))
+    assert tab.hidden_empty.isVisibleTo(tab) and not tab.hidden_unreadable.isVisibleTo(tab)
+
+    discovery.dismissed_path().parent.mkdir(parents=True, exist_ok=True)
+    discovery.dismissed_path().write_text("{half saved")
+    tab.refresh()
+    assert tab.hidden_unreadable.isVisibleTo(tab) and not tab.hidden_empty.isVisibleTo(tab)
+
+    discovery.dismissed_path().write_text("{}")
+    tab.refresh()
+    assert tab.hidden_empty.isVisibleTo(tab) and not tab.hidden_unreadable.isVisibleTo(tab)
+
+
 def test_show_again_rewrites_the_file_asks_the_apps_page_and_says_so(qapp, tmp_path, monkeypatch):
     from datetime import date
 
@@ -236,7 +268,7 @@ def test_a_failed_show_again_keeps_the_row_and_says_why(qapp, tmp_path, monkeypa
 
     item = tab.hidden_items[0]
     assert _labels(tab) == ["Kaila · hidden for good"]
-    assert item["error"].text() == "Could not show Kaila again: cannot write /x: read-only."
+    assert item["error"].text() == "Could not save your answer for Kaila: cannot write /x: read-only."
     assert item["error"].objectName() == "stateBad"
     assert asked == []
 

@@ -186,6 +186,10 @@ def _parse_dismissed(raw: bytes | None) -> dict[str, Dismissal] | None:
         return None
     found: dict[str, Dismissal] = {}
     for folder, item in data.items():
+        # A key that is not a folder name `scan` could have suggested (a path
+        # such as "../outside") is never looked up on disk or shown: ignored.
+        if not isinstance(folder, str) or not NAME_OK.fullmatch(folder):
+            continue
         if not isinstance(item, dict) or item.get("answer") not in ANSWERS:
             continue
         try:
@@ -203,6 +207,17 @@ def load_dismissed() -> dict[str, Dismissal]:
     except DiscoveryError:
         return {}
     return _parse_dismissed(raw) or {}
+
+
+def dismissed_ok() -> bool:
+    """False when the answers file is there but cannot be read: damaged, over
+    its size cap, or not a regular file. Nothing is hidden then (`load_dismissed`
+    reads it as empty), and Settings says so. A missing or empty file is fine."""
+    try:
+        raw, _ = _snapshot(dismissed_path(), DISMISSED_MAX_BYTES)
+    except DiscoveryError:
+        return False
+    return _parse_dismissed(raw) is not None
 
 
 def _hides(item: Dismissal, now: date) -> bool:

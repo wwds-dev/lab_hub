@@ -25,6 +25,9 @@ from .widgets import ElidedLabel, FolderField, discard_widget, scroll_column
 # (spec apps-discovery §7), the form Land's own dates use.
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 NO_HIDDEN_TEXT = "No hidden projects."
+# Spec apps-discovery §12.7 F (approved): a damaged answers file hides nothing,
+# and "No hidden projects." would then say something untrue.
+HIDDEN_UNREADABLE_TEXT = "Your hidden-projects file could not be read, so nothing is hidden."
 
 
 def hidden_text(folder: str, until) -> str:
@@ -123,8 +126,11 @@ class SettingsTab(QWidget, Refreshable):
         self.hidden_rows = QVBoxLayout()
         self.hidden_rows.setSpacing(theme.SPACE_S)
         self.hidden_empty = theme.hint(NO_HIDDEN_TEXT)
+        self.hidden_unreadable = theme.hint(HIDDEN_UNREADABLE_TEXT)
+        self.hidden_unreadable.hide()
         hidden_layout.addLayout(self.hidden_rows)
         hidden_layout.addWidget(self.hidden_empty)
+        hidden_layout.addWidget(self.hidden_unreadable)
         # (folder, answer, until) as shown, so an unchanged list is not rebuilt
         # under a button the keyboard is on.
         self._hidden_shown: list[tuple] | None = None
@@ -216,13 +222,17 @@ class SettingsTab(QWidget, Refreshable):
     def _refresh_hidden(self) -> None:
         rows = discovery.hidden(self.settings.resolved_lab_root(), discovery.today())
         shown = [(folder, item.answer, until) for folder, item, until in rows]
+        # Before the unchanged-list return: a file can go bad (or be mended)
+        # with no row either side.
+        readable = discovery.dismissed_ok()
+        self.hidden_unreadable.setVisible(not readable)
+        self.hidden_empty.setVisible(not shown and readable)
         if shown == self._hidden_shown:
             return
         self._hidden_shown = shown
         self._clear_hidden()
         for folder, _answer, until in shown:
             self._add_hidden_row(folder, until)
-        self.hidden_empty.setVisible(not shown)
 
     def _clear_hidden(self) -> None:
         for item in self.hidden_items:
@@ -271,7 +281,11 @@ class SettingsTab(QWidget, Refreshable):
             discovery.forget(folder)
         except discovery.DiscoveryError as error:
             item = self.hidden_items[index]
-            item["error"].setText(f"Could not show {name} again: {str(error).rstrip('. ')}.")
+            # Spec §12.7 C's first sentence. Its second ("It will be asked
+            # again.") is the opposite of what a failed Show again means.
+            item["error"].setText(
+                f"Could not save your answer for {name}: {str(error).rstrip('. ')}."
+            )
             item["error"].show()
             item["button"].setFocus()
             return

@@ -1187,6 +1187,44 @@ def test_hidden_survives_a_hostile_folder_name_in_the_file(isolated_config, lab)
     assert discovery.hidden(lab, TODAY) == []
 
 
+def test_a_key_that_is_not_a_folder_name_is_ignored_so_nothing_outside_is_read(isolated_config, lab):
+    outside = lab.parent / "outside"
+    outside.mkdir()
+    (outside / "README.md").write_text("# Outside Secret Name\n")
+    make_project(lab, "kaila")
+    write_dismissed({"../outside": {"answer": "never", "at": "2026-11-21"},
+                     "sub/dir": {"answer": "never", "at": "2026-11-21"},
+                     "kaila": {"answer": "never", "at": "2026-11-21"}})
+
+    assert list(discovery.load_dismissed()) == ["kaila"]
+    assert [row[0] for row in discovery.hidden(lab, TODAY)] == ["kaila"]
+
+
+@pytest.mark.parametrize("content, ok", [
+    (None, True),  # no file: nothing was ever hidden
+    (b"", True),
+    (b"  \n", True),
+    (b"{}", True),
+    (b'{"kaila": {"answer": "never", "at": "2026-11-21"}}', True),
+    (b"{older answers, damaged", False),
+    (b"[1, 2]", False),
+    (b"\xff\xfe", False),
+    (b'{"pad": "' + b"x" * 70_000 + b'"}', False),
+])
+def test_dismissed_ok_says_whether_the_file_could_be_read(isolated_config, content, ok):
+    if content is not None:
+        write_dismissed(content)
+
+    assert discovery.dismissed_ok() is ok
+
+
+def test_dismissed_ok_is_false_for_a_link_or_folder_in_the_files_place(isolated_config, tmp_path):
+    dismissed_file().parent.mkdir(parents=True, exist_ok=True)
+    dismissed_file().mkdir()
+
+    assert discovery.dismissed_ok() is False
+
+
 def test_the_constants_are_the_ones_the_spec_names():
     assert (discovery.NOT_NOW_DAYS, discovery.README_MAX_BYTES, discovery.SUMMARY_MAX,
             discovery.NAME_MAX, discovery.SCAN_MAX_ENTRIES) == (14, 8192, 220, 60, 400)
