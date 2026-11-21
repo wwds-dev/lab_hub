@@ -168,6 +168,28 @@ def test_open_in_terminal_is_always_there_on_a_no_launch_tile(qapp, lab, monkeyp
     assert opened == [project]
 
 
+def test_open_in_terminal_comes_back_after_a_refresh_or_a_landed_outcome(qapp, lab):
+    """Refresh (clear_outcome) and a Land that went well both hide the button on
+    a launchable tile; here the next poll must put it back."""
+    from lab_hub import land
+
+    card = AppCard(KAILA)
+    card.refresh(lab)
+
+    card.clear_outcome()
+    assert not _visible(card.terminal_button, card)
+    card.refresh(lab)
+    assert _visible(card.terminal_button, card)
+
+    card.show_outcome(land.LandResult("kaila", "landed", "Landed."))
+    card.refresh(lab)
+    assert _visible(card.terminal_button, card)
+
+    card.set_landing("Merging…")  # mid-Land the button stays out of the way
+    card.refresh(lab)
+    assert not _visible(card.terminal_button, card)
+
+
 def test_open_in_terminal_sits_beside_land_on_a_no_launch_tile(qapp):
     card = AppCard(KAILA)
 
