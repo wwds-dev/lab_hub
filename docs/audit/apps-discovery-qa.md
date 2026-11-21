@@ -204,3 +204,6 @@ on every launchable tile (not touched by this spec) and Qt-offscreen fonts diffe
 6. Commits `95869a3` (docs) and `48c1ee6` (security fixes to `discovery.py`, `registry.py`, `main.py` plus `tests/test_apps_discovery_security.py`) are newer than the verified 668eab2: re-run the suite and the mutants on them.
 
 Verdict: PASS with fixes
+
+## Real-Mac check (owner, 2026-11-21)
+The owner ran the worktree build on the Mac against a throwaway data folder and reported "All checks passed": first-run banner with three rows, Add (no-launch tile for Kaila), quick double-click on Add, Not now and Never with Cmd+R, Lab Hub's tile, Settings Hidden projects with Show again, keyboard focus ring in both themes, minimum width, Check builds with one Lab Hub row. Reported by the owner in chat; the agent did not observe it and no real-Mac screenshots were supplied.
