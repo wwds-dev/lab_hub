@@ -15,12 +15,24 @@ Where it is read from (`candidates`):
 
 A file that does not parse never empties the hub: `reload` keeps the last good
 list and says what was wrong in `last_error`.
+
+A second, local source sits behind it (spec `apps-discovery`, ADR 0007): the
+projects the owner chose to add from the Apps page live in
+`<Application Support>/Lab Hub/apps-local.toml`, never in the tracked
+`apps.toml`. It is read after that file on every `reload`, may list only
+`[[suites]]`, and `apps.toml` wins any clash. A local file that cannot be read
+keeps the last good local part and is reported in `local_note`, **not** in
+`last_error`: `main.py --selftest` fails on `last_error`, and a failed self-test
+rolls an update back, so a typo in the owner's own file must not be able to.
 """
 
 from __future__ import annotations
 
+import posixpath
+import re
 import sys
 import tomllib
+import unicodedata
 from dataclasses import dataclass, fields
 from pathlib import Path
 
@@ -30,6 +42,16 @@ CHECKOUT_REGISTRY = Path("lab_hub") / "lab_hub" / REGISTRY_NAME
 # The package's copy: the checkout's file from source, and the bundled one
 # frozen (build_app.sh adds it under lab_hub/, which is where __file__ points).
 PACKAGE_REGISTRY = Path(__file__).resolve().parents[1] / REGISTRY_NAME
+# The owner's own additions, beside the rest of Lab Hub's state (`local_path`).
+LOCAL_NAME = "apps-local.toml"
+LOCAL_MAX_BYTES = 256 * 1024
+# Keys and projects no registry file may define: Lab Hub's own tile is built in
+# code (`self_update.OWN_TILE`), so it can be neither hidden nor edited. A test
+# keeps this in step with `self_update.SELF`.
+RESERVED = frozenset({"lab_hub"})
+# What a key may be, and what discovery may name a folder: no space, quote or
+# control character can reach a TOML line or a path.
+KEY_OK = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
 class RegistryError(ValueError):
@@ -41,7 +63,10 @@ class ExternalApp:
     key: str
     name: str  # display name and installed bundle name
     project: str  # folder path under the lab root
-    entry: str  # entry script, relative to the project folder
+    # Entry script, relative to the project folder. None is a project with no
+    # launch command (Kaila today): it gets a tile with its version and repo
+    # state and no Launch button, no menu bar entry and no build row.
+    entry: str | None
     summary: str
     # What this app's windowless background copy is called, for apps that have
     # one. SONAR's launchd agent keeps settling hours with no window open, and
@@ -76,12 +101,18 @@ class ExternalApp:
     def served(self) -> bool:
         return self.url is not None
 
+    @property
+    def launchable(self) -> bool:
+        return self.entry is not None
+
 
 # The groups, in the order the file lists them and the window shows them.
 GROUPS = ("suites", "backup_sync", "utilities", "tools_only")
 
-_REQUIRED = ("key", "name", "project", "entry", "summary")
+_REQUIRED = ("key", "name", "project", "summary")
 _FIELDS = {f.name: f for f in fields(ExternalApp)}
+# Fields that only mean something for an app Lab Hub can start or build.
+_NEEDS_ENTRY = ("url", "service", "args", "bundle_dir", "build", "build_output")
 
 
 @dataclass(frozen=True)
@@ -108,16 +139,20 @@ class Registry:
         return tuple(getattr(self, name) for name in GROUPS)
 
     # Every launchable app. There is no nesting any more, so these are simply
-    # the groups in order. The menu bar reads `menu_bar_apps`; the self-test,
-    # the build report and Settings read `apps`, which also covers the
-    # Tools-only apps.
+    # the groups in order, minus the apps with no launch command. The menu bar
+    # reads `menu_bar_apps`; the self-test, the build report and Settings read
+    # `apps`, which also covers the Tools-only apps. `suites` (and `SUITES`,
+    # `primary_apps`) stay unfiltered: the Apps page shows a no-launch tile.
     @property
     def primary_apps(self) -> tuple[ExternalApp, ...]:
         return self.suites
 
     @property
     def menu_bar_apps(self) -> tuple[ExternalApp, ...]:
-        return self.suites + self.backup_sync + self.utilities
+        return tuple(
+            app for app in self.suites + self.backup_sync + self.utilities
+            if app.launchable
+        )
 
     @property
     def launchpad(self) -> tuple[ExternalApp, ...]:
@@ -125,7 +160,7 @@ class Registry:
 
     @property
     def apps(self) -> tuple[ExternalApp, ...]:
-        return self.launchpad + self.tools_only
+        return self.launchpad + tuple(app for app in self.tools_only if app.launchable)
 
 
 def _app(group: str, index: int, raw: object) -> ExternalApp:
@@ -138,6 +173,16 @@ def _app(group: str, index: int, raw: object) -> ExternalApp:
     missing = [name for name in _REQUIRED if not raw.get(name)]
     if missing:
         raise RegistryError(f"{where} is missing: {', '.join(missing)}")
+    if "entry" in raw and not raw["entry"]:
+        raise RegistryError(f"{where}.entry is empty (leave it out for a project with no launch command)")
+    if "entry" not in raw:
+        extra = [name for name in _NEEDS_ENTRY if name in raw]
+        if raw.get("runs_from_source") is False:
+            extra.append("runs_from_source = false")
+        if extra:
+            raise RegistryError(
+                f"{where} has no entry, so it cannot set {', '.join(extra)}"
+            )
     values = dict(raw)
     for name, value in values.items():
         if name == "args":
@@ -149,23 +194,58 @@ def _app(group: str, index: int, raw: object) -> ExternalApp:
                 raise RegistryError(f"{where}.runs_from_source must be true or false")
         elif not isinstance(value, str):
             raise RegistryError(f"{where}.{name} must be a string")
+    values.setdefault("entry", None)
+    _check_text(where, values)
     return ExternalApp(**values)
 
 
-def parse(text: str, source: Path | None = None) -> Registry:
-    """Build a registry from the TOML text of an app list."""
+def _check_text(where: str, values: dict) -> None:
+    """The fields that become a path, a bundle name or a message-box line.
+
+    `name` is joined into `/Applications/<name>.app` and shown in boxes that
+    render rich text; `project` and `entry` are joined onto the lab folder when
+    an app is launched. Both files go through this.
+    """
+    if not KEY_OK.fullmatch(values["key"]):
+        raise RegistryError(
+            f"{where}.key must be letters, digits, '.', '_' or '-' (up to 64)"
+        )
+    name = values["name"]
+    if any(c in name for c in "/\\<>&") or any(unicodedata.category(c) == "Cc" for c in name):
+        raise RegistryError(
+            f"{where}.name must not hold / \\ < > & or a control character"
+        )
+    for field in ("project", "entry"):
+        path = values[field]
+        if path is None:
+            continue
+        if path.startswith("/") or ".." in path.replace("\\", "/").split("/"):
+            raise RegistryError(
+                f"{where}.{field} must be a relative path with no '..': {path!r}"
+            )
+
+
+def parse(text: str, source: Path | None = None, *, local: bool = False) -> Registry:
+    """Build a registry from the TOML text of an app list.
+
+    `local` is the owner's own file (`LOCAL_NAME`): only `[[suites]]` is
+    allowed, because it is the Apps page and nothing else (the tray, Backup and
+    Tools code then never meets an entry with no launch command), and it may
+    list no apps at all.
+    """
     try:
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as error:
         raise RegistryError(f"not valid TOML: {error}") from error
-    unknown = sorted(set(data) - set(GROUPS))
+    allowed = ("suites",) if local else GROUPS
+    unknown = sorted(set(data) - set(allowed))
     if unknown:
         raise RegistryError(
-            f"unknown group(s): {', '.join(unknown)} (expected {', '.join(GROUPS)})"
+            f"unknown group(s): {', '.join(unknown)} (expected {', '.join(allowed)})"
         )
     groups: dict[str, tuple[ExternalApp, ...]] = {}
     seen: set[str] = set()
-    for group in GROUPS:
+    for group in allowed:
         raw = data.get(group, [])
         if not isinstance(raw, list):
             raise RegistryError(f"{group} must be an array of tables ([[{group}]])")
@@ -175,7 +255,7 @@ def parse(text: str, source: Path | None = None) -> Registry:
                 raise RegistryError(f"the key '{app.key}' is used twice")
             seen.add(app.key)
         groups[group] = apps
-    if not seen:
+    if not seen and not local:
         raise RegistryError("it lists no apps")
     return Registry(**groups, source=source)
 
@@ -205,8 +285,114 @@ def candidates(lab_root: Path | None = None, frozen: bool | None = None) -> list
     return [lab_root / CHECKOUT_REGISTRY, PACKAGE_REGISTRY]
 
 
+def local_path() -> Path:
+    """The owner's added projects, read at call time: tests move `SUPPORT_DIR`."""
+    from lab_hub import config
+
+    return config.SUPPORT_DIR / LOCAL_NAME
+
+
+def _clash_key(path: str) -> str:
+    # APFS is case-insensitive, so `KAILA` and `./Kaila` are the same folder.
+    return posixpath.normpath(path).casefold()
+
+
+def _overlap(a: str, b: str) -> bool:
+    """Equal, or one lies inside the other."""
+    return a == b or a.startswith(b + "/") or b.startswith(a + "/")
+
+
+def merge_local(
+    base: Registry, local: tuple[ExternalApp, ...]
+) -> tuple[Registry, tuple[str, ...]]:
+    """`base` with the local entries after its suites, and why any were dropped.
+
+    Pure: no filesystem. `apps.toml` always wins, so an entry is dropped, with a
+    note naming it, when its key is Lab Hub's own tile or is taken, or when its
+    project is, holds or lies inside one already listed. Kept entries go after
+    the hand-written suites, launchable ones first (no-launch tiles come last).
+    """
+    keys = {app.key for app in base.suites + base.backup_sync
+            + base.utilities + base.tools_only} | set(RESERVED)
+    projects = [_clash_key(app.project) for app in base.suites + base.backup_sync
+                + base.utilities + base.tools_only]
+    projects += [_clash_key(name) for name in RESERVED]
+    kept: list[ExternalApp] = []
+    notes: list[str] = []
+    for app in local:
+        if app.key in RESERVED:
+            notes.append(f"{app.key} is Lab Hub's own tile and cannot be added.")
+            continue
+        if app.key in keys:
+            notes.append(f"{app.key} is already in apps.toml: the apps.toml entry is used.")
+            continue
+        mine = _clash_key(app.project)
+        if any(_overlap(mine, other) for other in projects):
+            notes.append(
+                f"{app.key} is already in apps.toml (project {app.project}): "
+                "the apps.toml entry is used."
+            )
+            continue
+        kept.append(app)
+        keys.add(app.key)
+    kept.sort(key=lambda app: not app.launchable)  # stable: file order otherwise
+    merged = Registry(
+        suites=base.suites + tuple(kept), backup_sync=base.backup_sync,
+        utilities=base.utilities, tools_only=base.tools_only, source=base.source,
+    )
+    return merged, tuple(notes)
+
+
+def _read_local() -> tuple[tuple[ExternalApp, ...] | None, str | None]:
+    """(entries, None) for the local file; ((), None) when it is absent, which
+    is not broken; (None, why) when it cannot be read or does not parse."""
+    path = local_path()
+    try:
+        with path.open("rb") as handle:
+            raw = handle.read(LOCAL_MAX_BYTES + 1)
+    except FileNotFoundError:
+        return (), None
+    except OSError as error:
+        return None, f"cannot read {path}: {error}"
+    if len(raw) > LOCAL_MAX_BYTES:
+        return None, f"{path} is over {LOCAL_MAX_BYTES // 1024} KiB"
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None, f"{path} is not UTF-8 text"
+    try:
+        return parse(text, path, local=True).suites, None
+    except RegistryError as error:
+        return None, f"{path}: {error}"
+
+
 _current: Registry | None = None
 last_error: str | None = None
+# The local source, kept apart from `last_error` (see the module docstring).
+# `local_ok` is False while the file cannot be read: discovery then suggests
+# nothing and refuses to write into a file it cannot parse. `_last_local` is
+# the last good local part, which a bad file leaves in force.
+local_note: str | None = None
+local_ok: bool = True
+_last_local: tuple[ExternalApp, ...] = ()
+
+
+def _with_local(found: Registry) -> Registry:
+    """`found` plus the local file, setting `local_note`, `local_ok`."""
+    global local_note, local_ok, _last_local
+    entries, why = _read_local()
+    notes: list[str] = []
+    if entries is None:
+        local_ok = False
+        notes.append(
+            f"Your added projects file was ignored: {(why or '').rstrip('.')}. "
+            "The list is as it was."
+        )
+    else:
+        local_ok, _last_local = True, entries
+    merged, clashes = merge_local(found, _last_local)
+    local_note = " ".join(notes + list(clashes)) or None
+    return merged
 
 
 def _read(lab_root: Path | None) -> Registry | None:
@@ -222,7 +408,7 @@ def _read(lab_root: Path | None) -> Registry | None:
             errors.append(str(error))
             continue
         last_error = "; ".join(errors) or None
-        return found
+        return _with_local(found)
     last_error = "; ".join(errors) or "no app list found"
     return None
 
@@ -255,8 +441,9 @@ def reload(lab_root: Path | None = None) -> bool:
 
 def use(registry: Registry | None) -> None:
     """Put a list in force directly — for tests; None re-reads on next use."""
-    global _current
+    global _current, local_note, local_ok, _last_local
     _current = registry
+    local_note, local_ok, _last_local = None, True, ()
 
 
 _ALIASES = {
