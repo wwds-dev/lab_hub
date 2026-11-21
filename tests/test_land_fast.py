@@ -152,6 +152,23 @@ def test_a_protected_conflict_costs_no_test_and_no_claude(tested, stub, tmp_path
     unchanged(tested, main0, feat0, tmp_path / "resolve")
 
 
+def test_the_merge_itself_still_stops_a_protected_conflict_the_precheck_missed(
+        tested, stub, tmp_path, monkeypatch):
+    """Spec land-blocker-actions §2.3, QA P3-6: the second guard, after the real
+    merge in the temporary worktree, holds on its own. Only the pre-check's
+    file list is replaced; git, the merge and its conflicts are real."""
+    base = tidy.tip(tested, "main")
+    branch_from_base(tested, "feat", base, {".claude/settings.json": '{"a": 1}\n'})
+    write(tested, ".claude/settings.json", '{"b": 2}\n')
+    main0, feat0 = tidy.tip(tested, "main"), tidy.tip(tested, "feat")
+    monkeypatch.setattr(cr, "conflicted_files", lambda *a: ["c.txt"])
+    out, _, _ = resolve(tested, stub, tmp_path, "feat")
+    assert not out.landed and claude_calls(tmp_path) == 0
+    assert cr.blocker_kind(out.message) == "protected"
+    assert ".claude/settings.json" in out.message
+    unchanged(tested, main0, feat0, tmp_path / "resolve")
+
+
 def test_a_foundry_file_conflict_takes_mains_copy_without_claude(tested, stub, tmp_path):
     base = tidy.tip(tested, "main")
     branch_from_base(tested, "feat", base, {".claude/commands/ship-feature.md": "branch\n",

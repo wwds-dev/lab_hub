@@ -88,8 +88,8 @@ Review `docs/audit/land-blocker-actions-review.md`, security
   Claude… needs Claude Code, so it cannot clear these.
 
 ## Evidence
-- Tests: `tests/test_land_blocker_actions.py` (37 tests, real git, real processes and
+- Tests: `tests/test_land_blocker_actions.py` (60 tests, real git, real processes and
   `lsof`, the real Land worker); old-wording assertions updated in `test_land.py`,
   `test_land_fast.py`, `test_land_confirm.py`, `test_land_network_preflight.py`.
-- Full suite and mutation results: see the Verify report
+- Full suite and mutation results: see the Verify report (its 21 real survivors killed by tests added after Verify, listed there)
   `docs/audit/land-blocker-actions-verify.md`.

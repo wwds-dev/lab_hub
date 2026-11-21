@@ -23,6 +23,7 @@ import pytest
 from lab_hub import claude_resolve as cr
 from lab_hub import handoff, land, land_resolve as lr, repo_tidy
 
+from .test_handoff_ui import fakes  # noqa: F401 (fixture)
 from .test_land import plan_for, run
 from .test_repo_tidy import OLD, commit, lab, make_branch, sh  # noqa: F401 (fixture)
 
@@ -295,12 +296,15 @@ def _worktree(lab, tmp_path, name="wt") -> Path:
     return wt
 
 
-def _spy_kill():
+def _spy_kill(forward: bool = True):
+    """A kill that records each signal. `forward=False` for the "never
+    signal" tests: a regression there must not SIGTERM a real pid (QA P3-7)."""
     sent = []
 
     def kill(pid, sig):
         sent.append((pid, sig))
-        os.kill(pid, sig)
+        if forward:
+            os.kill(pid, sig)
     return kill, sent
 
 
@@ -354,7 +358,7 @@ def test_close_it_never_signals_a_process_outside_the_checkout(lab, tmp_path, sp
     outside = spawn(away)
     nested = _worktree(lab, wt, "nest")  # a worktree inside wt: its own, not wt's
     inner = spawn(nested)
-    kill, sent = _spy_kill()
+    kill, sent = _spy_kill(forward=False)
     listed = (_listed(outside.pid), _listed(inner.pid))
     done = lr.close_processes(lab, wt, listed, kill=kill, wait=0.2)
     assert sent == [] and set(done.skipped) == set(listed)
@@ -365,7 +369,7 @@ def test_close_it_never_signals_a_process_outside_the_checkout(lab, tmp_path, sp
 def test_close_it_never_signals_lab_hub_or_a_renamed_pid(lab, tmp_path, spawn):
     wt = _worktree(lab, tmp_path)
     proc = spawn(wt)
-    kill, sent = _spy_kill()
+    kill, sent = _spy_kill(forward=False)
     own = f"python (pid {os.getpid()})"
     renamed = f"zsh (pid {proc.pid})"  # the pid now runs something else
     done = lr.close_processes(lab, wt, (own, renamed), kill=kill, wait=0.2)
@@ -378,7 +382,7 @@ def test_close_it_never_signals_lab_hub_or_a_renamed_pid(lab, tmp_path, spawn):
 
 def test_close_it_signals_nothing_when_lsof_cannot_tell(lab, tmp_path):
     wt = _worktree(lab, tmp_path)
-    kill, sent = _spy_kill()
+    kill, sent = _spy_kill(forward=False)
     done = lr.close_processes(lab, wt, ("zsh (pid 999999)",), kill=kill,
                               listing=lambda: None)
     assert sent == [] and done.unknown and not done.clear
@@ -688,7 +692,7 @@ def test_close_it_never_signals_a_process_in_a_separate_repo_inside_the_checkout
     main = next(t for t in trees if t.path.resolve() == lab.resolve())
     assert entry not in lr.processes_in(main, trees)
     assert entry in lr.processes_in(main, trees, nested=True)
-    kill, sent = _spy_kill()
+    kill, sent = _spy_kill(forward=False)
     done = lr.close_processes(lab, lab, (entry,), kill=kill, wait=0.2)
     assert sent == [] and done.skipped == (entry,) and proc.poll() is None
     (lab / "a.txt").write_text("open work")
@@ -751,3 +755,218 @@ def test_restating_after_close_it_keeps_the_repos_other_stops(qapp):
     assert window.handoff_goals["r"] == goal
     assert not window.rows[0].close_button.isHidden()
     window.deleteLater()
+
+
+# ------------------------------------------------- Verify gaps (QA report §6)
+def _two_row_window(tab, lab):
+    """A finished Land all window: `other` landed, `repo` (the second row)
+    stopped on the network with Try again."""
+    from ui.progress_window import LandWindow
+
+    other_plan, repo_plan = _plan("other", lab / "other"), _plan("repo", lab)
+    window = LandWindow(tab)
+    window.start([other_plan, repo_plan])
+    landed = land.LandResult("other", "landed")
+    down = land.LandResult("repo", "not_landed", land.NO_ORIGIN,
+                           stops=(lr.Stop("repo", str(lab), land.NO_ORIGIN),))
+    for result in (landed, down):
+        window.on_repo_done(result.name, result)
+    window.finish([landed, down])
+    tab.land_window = window
+    return window, other_plan, repo_plan
+
+
+def _model_row(window, name):
+    return next(r for r in window.model.rows if name in (r.key, r.name))
+
+
+def test_a_rerun_resets_only_its_own_row_and_the_window_counts_every_row(
+        qapp, tmp_path, lab, monkeypatch, no_claude):
+    """QA P2-1, P2-2: owner, P2-4 "1, re-run in the same window", while it runs."""
+    from ui import progress_window
+    from .test_land_ui import tab_for
+    from .test_hygiene import _drop
+
+    runs = []
+    monkeypatch.setattr(progress_window.durations, "record_run",
+                        lambda *a, **k: runs.append(a))
+    tab = tab_for(qapp, tmp_path, ["repo"], monkeypatch)
+    window, other_plan, repo_plan = _two_row_window(tab, lab)
+    assert len(runs) == 1 and not window.model.live
+    other_before = window.model.snapshot().rows[0]
+    old_units = _model_row(window, "repo").units
+    started = []
+    tab.lander.run = lambda plans: started.append(plans) or True  # nothing really lands
+    tab.confirm_land = lambda plans: list(plans)  # the real dialog returns the plans
+
+    tab._rerun_planned(window, repo_plan, lr.RETRY)
+    assert started == [[repo_plan]]
+    row = _model_row(window, "repo")
+    assert row.units is not old_units and row.units
+    assert all(u.state == "waiting" for u in row.units)
+    assert row.state == "waiting" and (row.reason, row.action) == ("", "")
+    assert window.model.live and window.model.outcome == ""
+    assert window.model.snapshot().rows[0] == other_before  # the other row is untouched
+    assert "repo" not in window.results and "other" in window.results
+    assert not window.stop_button.isHidden()
+
+    landed = land.LandResult("repo", "landed")
+    window.on_repo_done("repo", landed)
+    window.finish([landed])
+    assert window.model.outcome == "Landed 2 of 2 repos."
+    assert len(runs) == 1  # the re-run is not a second run in the history
+    window.deleteLater()
+    _drop(tab)
+
+
+def test_a_rerun_the_owner_leaves_out_of_the_confirm_does_not_land(
+        qapp, tmp_path, lab, monkeypatch, no_claude):
+    """QA P2-2: the confirm's answer is a list; without this repo it is a cancel."""
+    from .test_land_ui import tab_for
+    from .test_hygiene import _drop
+
+    tab = tab_for(qapp, tmp_path, ["repo"], monkeypatch)
+    window, other_plan, repo_plan = _two_row_window(tab, lab)
+    started = []
+    tab.lander.run = lambda plans: started.append(plans) or True
+    for answer in ([other_plan], []):
+        tab.confirm_land = lambda plans, answer=answer: answer
+        tab._rerun_planned(window, repo_plan, lr.RETRY)
+        assert started == []
+        assert _model_row(window, "repo").reason.startswith(
+            "cleared, but the Land was cancelled")
+    window.deleteLater()
+    _drop(tab)
+
+
+def test_the_close_it_confirm_shows_each_process_folder_and_never_lab_hub(
+        qapp, tmp_path, lab, monkeypatch, no_claude):
+    """QA P2-3, review P1-2: each process with its own folder; Cancel is the default."""
+    from PySide6.QtWidgets import QMessageBox
+    from .test_land_ui import tab_for
+    from .test_hygiene import _drop
+
+    wt = tmp_path / "wt"
+    inner = wt / "website"
+    mine = f"python (pid {os.getpid()})"
+    monkeypatch.setattr(lr, "cwd_listing", lambda: [("node", "4242", inner),
+                                                    ("python", str(os.getpid()), wt)])
+    shown = []
+
+    def exec_(box):
+        cancel = box.defaultButton()
+        shown.append((box.text(), box.informativeText(),
+                      box.standardButton(cancel) == QMessageBox.StandardButton.Cancel))
+        return 0
+    monkeypatch.setattr(QMessageBox, "exec", exec_)
+    tab = tab_for(qapp, tmp_path, ["repo"], monkeypatch)
+    stop = lr.Stop("repo", str(wt), "busy", ("node (pid 4242)", mine))
+    assert tab.confirm_close("repo", lab, (stop,), None) is False  # nothing clicked
+    [(text, info, cancel_default)] = shown
+    assert text == "Close 1 process running in repo?" and cancel_default
+    assert f"node (pid 4242)  in  {inner}  (" in info
+    assert f"pid {os.getpid()}" not in info
+    assert "SIGTERM, never a forced kill" in info and "zsh" in info
+    only_me = lr.Stop("repo", str(wt), "busy", (mine,))
+    assert tab.confirm_close("repo", lab, (only_me,), None) is False and len(shown) == 1
+    _drop(tab)
+
+
+def test_ask_claude_from_the_land_window_carries_the_protected_goal(
+        qapp, tmp_path, lab, monkeypatch, fakes):
+    """QA P2-4: §3.4 end to end, from the Land window's Ask Claude…."""
+    from ui.progress_window import LandWindow
+    from .test_land_ui import tab_for
+    from .test_hygiene import _drop
+
+    tab = tab_for(qapp, tmp_path, [], monkeypatch)
+    seen = []
+    tab.confirm_handoff = lambda items, unplaced, parent: seen.append(items) or []
+    window = LandWindow()
+    window.start([_plan("repo", lab)])
+    stop = lr.Stop("repo", "feat", lr.PROTECTED_STOP, files=(".claude/settings.json",),
+                   base="main")
+    result = land.LandResult("repo", "not_landed", stop.reason, stops=(stop,))
+    window.on_repo_done("repo", result)
+    window.finish([result])
+    tab.ask_claude(window)
+    [[(_h, _ctx, text)]] = seen
+    asks = text.index("What Lab Hub asks for")
+    assert text.index("```") < asks  # after the data fence
+    assert "Land branch `feat` onto `main`" in text[asks:]
+    assert "`.claude/settings.json`" in text[asks:]
+    window.close()
+    _drop(tab)
+
+
+def test_a_rows_button_while_land_runs_says_not_now_and_a_held_row_forgets_the_rerun(
+        qapp, tmp_path, lab, monkeypatch, no_claude):
+    """QA P3-4."""
+    from PySide6.QtWidgets import QMessageBox
+    from .test_land_ui import tab_for
+    from .test_hygiene import _drop
+
+    shown = []
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: shown.append(a[2]))
+    tab = tab_for(qapp, tmp_path, ["repo"], monkeypatch)
+    window, _other, _repo = _two_row_window(tab, lab)
+    cleared = []
+    tab.lander.clear = lambda *a: cleared.append(a) or True
+    tab.lander._thread = object()  # Land is still running
+    try:
+        tab.clear_land_row("repo", lr.RETRY)
+    finally:
+        tab.lander._thread = None
+    assert cleared == [] and tab._rerun_name == ""
+    assert shown and shown[0].startswith("Not now: Land is still running")
+    tab.clear_land_row("repo", lr.RETRY)
+    assert len(cleared) == 1 and tab._rerun_name == "repo"
+    tab._land_held("repo", land.LandResult("repo", "not_landed", land.NO_ORIGIN,
+                                           stops=(lr.Stop("repo", str(lab), land.NO_ORIGIN),)))
+    assert tab._rerun_name == ""  # a later Land of this repo is not a re-run
+    window.deleteLater()
+    _drop(tab)
+
+
+def test_close_it_never_signals_lab_hubs_parent(lab, tmp_path):
+    """QA P3-1, security P3-2."""
+    wt = _worktree(lab, tmp_path)
+    parent = os.getppid()
+    kill, sent = _spy_kill(forward=False)
+    entry = f"zsh (pid {parent})"
+    done = lr.close_processes(lab, wt, (entry,), kill=kill, wait=0.2,
+                              listing=lambda: [("zsh", str(parent), wt)])
+    assert sent == [] and done.skipped == (entry,) and done.left == ()
+
+
+def test_a_process_gone_before_the_signal_is_not_logged_as_closed(lab, tmp_path):
+    """QA P3-2, review P3-3."""
+    wt = _worktree(lab, tmp_path)
+    entry = "node (pid 424242)"
+
+    def gone(pid, sig):
+        raise ProcessLookupError(pid)
+    readings = [[("node", "424242", wt)], [("zsh", "424243", tmp_path / "elsewhere")]]
+    log = tmp_path / "land.log"
+    done = lr.close_processes(lab, wt, (entry,), log=log, kill=gone, wait=0.2,
+                              listing=lambda: readings.pop(0))
+    assert done.clear and done.closed == () and done.ignored == ()
+    assert not log.exists() or "owner closed" not in log.read_text()
+
+
+def test_clearing_reads_only_the_ending_not_an_action_quoted_inside():
+    """QA P3-3, security P3-3: a branch name cannot pick the button."""
+    assert lr.clearing(f"branch `x {lr.CLOSE_IT}` failed: {lr.ASK_CLAUDE}") == lr.ASK
+    assert lr.clearing(f"git said: {lr.TRY_AGAIN} later, no") == lr.ASK
+    assert lr.clearing(f"{lr.TRY_AGAIN} — the step failed") == lr.ASK
+
+
+def test_goal_names_and_file_lists_are_capped_and_a_stop_without_files_still_has_a_goal():
+    """QA P3-5."""
+    long = handoff._name("b" * 300)
+    assert len(long) == handoff._NAME_MAX and long.endswith("…")
+    files = tuple(f".claude/f{i:02}.json" for i in range(12))
+    [goal] = handoff.blocker_goals((lr.Stop("r", "feat", lr.PROTECTED_STOP, files=files),))
+    assert "`.claude/f09.json`" in goal and "f10" not in goal and "and 2 more" in goal
+    [bare] = handoff.blocker_goals((lr.Stop("r", "feat", lr.PROTECTED_STOP),))
+    assert "resolve the conflicts in the conflicted .claude/ files with the owner" in bare

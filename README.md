@@ -361,7 +361,7 @@ the other rows and Ask Claude… stay. Cancel that confirmation and the row read
   process with its pid and folder. Lab Hub sends each a polite quit (SIGTERM,
   never a forced kill), only to a pid a fresh `lsof` still shows with the same
   name in that checkout (never one in a worktree nested in it, never Lab Hub
-  itself), waits up to 5 seconds and checks again. Closed ones are logged as
+  itself or what started it), waits up to 5 seconds and checks again. Closed ones are logged as
   "owner closed: zsh (pid N) in <folder>"; one that will not quit stays on the
   row with Close it…; then the repo is planned and confirmed as any Land is.
   An interactive shell such as zsh ignores that request: it stays on the row,

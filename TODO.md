@@ -562,6 +562,9 @@ From `docs/audit/2026-11-18-readiness-audit.md`. Items already in this file (fol
   - Code: `lab_hub/land_resolve.py` (`STOP_ACTIONS`, `clearing`, `close_processes`), `land.py`, `claude_resolve.py`, `handoff.py` (`blocker_goals`), `progress.py`, `ui/progress_window.py`, `ui/lander.py`, `ui/apps_tab.py`; tests `tests/test_land_blocker_actions.py`.
   - Not done: owner merge and rebuild; one owner-watched Ask Claude run on syndustryx's `.claude/settings.json` conflict (spec §2.2), ending in "Landed" or a different, named stop.
 - [ ] `P3` `bug` `@ai` "land it by hand (Review branches → Open in Terminal)" is still the skip reason when Claude Code is missing or a repo has no test command (`repo_tidy._claude_blocker`). Not a Land stop; Ask Claude… cannot help without Claude Code either.
+- [ ] `P3` `test` `@ai` The §2.1 check scans only for banned words: a raw git or gitleaks error passed through `plain_reason` ends in no clearing sentence and relies on the Ask Claude… footer (QA `docs/audit/land-blocker-actions-verify.md` P3-8).
+- [ ] `P3` `process` `@owner` `app-context.md` `## Commands` and `## Test bar` are still placeholders, and the venv has no coverage, `pytest-timeout` or `pytest-randomly`: branch coverage, random order and timeouts are not verified (QA P3-9).
+- [ ] `P3` `test` `@ai` `test_land_resolve.py::test_a_file_that_appears_after_the_preview_is_not_committed_and_land_says_not_landed` fails with a long pytest temp path: the reason is cut at 180 characters before "untracked" (QA P3-10; pre-existing, commit `3cd5dd7`).
 
 ## Out of scope, deliberately
 
