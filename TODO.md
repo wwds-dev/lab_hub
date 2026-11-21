@@ -555,6 +555,16 @@ From `docs/audit/2026-11-18-readiness-audit.md`. Items already in this file (fol
 - [ ] `P3` `design` `@me` Offline, a repo whose only work is local cleanup (delete landed branches, quarantine an untracked file) is now stopped by the preflight, as a merge is. Decide: stop it too (as built), or skip the check when the plan has no merge or push. Spec `land-network-preflight` §3, review P3-3.
 - [ ] `P3` `design` `@ai` Every `ls-remote` failure gets "cannot reach origin (no network?)", so a dead or renamed `origin` blocks Land with no override. Tell a missing remote apart from a network drop, or point to the Land log. Review P3-4.
 
+## apps-discovery — review follow-ups (2026-11-21)
+
+From `docs/audit/apps-discovery-review-core.md` and `-ui.md`; the P2s and the listed P3s were fixed (see `git log`). Left, none blocking:
+
+- [ ] `P3` `bug` `@ai` README titles: `# C#` reads as "C" (`discovery._heading` `rstrip("#")`); markdown, quotes and bullets are shown raw in the summary (core P3-1, P3-2).
+- [ ] `P3` `bug` `@ai` Two tiles can still carry one name (`merge_local` has no name rule); a hand-written local entry with a `build` command and an installed app's name would trash that app on Update now (core P2-2, residual; `add` never writes `build`).
+- [ ] `P3` `design` `@me` Wording the owner has not approved or that overlaps: " · behind" with no count, and the behind fact said twice on Lab Hub's tile; "A newer build is ready to install" for a held row; Lab Hub's tile has no name tooltip (UI P3-5).
+- [ ] `P3` `bug` `@ai` Show again: put the folder name in the row's tooltip (two READMEs with one heading look identical) and say so when a rescan will not suggest it (UI P3-4).
+- [ ] `P3` `testing` `@ai` No test for `aboutToQuit.connect(self._own_verdict.shutdown)`; a double-click on "Add to Apps" is Verify's to try on the Mac (UI P3-6, Not verified).
+
 ## Out of scope, deliberately
 
 Lab Hub does not replace the projects it launches. Each keeps its own repo, README, venv and build script. Changing what Sentinel AI does still means changing Sentinel AI.
