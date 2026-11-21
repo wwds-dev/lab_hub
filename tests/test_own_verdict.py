@@ -178,3 +178,81 @@ def test_after_shutdown_nothing_runs_and_nothing_is_signalled(qapp, monkeypatch,
     other._thread.join(5)
     other._drain()
     assert late == []
+
+
+def test_a_run_that_ends_in_something_other_than_an_exception_still_delivers_a_result(
+        qapp, monkeypatch, tmp_path):
+    def stops(lab_root, **kwargs):
+        raise SystemExit  # not an Exception: `except Exception` does not see it
+
+    monkeypatch.setattr(threading, "excepthook", lambda args: None)  # keep the noise out
+    monkeypatch.setattr(self_update, "self_status", stops)
+    verdict = OwnVerdict()
+    got = []
+    verdict.ready.connect(got.append)
+
+    verdict.request(tmp_path)
+    _wait(verdict)
+
+    assert got[0].row is None and got[0].error
+    assert not verdict.busy, "not left waiting for a result that never comes"
+    monkeypatch.setattr(self_update, "self_status", lambda root, **kw: _row("again"))
+    verdict.request(tmp_path)
+    _wait(verdict)
+    assert got[1].row.note == "again"
+    verdict.shutdown()
+
+
+def test_a_thread_that_cannot_start_leaves_it_idle_and_says_why(qapp, monkeypatch, tmp_path):
+    verdict = OwnVerdict()
+    got = []
+    verdict.ready.connect(got.append)
+
+    with monkeypatch.context() as patch:
+        def refuse(self):
+            raise RuntimeError("can't start new thread")
+
+        patch.setattr(threading.Thread, "start", refuse)
+        verdict.request(tmp_path)  # must not raise into the page
+
+    assert not verdict.busy and not verdict._timer.isActive()
+    assert got[0].row is None and "can't start new thread" in got[0].error
+    monkeypatch.setattr(self_update, "self_status", lambda root, **kw: _row("later"))
+    verdict.request(tmp_path)  # the next request is not blocked by the failed one
+    _wait(verdict)
+    assert got[1].row.note == "later"
+    verdict.shutdown()
+
+
+def test_shutdown_stops_the_timer_even_with_a_run_in_flight(qapp, monkeypatch, tmp_path):
+    gate = _Gate()
+    monkeypatch.setattr(self_update, "self_status", gate)
+    verdict = OwnVerdict()
+    verdict.request(tmp_path)
+    assert gate.started.wait(5)
+    assert verdict._timer.isActive()
+
+    verdict.shutdown()
+
+    assert not verdict._timer.isActive()
+    gate.release.set()
+    verdict._thread.join(5)
+
+
+def test_the_real_timer_delivers_the_result_without_a_manual_drain(qapp, monkeypatch, tmp_path):
+    from PySide6.QtTest import QTest
+
+    monkeypatch.setattr(self_update, "self_status", lambda root, **kw: _row("by the timer"))
+    verdict = OwnVerdict()
+    got = []
+    verdict.ready.connect(got.append)
+
+    verdict.request(tmp_path)
+    for _ in range(60):  # up to 3 s: the timer fires every 100 ms
+        if got:
+            break
+        QTest.qWait(50)
+
+    assert [r.row.note for r in got] == ["by the timer"]
+    assert not verdict._timer.isActive(), "idle again once the answer is in"
+    verdict.shutdown()

@@ -268,3 +268,29 @@ def test_discard_widget_takes_it_out_of_the_layout(qapp):
 
     assert layout.count() == 0 and child.isHidden()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+def test_a_discarded_row_stays_alive_until_qt_has_deleted_it(qapp):
+    """The row may be the one whose button is mid-click: dropping the last
+    Python reference there would delete the button under its own signal. (With
+    this PySide, `deleteLater` alone also keeps the wrapper until the object is
+    destroyed, so removing `_DISCARDED` cannot fail this: it pins the behaviour,
+    not the mechanism.)"""
+    import gc
+    import weakref
+
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    row = QWidget()
+    QVBoxLayout(row).addWidget(QLabel("x"))
+    layout.addWidget(row)
+    alive = weakref.ref(row)
+
+    discard_widget(layout, row)
+    del row
+    gc.collect()
+
+    assert alive() is not None, "nothing but the keep-alive holds it now"
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    gc.collect()
+    assert alive() is None, "and it is let go once Qt has really deleted it"

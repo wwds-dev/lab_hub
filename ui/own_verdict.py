@@ -69,18 +69,29 @@ class OwnVerdict(QObject):
 
     # -- worker side --------------------------------------------------------
     def _start(self, lab_root: Path) -> None:
-        self._thread = threading.Thread(
+        thread = threading.Thread(
             target=self._work, args=(lab_root,), daemon=True, name="lab-hub-own-verdict"
         )
+        try:
+            thread.start()
+        except RuntimeError as exc:  # no thread could be made: stay idle, say why
+            self.ready.emit(OwnResult(error=str(exc) or type(exc).__name__))
+            return
+        # After a start that worked, so a failed one never leaves it "busy". The
+        # worker only puts on the queue; `_drain` runs on this thread, later.
+        self._thread = thread
         self._timer.start()
-        self._thread.start()
 
     def _work(self, lab_root: Path) -> None:
+        result = OwnResult(error="the check stopped before it finished")
         try:
             result = OwnResult(row=self_update.self_status(lab_root))
         except Exception as exc:  # noqa: BLE001 - the tile shows version only, whatever went wrong
             result = OwnResult(error=str(exc) or type(exc).__name__)
-        self._events.put(result)
+        finally:
+            # Whatever ended the run, the page gets an answer and is not left
+            # "busy" for ever.
+            self._events.put(result)
 
     # -- UI side ------------------------------------------------------------
     def _drain(self) -> None:

@@ -10,11 +10,12 @@ from ui import theme
 
 
 @pytest.fixture
-def restore_theme(qapp):
-    """Theme state is application-wide; put it back for the next test."""
-    before = theme.mode()
-    yield qapp
-    theme.apply(qapp, mode=before)
+def restore_theme(pristine_theme):
+    """Theme state is application-wide; put it back for the next test, the
+    stylesheet, palette and style too (`pristine_theme`, tests/conftest.py):
+    restoring only the mode left every later test in a styled app, and
+    tests/test_land_confirm.py's screen-height check fails after this file."""
+    return pristine_theme
 
 
 def _window_colour(app) -> str:
