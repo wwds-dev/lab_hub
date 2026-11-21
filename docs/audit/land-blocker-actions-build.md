@@ -54,6 +54,36 @@ all three §6 recommendations). Built 2026-11-21 by an `engineer` session on bra
    branches → Open in Terminal)" is a skip reason when Claude Code is missing, not a Land
    stop; Ask Claude… cannot help there either.
 
+## Signal boundary (in place of an Architect pass; review asked for a note)
+Who Lab Hub may signal, and how, after the owner confirms Close it…:
+- Only a `cmd (pid N)` the confirm listed, and only when a fresh `lsof` reading shows that
+  pid with the same name, its current folder in this worktree, not in a worktree nested in
+  it and not below a separate `.git` (a nested repo).
+- Never Lab Hub's own pid, its parent, pid 0 or 1. Never a process group (pids are parsed
+  as positive decimals). Only SIGTERM, plus `kill(pid, 0)` to see whether it is gone.
+- Owner, 2026-11-21, on SIGTERM being ignored by an interactive zsh: "Option 1, accept it".
+  No SIGKILL, no SIGHUP: that process stays on the row, named, and the owner closes its window.
+- A residual pid-reuse window between the fresh `lsof` and `kill` remains (accepted,
+  security P3-5).
+
+## Fixes after Review and Secure
+Review `docs/audit/land-blocker-actions-review.md`, security
+`docs/audit/land-blocker-actions-security.md`.
+- Review P1-1 (zsh ignores SIGTERM): owner decision above; the texts say so.
+- Review P1-2 / security P2-1 (nested repo): fixed, `land_resolve.in_nested_repo`; the
+  confirm shows each process's own folder.
+- P2-1 (cut): `plain_reason` keeps a trailing ": press …" or ", or press …".
+- P2-2: link stops end "press Ask Claude… to remove the link from <where>"; the gitleaks
+  push stop ends "press Ask Claude… to remove it from those commits".
+- P2-3: `LandWindow.restate` keeps the repo's other stops and their Ask Claude goals.
+- P2-4: owner decision asked (see TODO / this file once answered).
+- P3-2, P3-4, P3-5, P3-6, P3-7 (the `if stops:` test): fixed. P3-3: "gone already" is no
+  longer logged as closed; a zombie child still makes Close it… wait the full 5 s (not
+  reaped, so a child Lab Hub runs keeps its exit status). P3-1: see P2-4.
+- P3-8, accepted exceptions: "install or sign in to Claude Code, then Land again" and
+  "Claude Code could not decide (…): Land again, or decide in Review branches": Ask
+  Claude… needs Claude Code, so it cannot clear these.
+
 ## Evidence
 - Tests: `tests/test_land_blocker_actions.py` (37 tests, real git, real processes and
   `lsof`, the real Land worker); old-wording assertions updated in `test_land.py`,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import os
 import subprocess
 import time
 from dataclasses import replace
@@ -616,6 +617,7 @@ class AppsTab(TilePage):
         # Cards Land was asked on, by repo name, held from the click: a hygiene
         # refresh or a rebuilt tile mid-Land must not lose the outcome.
         self._landing_cards: dict[str, AppCard] = {}
+        self._clearing: dict[str, str] = {}  # repo -> the row button now running for it
         # What is running in this process that a restart would end. The main
         # window replaces this with one that looks at every page and tool.
         self.busy_reasons: Callable[[], list[str]] = self._own_busy_reasons
@@ -1209,6 +1211,7 @@ class AppsTab(TilePage):
     def _land_planned(self, plans) -> None:
         if self.land_window is not None:
             self.land_window.set_clearing("")  # a row's button led here, or nothing did
+        self._clearing.clear()
         try:
             answer = True if all(p.nothing for p in plans) else self.confirm_land(plans)
         except Exception:  # noqa: BLE001 - never leave the tiles on "Looking…"
@@ -1275,6 +1278,7 @@ class AppsTab(TilePage):
                 return
         if not self.lander.clear(name, Path(path), action, stops):
             return
+        self._clearing[name] = action
         what = ("Closing the processes, then looking at the repo…" if stops
                 else "Checking that origin answers…")
         window.set_clearing(f"{name}: {what}")
@@ -1285,10 +1289,15 @@ class AppsTab(TilePage):
         self._update_land_controls()
 
     def confirm_close(self, name: str, repo: Path, stops, parent) -> bool:
-        """The one confirm for Close it…: every process and its folder (tests
-        replace this)."""
-        lines = [f"{p}  in  {land.stop_view(s, repo).place} ({s.target})"
-                 for s in stops for p in s.processes]
+        """The one confirm for Close it…: every process and its own folder, as
+        lsof sees it now (tests replace this)."""
+        listing = land_resolve.cwd_listing() or []
+        where = {f"{cmd} (pid {pid})": cwd for cmd, pid, cwd in listing}
+        mine = f" (pid {os.getpid()})"
+        lines = [f"{p}  in  {where.get(p, s.target)}  ({land.stop_view(s, repo).place})"
+                 for s in stops for p in s.processes if not p.endswith(mine)]
+        if not lines:
+            return False
         box = QMessageBox(parent)
         box.setWindowTitle("Close processes")
         box.setIcon(QMessageBox.Icon.Warning)
@@ -1298,7 +1307,10 @@ class AppsTab(TilePage):
         box.setInformativeText(
             "\n".join(lines) + "\n\nLab Hub asks each one to quit (SIGTERM, never a forced "
             "kill) and waits up to 5 seconds. Unsaved work in a terminal or editor there can "
-            "be lost. Then Land looks at the repo again and asks you before it runs.")
+            "be lost. A process that ignores the request stays open and stays on the row, "
+            "named: an interactive shell such as zsh does. Close its Terminal window, then "
+            "press Close it… again. When nothing is left, Land looks at the repo again and "
+            "asks you before it runs.")
         close = box.addButton("Close them", QMessageBox.ButtonRole.DestructiveRole)
         cancel = box.addButton(QMessageBox.StandardButton.Cancel)
         box.setDefaultButton(cancel)
@@ -1312,7 +1324,7 @@ class AppsTab(TilePage):
             card.show_outcome(result)
         self._landing_cards.pop(name, None)
         if self.land_window is not None:
-            self.land_window.restate(name, result)
+            self.land_window.restate(name, result, self._clearing.pop(name, ""))
         self._update_land_controls()
 
     def _run_window(self) -> LandWindow | None:

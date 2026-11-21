@@ -1108,7 +1108,7 @@ def apply(action: Action, log: Path | None = None,
             if error or found:
                 why = error or ("gitleaks found a secret in the commits to push: "
                                 + "; ".join(found[:3])
-                                + "; remove it from those commits, then Land again")
+                                + ": press Ask Claude… to remove it from those commits")
                 _log(f"NOT PUSHED {action.target} in {repo}: {why}", log)
                 return False, f"not pushed — {why}"
         rc, _, err = git(repo, "push", "--quiet", "--no-follow-tags", "origin",

@@ -19,6 +19,7 @@ stripped (`progress.plain`).
 
 from __future__ import annotations
 
+import dataclasses
 import html
 import time
 from datetime import datetime
@@ -42,7 +43,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from lab_hub import durations, handoff, progress
+from lab_hub import durations, handoff, land_resolve, progress
 
 from . import theme
 
@@ -845,10 +846,17 @@ class LandWindow(QWidget, _Run):
         elif old and self.handoff_note.text() == old:
             self.handoff_note.hide()
 
-    def restate(self, name: str, result) -> None:
-        """The button ran and the stop is still there: the row says why now."""
+    def restate(self, name: str, result, action: str = "") -> None:
+        """The button ran and the stop is still there: the row says why now.
+        The repo's other stops stay, with their Ask Claude goals (review P2-3):
+        only the stops `action` was pressed for are replaced by `result`'s."""
         if self.model is None:
             return
+        old = self.results.get(progress.plain(name))
+        if old is not None and action:
+            kept = tuple(s for s in getattr(old, "stops", ())
+                         if land_resolve.clearing(s.reason) != action)
+            result = dataclasses.replace(result, stops=tuple(result.stops) + kept)
         self.results[progress.plain(name)] = result
         self.handoff_goals[progress.plain(name)] = handoff.blocker_goals(
             getattr(result, "stops", ()))

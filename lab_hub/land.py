@@ -49,6 +49,8 @@ NO_ORIGIN = no_origin()
 def network_cause(err: str) -> str:
     """What failed, from git's own error: the proxy, the name lookup, or a port."""
     low = (err or "").lower()
+    if land_resolve.refused(low):
+        return "origin refused access"
     if "proxy" in low:
         return "the proxy does not answer"
     if "could not resolve" in low:
@@ -89,8 +91,10 @@ def plain_reason(message: str) -> str:
         first = f"{first.rstrip(' .:')}: {error}"
     first = re.sub(r"\s+", " ", first)
     if len(first) > MAX_REASON:
-        # A cut never hides what clears the stop (spec land-blocker-actions §2.1).
-        tail = next((": " + a for a in land_resolve.STOP_ACTIONS if first.endswith(": " + a)), "")
+        # A cut never hides what clears the stop (spec land-blocker-actions §2.1):
+        # it keeps ": press …" or ", or press …" at the end, and cuts before it.
+        at = max(first.rfind(": press "), first.rfind(", or press "))
+        tail = first[at:] if at > 0 and len(first) - at <= 100 else ""
         keep = MAX_REASON - 1 - len(tail)
         first = first[: keep].rstrip() + "…" + tail
     return first
@@ -112,6 +116,9 @@ def preflight(plan: LandPlan, log: Path | None = None) -> str:
     if rc == 0:
         return ""
     repo_tidy._log(f"{plan.name}: git {' '.join(args)}: {err or 'failed'}", log)
+    if land_resolve.refused(err):  # not the network: Try again cannot clear it (review P3-5)
+        return ("origin refused access (a sign-in, key or repo name problem), so no merge "
+                f"or test was started: {land_resolve.ASK_CLAUDE}")
     return no_origin(network_cause(err))
 
 
@@ -304,6 +311,11 @@ class LandPlan:
         if self.skipped:
             lines += ["", "Left alone:"] + [s.label for s in self.skipped]
         return "\n".join(lines)
+
+
+def _names(names: list[str], limit: int = 3) -> str:
+    more = f" and {len(names) - limit} more" if len(names) > limit else ""
+    return ", ".join(names[:limit]) + more
 
 
 def _usd(amount: float) -> str:
@@ -742,7 +754,7 @@ class _Run:
             self.blocker_stops.insert(0, land_resolve.Stop(
                 plan.name, default,
                 f"{default}'s own tests fail in a clean copy ({detail}waiting: "
-                f"{', '.join(sorted(branches))}): {land_resolve.BASE_ACTION}", base=default))
+                f"{_names(sorted(branches))}): {land_resolve.BASE_ACTION}", base=default))
         self.stops = self.blocker_stops + self.stops
 
     def triage(self) -> None:

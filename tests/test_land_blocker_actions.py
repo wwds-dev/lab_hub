@@ -144,10 +144,11 @@ def test_the_busy_paused_and_settling_stops_on_a_real_repo(lab, tmp_path):
 
 def test_no_default_branch_and_no_checkout_point_at_ask_claude(lab, tmp_path):
     sh(lab, "remote", "set-head", "origin", "-d")
+    sh(lab, "update-ref", "-d", "refs/remotes/origin/main")
     sh(lab, "branch", "-m", "main", "trunk")
+    assert repo_tidy.default_branch(lab) is None
     _, stops = lr.prep("repo", lab, ())
-    if stops:  # git may still guess the default branch
-        assert stops[0].reason.endswith(": " + lr.ASK_CLAUDE)
+    assert stops and stops[0].reason.endswith(": " + lr.ASK_CLAUDE)
     plan = land.make_plan("gone", tmp_path / "nothing-here", claude=None, busy=(), now=OLD)
     assert plan.stops[0].reason.endswith(": " + lr.ASK_CLAUDE)
     assert not _banned(plan.stops[0].reason)
@@ -550,3 +551,130 @@ def test_close_it_on_the_land_window_confirms_then_closes_then_asks_to_land(
     assert proc.wait(5) == -signal.SIGTERM
     assert pump(lambda: not tab.lander.busy)
     _drop(tab)
+
+
+# ------------------------------------------------------------ review fixes
+def test_a_long_or_press_reason_keeps_its_action():
+    """Review P2-1: settling and link reasons end ", or press Ask Claude…"."""
+    settling = lr.for_land(f"{'deep/' * 30}x.txt changed 2 minutes ago: a session may still "
+                           "be working here. Try again in 13 minutes, or commit it yourself")
+    short = land.plain_reason(settling)
+    assert len(short) == land.MAX_REASON and short.endswith("…, or press Ask Claude…")
+    link = "it adds a link at " + "p/" * 80 + ": press Ask Claude… to remove the link from main"
+    assert land.plain_reason(link).endswith("…: press Ask Claude… to remove the link from main")
+
+
+def test_the_red_main_stop_names_at_most_three_waiting_branches(lab, tmp_path):
+    for name in ("a", "b", "c", "d", "e"):
+        make_branch(lab, name, f"w{name}.txt")
+    plan = plan_for(lab)
+    r = land._Run(plan, lambda _l: None, None, tmp_path / "land.log", (), OLD)
+    message = cr.base_fail_reason("main", "fail", "E   ImportError: x")
+    for name in ("a", "b", "c", "d", "e"):
+        r.blocked[(name, repo_tidy.tip(lab, name))] = ("base", "main", message)
+    r.blockers()
+    assert "waiting: a, b, c and 2 more): press Ask Claude… to fix them" in r.stops[0].reason
+
+
+@pytest.mark.parametrize("err", [
+    "git@github.com: Permission denied (publickey).",
+    "remote: Repository not found.\nfatal: repository 'https://github.com/a/b/' not found",
+    "fatal: Authentication failed for 'https://github.com/a/b/'",
+])
+def test_a_refused_origin_is_not_a_network_stop(lab, tmp_path, monkeypatch, err):
+    """Review P3-5: Try again cannot clear a sign-in or repo-name problem."""
+    real = repo_tidy.git
+
+    def refuse(repo, *args, **kw):
+        if args and args[0] == "ls-remote":
+            return 128, "", err
+        return real(repo, *args, **kw)
+
+    monkeypatch.setattr(repo_tidy, "git", refuse)
+    why = land.preflight(land.LandPlan("repo", lab))
+    assert why.startswith("origin refused access") and why.endswith(": " + lr.ASK_CLAUDE)
+    assert lr.clearing(why) == lr.ASK
+    assert lr.clearing(f"could not fetch: {err}") == lr.ASK
+
+
+def test_the_label_shows_branch_chosen_file_names_safely():
+    stop = lr.Stop("r", "feat", lr.PROTECTED_STOP, files=(".claude/a\nFAKE LINE\u202e.json",))
+    assert "\n" not in stop.label and "\u202e" not in stop.label
+
+
+@pytest.mark.skipif(lr.cwd_listing() is None, reason="needs lsof")
+def test_close_it_never_signals_a_process_in_a_separate_repo_inside_the_checkout(
+        lab, tmp_path, spawn):
+    """Review P1-2, security P2-1: shopfront/website is its own repo."""
+    inner = lab / "website"
+    inner.mkdir()
+    subprocess.run(["git", "init", "-q", str(inner)], check=True)
+    proc = spawn(inner)
+    entry = _listed(proc.pid)
+    trees = repo_tidy.worktrees(lab)
+    main = next(t for t in trees if t.path.resolve() == lab.resolve())
+    assert entry not in lr.processes_in(main, trees)
+    assert entry in lr.processes_in(main, trees, nested=True)
+    kill, sent = _spy_kill()
+    done = lr.close_processes(lab, lab, (entry,), kill=kill, wait=0.2)
+    assert sent == [] and done.skipped == (entry,) and proc.poll() is None
+    (lab / "a.txt").write_text("open work")
+    reason, who = lr._worktree_stop_full(lab, main, (inner,), lr.cwd_listing)
+    assert reason.startswith("a process is running in a separate repo inside it (")
+    assert reason.endswith(": " + lr.ASK_CLAUDE) and who == ()
+
+
+@pytest.mark.skipif(lr.cwd_listing() is None, reason="needs lsof")
+def test_one_that_ignores_close_it_is_named_and_the_owner_closes_its_window(
+        lab, tmp_path, spawn):
+    """Owner, 2026-11-21: "Option 1, accept it": SIGTERM only, it stays on the row."""
+    wt = _worktree(lab, tmp_path)
+    proc = spawn(wt, ignore_term=True)
+    entry = _listed(proc.pid)
+    done = lr.close_processes(lab, wt, (entry,), log=tmp_path / "land.log", wait=0.3)
+    assert done.ignored == (entry,) and proc.poll() is None
+    assert "it ignored the request to quit, as an interactive shell such as zsh does; " \
+        "close its window" in done.reason
+    assert done.reason.endswith(": " + lr.CLOSE_IT)
+    assert f"owner asked to close, still running: {entry}" in (tmp_path / "land.log").read_text()
+
+
+@pytest.mark.skipif(lr.cwd_listing() is None, reason="needs lsof")
+def test_one_started_after_the_confirm_is_running_not_ignored(lab, tmp_path, spawn):
+    """Review P3-4: never signalled, so not "still running after Close it…"."""
+    wt = _worktree(lab, tmp_path)
+    proc = spawn(wt)
+    done = lr.close_processes(lab, wt, (), wait=0.2)
+    assert done.ignored == () and _listed(proc.pid) in done.left
+    assert done.reason.startswith("a process is running in it (")
+
+
+def test_an_empty_lsof_reading_after_the_signal_is_not_all_closed(lab, tmp_path, spawn):
+    """Review P3-2."""
+    wt = _worktree(lab, tmp_path)
+    proc = spawn(wt)
+    readings = [[("x", str(proc.pid), wt)], []]
+    done = lr.close_processes(lab, wt, (f"x (pid {proc.pid})",), wait=2,
+                              listing=lambda: readings.pop(0))
+    assert done.unknown and not done.clear and done.closed == ()
+
+
+def test_restating_after_close_it_keeps_the_repos_other_stops(qapp):
+    """Review P2-3: the protected-conflict goal stays in Ask Claude's prompt."""
+    busy = lr.Stop("r", "/w", f"a process is running in it (zsh (pid 4)): {lr.CLOSE_IT}",
+                   ("zsh (pid 4)",))
+    protected = lr.Stop("r", "feat", lr.PROTECTED_STOP, files=(".claude/settings.json",),
+                        base="main")
+    first = land.LandResult("r", "not_landed", busy.reason, stops=(busy, protected))
+    window = _finished_window([first], [_plan("r")])
+    goal = window.handoff_goals["r"]
+    assert goal and "`feat`" in goal[0]
+    still = lr.Stop("r", "/w", lr.Closed(left=("zsh (pid 4)",),
+                                         ignored=("zsh (pid 4)",)).reason, ("zsh (pid 4)",))
+    window.restate("r", land.LandResult("r", "not_landed", still.reason, stops=(still,)),
+                   lr.CLOSE)
+    kept = window.results["r"].stops
+    assert still in kept and protected in kept and busy not in kept
+    assert window.handoff_goals["r"] == goal
+    assert not window.rows[0].close_button.isHidden()
+    window.deleteLater()

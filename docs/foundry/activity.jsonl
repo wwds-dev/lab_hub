@@ -240,3 +240,7 @@
 {"ts": "2026-11-21T02:14:43", "phase": "build", "state": "done", "spec": "land-network-preflight"}
 {"ts": "2026-11-21T02:21:21", "phase": "build", "state": "start", "spec": "land-blocker-actions"}
 {"ts": "2026-11-21T02:50:33", "phase": "build", "state": "done", "spec": "land-blocker-actions"}
+{"ts": "2026-11-21T02:50:39", "phase": "review", "state": "start", "spec": "land-blocker-actions"}
+{"ts": "2026-11-21T02:50:39", "phase": "secure", "state": "start", "spec": "land-blocker-actions"}
+{"ts": "2026-11-21T03:09:11", "phase": "review", "state": "done", "spec": "land-blocker-actions"}
+{"ts": "2026-11-21T03:09:11", "phase": "secure", "state": "done", "spec": "land-blocker-actions"}
