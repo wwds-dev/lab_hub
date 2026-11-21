@@ -115,8 +115,10 @@ toolbox have no `app-context.md`, so they are never asked about.
 
 The question is a card at the top of the Apps page, one row per project, at most three
 rows and then "and N more". Each row shows the project's name (the first `# ` heading of
-its README, else the folder name), the README's first sentence (at most 220
-characters, shown as plain text and never run), and three buttons:
+its README, else the folder name) and, when that differs from the folder name ignoring
+case, the folder in brackets after it ("Shopfront HQ (shopfront)"), so a title cannot pass
+for another app. Under it is the README's first sentence (at most 220
+characters, shown as plain text and never run), then three buttons:
 
 | Answer | What happens |
 | --- | --- |
@@ -135,6 +137,15 @@ the summary "A project in your lab folder."), and `entry` is `main.py` only when
 folder has one, else left out. No build command is guessed. A project added with
 `main.py` gets a Launch button that runs it from its own checkout, never the installed
 app of the same name.
+
+**What these files are trusted with.** `apps-local.toml` and `apps-dismissed.json` live in
+your own Application Support folder and are trusted like `apps.toml`: whoever can edit
+one can edit all three. A hand-edited entry in `apps-local.toml` can carry `args`,
+`build`, `url` and `service`; they take effect only when you press a button (Launch,
+Update now), apart from a plain connection attempt to `url` to see whether the app is up
+and a `service` name matched against the process list, and never during the self-test or
+the scan. A project's README is shown as plain text and never run. Add looks at the
+folder again just before it writes and writes nothing if it has become a link.
 
 **A tile with no launch command.** `entry` is optional. A project without it (Kaila,
 Overseer and Shopfront HQ once added) gets a tile with its name, summary, version and

@@ -2,9 +2,9 @@
 the page does not list yet (spec `apps-discovery` §4.2, §12.1).
 
 One card, one row per suggestion, never a dialog: Launch, Land and the poll keep
-working while it is up. A row is the project's name, the README's first
-sentence, and three buttons. The words and tooltips are the owner-approved ones
-(§7); everything read from the project (name, sentence, reasons) is plain text.
+working while it is up. A row is the project's name (and its folder, when the
+README title differs from it), the README's first sentence, and three buttons.
+The words and tooltips are the owner-approved ones (§7); everything read from the project (name, sentence, reasons) is plain text.
 
 The banner only asks. It emits which suggestion was answered how; `AppsTab`
 does the writing, the rescan, and tells the banner what is left.
@@ -68,7 +68,11 @@ class _Row(QFrame):
         # 1px `border` line the Land window's rows use).
         if not first:
             self.setObjectName("runRow")
-        self.setAccessibleName(f"New project: {name}")
+        # A README title can say anything, so the folder is shown beside it
+        # when the two differ (ignoring case): "Shopfront HQ (shopfront)".
+        shows_folder = suggestion.folder.casefold() != name.casefold()
+        self.setAccessibleName(
+            f"New project: {name} ({suggestion.folder})" if shows_folder else f"New project: {name}")
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0 if first else theme.SPACE_M, 0, 0 if last else theme.SPACE_M)
@@ -80,7 +84,16 @@ class _Row(QFrame):
         self.name = ElidedLabel(name)
         self.name.setObjectName("appName")
         line.addWidget(lead)
-        line.addWidget(self.name, 1)
+        self.folder: ElidedLabel | None = None
+        if shows_folder:
+            # Next to the name, not at the far edge. An ElidedLabel is plain text.
+            self.folder = ElidedLabel(f"({suggestion.folder})")
+            self.folder.setObjectName("hint")
+            line.addWidget(self.name)
+            line.addWidget(self.folder)
+            line.addStretch(1)
+        else:
+            line.addWidget(self.name, 1)
         outer.addLayout(line)
 
         # No README text, no second line (the fixed fallback is not a sentence

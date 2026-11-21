@@ -16,6 +16,10 @@ README and the specs in `docs/specs/` describe them.
 ## Unreleased
 
 ### Changed
+- **The new-project question names the folder.** When a project's README title differs from
+  its folder name (ignoring case), the row reads "Shopfront HQ (shopfront)", so a title
+  cannot pass for another app. Add to Apps also checks the folder again just before it
+  writes, and refuses one that has become a link since the question was asked.
 - **Text on an Apps tile is shown as typed.** A project's name, summary and version line
   (and the tooltips that quote them) never turn into formatting or links, which matters
   now that a tile's name and summary can come from a project's README. A long name is

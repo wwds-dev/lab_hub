@@ -82,6 +82,36 @@ def test_banner_text_from_a_readme_is_plain_text(qapp):
     assert row.error.textFormat() == Qt.TextFormat.PlainText
 
 
+def test_the_folder_is_shown_next_to_a_title_that_differs_from_it(qapp):
+    banner = make_banner()
+    banner.set_suggestions((suggestion("shopfront", "Shopfront HQ"),))
+    row = banner.rows[0]
+
+    assert row.name.fullText() == "Shopfront HQ"
+    assert row.folder.text() == "(shopfront)"
+    assert row.folder.textFormat() == Qt.TextFormat.PlainText
+    assert row.accessibleName() == "New project: Shopfront HQ (shopfront)"
+    assert discovery_banner.LEAD_IN == "New project in your lab folder:"
+    assert row.add_button.accessibleName() == "Add to Apps, Shopfront HQ"
+
+
+@pytest.mark.parametrize("name", ["Kaila", "kaila", "KAILA"])
+def test_the_folder_is_left_out_when_it_is_the_title_ignoring_case(qapp, name):
+    banner = make_banner()
+    banner.set_suggestions((suggestion("kaila", name),))
+    row = banner.rows[0]
+
+    assert row.folder is None
+    assert row.accessibleName() == f"New project: {name}"
+
+
+def test_a_title_posing_as_another_app_still_shows_its_real_folder(qapp):
+    banner = make_banner()
+    banner.set_suggestions((suggestion("evil-thing", "Sentinel"),))
+
+    assert banner.rows[0].folder.text() == "(evil-thing)"
+
+
 def test_a_project_with_no_readme_has_no_second_line(qapp):
     banner = make_banner()
     banner.set_suggestions((suggestion(summary=discovery.FALLBACK_SUMMARY),))
@@ -161,8 +191,8 @@ def test_three_long_rows_never_make_the_banner_wider_than_the_column(qapp, prist
     theme.apply(qapp, mode=mode)
     banner = make_banner()
     banner.set_suggestions(tuple(
-        suggestion(f"p{i}", "N" * 60, "word " * 44) for i in range(5)))
-    banner.show_error("p0", "Could not add " + "x" * 80 + ": " + "reason " * 20 + ".")
+        suggestion(f"p{i}" + "f" * 60, "N" * 60, "word " * 44) for i in range(5)))
+    banner.show_error("p0" + "f" * 60, "Could not add " + "x" * 80 + ": " + "reason " * 20 + ".")
 
     assert banner.minimumSizeHint().width() <= 500
     banner.close()
