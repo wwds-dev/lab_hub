@@ -16,6 +16,15 @@ Folder names and README text are untrusted: a project's README can say
 anything. Nothing read from either is ever executed or rendered as markup. Text
 goes into a TOML file only through `toml_string`, and the entry that results is
 parsed back and compared with what was meant before a byte is written.
+
+Trust boundary: both files live in the user's own Application Support folder and
+are trusted like `apps.toml`, since the same user can edit all three. A
+hand-edited entry in `apps-local.toml` can carry `args`, `build`, `url` and
+`service`. `args` and `build` run only when the owner presses a button (Launch,
+Update now); `url` is opened only that way, and while the page checks whether
+the app is up it is only connected to, nothing sent; `service` is text matched
+against the process list, never run. None of it happens in the self-test or a
+scan, and `add` itself writes none of these fields.
 """
 
 from __future__ import annotations
@@ -439,6 +448,55 @@ def describe(project: Path) -> tuple[str, str]:
 
 
 # -- the scan -----------------------------------------------------------------
+def _not_a_project(root: Path, name: str) -> str | None:
+    """Why `root/name` is not a project to suggest, or None when it is one.
+
+    The folder's own conditions, in one place: the scan asks it for every entry
+    and `add` asks it again just before it writes, so a folder swapped for a
+    link after the banner was drawn is refused. `lstat` only, no program run.
+    Each test below is one line marked `# condition:`.
+    """
+    folder = root / name
+    # condition: the name does not start with "." or "_"
+    if name.startswith((".", "_")):
+        return "its name starts with a dot or an underscore"
+    # condition: the name is plain letters, digits, "." "_" "-"
+    if not NAME_OK.fullmatch(name):
+        return "its name is not plain letters, digits, dots, dashes and underscores"
+    try:
+        # condition: a real top-level directory, so a link is never suggested
+        if not stat.S_ISDIR(os.lstat(folder).st_mode):
+            return "it is not a folder, or it is a link"
+    except OSError:
+        return "it is no longer there"
+    try:
+        # condition: .git is a directory (a .git file marks a linked worktree)
+        if not stat.S_ISDIR(os.lstat(folder / ".git").st_mode):
+            return "it has no .git folder of its own"
+        marker = folder / APP_CONTEXT
+        # condition: Foundry's app-context.md is a regular file, not a link
+        if not stat.S_ISREG(os.lstat(marker).st_mode):
+            return "it has no docs/foundry/app-context.md of its own"
+    except OSError:
+        return "it has no .git folder and docs/foundry/app-context.md of its own"
+    real = os.path.realpath(folder)
+    # condition: the app-context.md really lies inside the folder
+    if not os.path.realpath(marker).startswith(real + "/"):
+        return "its docs/foundry/app-context.md leads out of the folder"
+    # condition: not Lab Hub itself (its tile is built in code)
+    if name.casefold() in registry.RESERVED:
+        return "it is Lab Hub itself"
+    return None
+
+
+def _runnable(folder: Path) -> bool:
+    """Whether the project has its own `main.py` (a regular file, not a link)."""
+    try:
+        return stat.S_ISREG(os.lstat(folder / "main.py").st_mode)
+    except OSError:
+        return False
+
+
 def scan(
     lab_root: Path,
     registered: Collection[str],
@@ -451,7 +509,8 @@ def scan(
     qualifies, no program run, no network. `registered` is real paths. Worktrees
     under `.claude/worktrees` and nested repositories are never reached: only
     direct children are looked at, and at most `SCAN_MAX_ENTRIES` of them.
-    Each test below is one line marked `# condition:`.
+    The folder's own tests are in `_not_a_project`; the two about the list are
+    here. Each is one line marked `# condition:`.
     """
     root = Path(lab_root)
     taken = {path.casefold().rstrip("/") for path in registered}
@@ -463,37 +522,10 @@ def scan(
     with entries:
         for entry in itertools.islice(entries, SCAN_MAX_ENTRIES):
             name = entry.name
-            try:
-                # condition: a real top-level directory, so a link is never suggested
-                if not entry.is_dir(follow_symlinks=False):
-                    continue
-            except OSError:
+            if _not_a_project(root, name) is not None:
                 continue
-            # condition: the name does not start with "." or "_"
-            if name.startswith((".", "_")):
-                continue
-            # condition: the name is plain letters, digits, "." "_" "-"
-            if not NAME_OK.fullmatch(name):
-                continue
-            folder = Path(entry.path)
-            try:
-                # condition: .git is a directory (a .git file marks a linked worktree)
-                if not stat.S_ISDIR(os.lstat(folder / ".git").st_mode):
-                    continue
-                marker = folder / APP_CONTEXT
-                # condition: Foundry's app-context.md is a regular file, not a link
-                if not stat.S_ISREG(os.lstat(marker).st_mode):
-                    continue
-            except OSError:
-                continue
-            real = os.path.realpath(folder)
-            # condition: the app-context.md really lies inside the folder
-            if not os.path.realpath(marker).startswith(real + "/"):
-                continue
-            # condition: not Lab Hub itself (its tile is built in code)
-            if name.casefold() in registry.RESERVED:
-                continue
-            here = real.casefold()
+            folder = root / name
+            here = os.path.realpath(folder).casefold()
             # condition: not registered (same folder, or a registered project inside it)
             if here in taken or any(other.startswith(here + "/") for other in taken):
                 continue
@@ -501,11 +533,7 @@ def scan(
             if name in dismissed and _hides(dismissed[name], today):
                 continue
             title, summary = describe(folder)
-            try:
-                runnable = stat.S_ISREG(os.lstat(folder / "main.py").st_mode)
-            except OSError:
-                runnable = False
-            found.append(Suggestion(name, title, summary, "main.py" if runnable else None))
+            found.append(Suggestion(name, title, summary, "main.py" if _runnable(folder) else None))
     found.sort(key=lambda item: item.folder.casefold())
     return tuple(found)
 
@@ -584,15 +612,17 @@ def _local_text(path: Path) -> tuple[str, tuple[int, int, int] | None]:
         raise DiscoveryError(f"{path} is not UTF-8 text") from error
 
 
-def add(s: Suggestion) -> None:
+def add(s: Suggestion, lab_root: Path) -> None:
     """Give a suggestion a tile: append its entry to `apps-local.toml`.
 
     The file is appended to, so comments and hand edits survive. Before a byte
     is written the new text must parse as TOML with exactly one more `suites`
     table holding exactly the fields meant (a hostile README cannot add a field,
     a group or a second entry), pass the registry's own rules, and survive the
-    merge against the list in force. Otherwise nothing is written and the error
-    says why. Adding a key that is already there changes nothing.
+    merge against the list in force. The folder is looked at again too, with the
+    scan's own conditions: the suggestion may be minutes old, and a folder
+    swapped for a link since then is refused. Otherwise nothing is written and
+    the error says why. Adding a key that is already there changes nothing.
     """
     if not registry.local_ok:
         raise DiscoveryError(
@@ -615,8 +645,25 @@ def add(s: Suggestion) -> None:
     data = new_text.encode("utf-8")
     if len(data) > registry.LOCAL_MAX_BYTES:
         raise DiscoveryError("your added projects file would be too big to read back")
+    _recheck_folder(s, Path(lab_root))
     _replace_file(path, data, expected)
     _forget_quietly(s.folder)
+
+
+def _recheck_folder(s: Suggestion, lab_root: Path) -> None:
+    """Refuse unless the folder is still a project the scan would suggest.
+
+    The scan ran when the banner was drawn; the folder can have changed since
+    (a link put in its place, its `.git` removed). Same conditions, same `lstat`
+    calls, no new rule. A `main.py` that was there and is no longer a plain file
+    is refused too, so a tile never launches what the scan did not see.
+    """
+    why = f"cannot add {s.folder}: "
+    problem = _not_a_project(lab_root, s.folder)
+    if problem is None and s.entry is not None and not _runnable(lab_root / s.folder):
+        problem = f"its {s.entry} is no longer a plain file"
+    if problem is not None:
+        raise DiscoveryError(why + problem)
 
 
 def _verify(before: dict, new_text: str, s: Suggestion, path: Path) -> None:

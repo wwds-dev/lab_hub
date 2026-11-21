@@ -636,7 +636,7 @@ def test_a_failed_add_keeps_the_row_and_says_why(qapp, lab, monkeypatch):
     tab.apps_changed.connect(lambda: changed.append(True))
     tab.launched.connect(said.append)
 
-    def boom(s):
+    def boom(s, lab_root):
         raise discovery.DiscoveryError("cannot write /x: disk full")
 
     monkeypatch.setattr(discovery, "add", boom)

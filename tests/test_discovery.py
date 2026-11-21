@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+import shutil
 import subprocess
 import tomllib
 from datetime import date, timedelta
@@ -713,12 +714,25 @@ def listing(tmp_path, monkeypatch):
     return path
 
 
+@pytest.fixture
+def put(lab):
+    """`add` for a suggestion, with its folder made first: `add` looks at the
+    folder again before it writes (a test of that check makes its own)."""
+    def add(s):
+        if discovery.NAME_OK.fullmatch(s.folder) and not (lab / s.folder).exists():
+            make_project(lab, s.folder)
+            if s.entry:
+                (lab / s.folder / s.entry).write_text("print('hi')\n")
+        discovery.add(s, lab)
+    return add
+
+
 def local_file() -> Path:
     return registry.local_path()
 
 
-def test_add_writes_the_local_file_and_a_reload_shows_the_tile(listing):
-    discovery.add(KAILA)
+def test_add_writes_the_local_file_and_a_reload_shows_the_tile(listing, put):
+    put(KAILA)
 
     assert registry.reload() is True
     tile = next(a for a in registry.current().suites if a.key == "kaila")
@@ -728,15 +742,15 @@ def test_add_writes_the_local_file_and_a_reload_shows_the_tile(listing):
     assert [a.key for a in registry.current().apps] == ["a"], "no Launch, so not in apps"
 
 
-def test_an_added_project_with_a_main_py_is_launchable(listing):
-    discovery.add(discovery.Suggestion("tool", "Tool", "Does things.", "main.py"))
+def test_an_added_project_with_a_main_py_is_launchable(listing, put):
+    put(discovery.Suggestion("tool", "Tool", "Does things.", "main.py"))
     registry.reload()
 
     tool = next(a for a in registry.current().suites if a.key == "tool")
     assert tool.launchable and tool.entry == "main.py"
 
 
-def test_a_readme_title_cannot_make_a_tile_control_an_installed_app(listing, lab, tmp_path, monkeypatch):
+def test_a_readme_title_cannot_make_a_tile_control_an_installed_app(listing, lab, tmp_path, monkeypatch, put):
     """A cloned SONAR keeps the README title "SONAR"; a hostile one says "Safari".
     The tile's name decides which `/Applications/<name>.app` it opens, so an
     added entry never matches a bundle by name (it runs its own source)."""
@@ -750,7 +764,7 @@ def test_a_readme_title_cannot_make_a_tile_control_an_installed_app(listing, lab
     found = discovery.scan(lab, (), {}, TODAY)
     assert (found[0].name, found[0].entry) == ("Safari", "main.py")
 
-    discovery.add(found[0])
+    put(found[0])
     registry.reload()
     tile = next(a for a in registry.current().suites if a.key == "p6")
 
@@ -763,12 +777,12 @@ def test_a_readme_title_cannot_make_a_tile_control_an_installed_app(listing, lab
     assert launcher.bundle_path(shipped, lab) == applications / "Safari.app"
 
 
-def test_add_keeps_what_the_owner_already_wrote_in_the_file(listing):
+def test_add_keeps_what_the_owner_already_wrote_in_the_file(listing, put):
     local_file().parent.mkdir(parents=True, exist_ok=True)
     mine = '# my own note\n[[suites]]\nkey = "mine"\nname = "Mine"\nproject = "mine"\nsummary = "m"'
     local_file().write_text(mine)  # no trailing newline, on purpose
 
-    discovery.add(KAILA)
+    put(KAILA)
 
     text = local_file().read_text()
     assert text.startswith(mine + "\n")
@@ -777,26 +791,26 @@ def test_add_keeps_what_the_owner_already_wrote_in_the_file(listing):
     assert [a.key for a in registry.current().suites] == ["a", "mine", "kaila"]
 
 
-def test_add_is_idempotent(listing):
-    discovery.add(KAILA)
+def test_add_is_idempotent(listing, put):
+    put(KAILA)
     once = local_file().read_bytes()
 
-    discovery.add(KAILA)
+    put(KAILA)
 
     assert local_file().read_bytes() == once
 
 
-def test_the_file_is_private_and_no_temp_file_is_left(listing):
-    discovery.add(KAILA)
+def test_the_file_is_private_and_no_temp_file_is_left(listing, put):
+    put(KAILA)
 
     assert local_file().stat().st_mode & 0o777 == 0o600
     assert [p.name for p in local_file().parent.iterdir()] == ["apps-local.toml"]
 
 
-def test_a_hostile_readme_cannot_add_a_field_a_group_or_a_second_entry(listing):
+def test_a_hostile_readme_cannot_add_a_field_a_group_or_a_second_entry(listing, put):
     for index, value in enumerate(HOSTILE):
         hostile = discovery.Suggestion(f"p{index}", "P", value or "x", None)
-        discovery.add(hostile)
+        put(hostile)
 
     data = tomllib.loads(local_file().read_text())
     assert list(data) == ["suites"]
@@ -818,14 +832,14 @@ def test_a_hostile_readme_cannot_add_a_field_a_group_or_a_second_entry(listing):
     discovery.Suggestion("kaila", "Kaila", "bad \ud800", None),
     discovery.Suggestion("a", "Dup", "same key as apps.toml", None),
 ])
-def test_an_entry_the_registry_would_refuse_is_never_written(listing, bad):
+def test_an_entry_the_registry_would_refuse_is_never_written(listing, bad, put):
     with pytest.raises(discovery.DiscoveryError):
-        discovery.add(bad)
+        put(bad)
 
     assert not local_file().exists()
 
 
-def test_add_checks_what_it_would_write_even_if_the_writer_were_broken(listing, monkeypatch):
+def test_add_checks_what_it_would_write_even_if_the_writer_were_broken(listing, monkeypatch, put):
     """The second layer (spec 13.3, verify before writing). With a naive writer
     this README makes two valid entries, so the registry's own rules accept the
     last one; only the comparison with the fields meant refuses it."""
@@ -834,64 +848,64 @@ def test_add_checks_what_it_would_write_even_if_the_writer_were_broken(listing, 
         "p1", "P1", 'x"\n[[suites]]\nkey = "evil"\nname = "E"\nproject = "e"\nsummary = "z', None)
 
     with pytest.raises(discovery.DiscoveryError, match="did not read back"):
-        discovery.add(hostile)
+        put(hostile)
 
     assert not local_file().exists()
 
 
-def test_add_refuses_a_file_that_would_outgrow_what_the_registry_reads(listing, monkeypatch):
-    discovery.add(KAILA)
+def test_add_refuses_a_file_that_would_outgrow_what_the_registry_reads(listing, monkeypatch, put):
+    put(KAILA)
     before = local_file().read_bytes()
     monkeypatch.setattr(registry, "LOCAL_MAX_BYTES", len(before) + 20)
     registry.reload()
     assert registry.local_ok, "the file as it is still fits"
 
     with pytest.raises(discovery.DiscoveryError, match="too big"):
-        discovery.add(discovery.Suggestion("overseer", "Overseer", "Another project.", None))
+        put(discovery.Suggestion("overseer", "Overseer", "Another project.", None))
 
     assert local_file().read_bytes() == before
 
 
-def test_add_refuses_a_local_file_it_cannot_parse_and_leaves_its_bytes(listing):
+def test_add_refuses_a_local_file_it_cannot_parse_and_leaves_its_bytes(listing, put):
     local_file().parent.mkdir(parents=True, exist_ok=True)
     local_file().write_bytes(b"half saved [[ \xff")
     registry.reload()
     assert registry.local_ok is False
 
     with pytest.raises(discovery.DiscoveryError, match="cannot be read"):
-        discovery.add(KAILA)
+        put(KAILA)
 
     assert local_file().read_bytes() == b"half saved [[ \xff"
 
 
-def test_add_refuses_a_file_that_broke_since_the_last_reload(listing):
+def test_add_refuses_a_file_that_broke_since_the_last_reload(listing, put):
     local_file().parent.mkdir(parents=True, exist_ok=True)
     local_file().write_text("half saved [[")  # registry still thinks local_ok
 
     with pytest.raises(discovery.DiscoveryError, match="does not parse"):
-        discovery.add(KAILA)
+        put(KAILA)
     assert local_file().read_text() == "half saved [["
 
     local_file().write_text('[[suites]]\nkey = "x"\n')  # valid TOML, not a valid entry
     with pytest.raises(discovery.DiscoveryError, match="does not parse"):
-        discovery.add(KAILA)
+        put(KAILA)
     assert local_file().read_text() == '[[suites]]\nkey = "x"\n'
 
 
-def test_add_refuses_a_local_file_that_is_a_link(listing, tmp_path):
+def test_add_refuses_a_local_file_that_is_a_link(listing, tmp_path, put):
     local_file().parent.mkdir(parents=True, exist_ok=True)
     elsewhere = tmp_path / "elsewhere.toml"
     elsewhere.write_text("")
     local_file().symlink_to(elsewhere)
 
     with pytest.raises(discovery.DiscoveryError):
-        discovery.add(KAILA)
+        put(KAILA)
 
     assert elsewhere.read_text() == ""
 
 
-def test_a_failed_replace_leaves_the_original_and_no_temp_file(listing, monkeypatch):
-    discovery.add(discovery.Suggestion("first", "First", "s", None))
+def test_a_failed_replace_leaves_the_original_and_no_temp_file(listing, monkeypatch, put):
+    put(discovery.Suggestion("first", "First", "s", None))
     before = local_file().read_bytes()
 
     def fail(src, dst):
@@ -899,14 +913,14 @@ def test_a_failed_replace_leaves_the_original_and_no_temp_file(listing, monkeypa
 
     monkeypatch.setattr(os, "replace", fail)
     with pytest.raises(discovery.DiscoveryError, match="No space left"):
-        discovery.add(KAILA)
+        put(KAILA)
 
     assert local_file().read_bytes() == before
     assert [p.name for p in local_file().parent.iterdir()] == ["apps-local.toml"]
 
 
-def test_a_change_made_while_writing_aborts_the_write(listing, monkeypatch):
-    discovery.add(discovery.Suggestion("first", "First", "s", None))
+def test_a_change_made_while_writing_aborts_the_write(listing, monkeypatch, put):
+    put(discovery.Suggestion("first", "First", "s", None))
     real_fsync = os.fsync
 
     def edit_then_sync(fd):
@@ -916,14 +930,14 @@ def test_a_change_made_while_writing_aborts_the_write(listing, monkeypatch):
 
     monkeypatch.setattr(os, "fsync", edit_then_sync)
     with pytest.raises(discovery.DiscoveryError, match="changed while Lab Hub was writing"):
-        discovery.add(KAILA)
+        put(KAILA)
 
     assert local_file().read_text().endswith("# edited by hand\n")
     assert "kaila" not in local_file().read_text()
     assert [p.name for p in local_file().parent.iterdir()] == ["apps-local.toml"]
 
 
-def test_a_file_that_appears_while_writing_is_not_overwritten(listing, monkeypatch):
+def test_a_file_that_appears_while_writing_is_not_overwritten(listing, monkeypatch, put):
     real_fsync = os.fsync
 
     def create_then_sync(fd):
@@ -932,12 +946,12 @@ def test_a_file_that_appears_while_writing_is_not_overwritten(listing, monkeypat
 
     monkeypatch.setattr(os, "fsync", create_then_sync)
     with pytest.raises(discovery.DiscoveryError, match="changed while"):
-        discovery.add(KAILA)
+        put(KAILA)
 
     assert local_file().read_text() == "# made by hand\n"
 
 
-def test_a_planted_link_at_the_temp_name_is_not_followed(listing, tmp_path):
+def test_a_planted_link_at_the_temp_name_is_not_followed(listing, tmp_path, put):
     """The temp file is created with O_EXCL, so a link put at its name cannot
     send the write somewhere else."""
     victim = tmp_path / "victim.txt"
@@ -945,7 +959,7 @@ def test_a_planted_link_at_the_temp_name_is_not_followed(listing, tmp_path):
     (local_file().parent / f"apps-local.toml.{os.getpid()}.tmp").symlink_to(victim)
 
     with pytest.raises(discovery.DiscoveryError):
-        discovery.add(KAILA)
+        put(KAILA)
     (local_file().parent / f"apps-dismissed.json.{os.getpid()}.tmp").symlink_to(victim)
     with pytest.raises(discovery.DiscoveryError):
         discovery.dismiss("kaila", "never", TODAY)
@@ -954,15 +968,15 @@ def test_a_planted_link_at_the_temp_name_is_not_followed(listing, tmp_path):
     assert not local_file().exists()
 
 
-def test_add_clears_a_leftover_dismissal_for_that_folder(listing):
+def test_add_clears_a_leftover_dismissal_for_that_folder(listing, put):
     discovery.dismiss("kaila", "not_now", TODAY - timedelta(days=30))
 
-    discovery.add(KAILA)
+    put(KAILA)
 
     assert "kaila" not in discovery.load_dismissed()
 
 
-def test_an_unwritable_support_folder_is_a_discovery_error_not_a_crash(listing, monkeypatch):
+def test_an_unwritable_support_folder_is_a_discovery_error_not_a_crash(listing, monkeypatch, put):
     real_open = os.open
 
     def refuse(path, flags, *args, **kwargs):
@@ -972,9 +986,86 @@ def test_an_unwritable_support_folder_is_a_discovery_error_not_a_crash(listing, 
 
     monkeypatch.setattr(os, "open", refuse)
     with pytest.raises(discovery.DiscoveryError, match="Permission denied"):
-        discovery.add(KAILA)
+        put(KAILA)
     with pytest.raises(discovery.DiscoveryError, match="Permission denied"):
         discovery.dismiss("kaila", "never", TODAY)
+
+
+# --- add(): the folder is looked at again before the write --------------------
+def scanned(lab, name="kaila", main=False):
+    """A folder as the scan sees it, and the suggestion the banner would hold."""
+    folder = make_project(lab, name, readme="# Kaila\n\nPersonal AI assistant.\n")
+    if main:
+        (folder / "main.py").write_text("print('hi')\n")
+    (found,) = scan(lab)
+    assert found.folder == name
+    return found
+
+
+def test_a_folder_swapped_for_a_link_after_the_scan_is_not_added(listing, lab, tmp_path):
+    suggestion = scanned(lab)
+    elsewhere = make_project(tmp_path, "elsewhere")
+    shutil.rmtree(lab / "kaila")
+    (lab / "kaila").symlink_to(elsewhere)
+
+    with pytest.raises(discovery.DiscoveryError, match="cannot add kaila: .*link"):
+        discovery.add(suggestion, lab)
+
+    assert not local_file().exists()
+
+
+@pytest.mark.parametrize("change, reason", [
+    (lambda f: shutil.rmtree(f), "no longer there"),
+    (lambda f: shutil.rmtree(f / ".git"), "no .git folder"),
+    (lambda f: (shutil.rmtree(f / ".git"), (f / ".git").write_text("gitdir: x\n")), "no .git folder"),
+    (lambda f: (f / "docs" / "foundry" / "app-context.md").unlink(), "app-context.md"),
+    (lambda f: ((f / "docs" / "foundry" / "app-context.md").unlink(),
+                (f / "docs" / "foundry" / "app-context.md").symlink_to(f / "README.md")),
+     "app-context.md"),
+], ids=["folder gone", "no .git", ".git is a file", "no app-context", "app-context is a link"])
+def test_add_refuses_a_folder_that_no_longer_meets_the_scans_conditions(
+        listing, lab, change, reason):
+    suggestion = scanned(lab)
+    change(lab / "kaila")
+
+    with pytest.raises(discovery.DiscoveryError, match=reason):
+        discovery.add(suggestion, lab)
+
+    assert not local_file().exists()
+
+
+def test_add_refuses_a_main_py_that_is_no_longer_a_plain_file(listing, lab):
+    suggestion = scanned(lab, main=True)
+    assert suggestion.entry == "main.py"
+    (lab / "kaila" / "main.py").unlink()
+    (lab / "kaila" / "main.py").symlink_to("/etc/hosts")
+
+    with pytest.raises(discovery.DiscoveryError, match="main.py is no longer a plain file"):
+        discovery.add(suggestion, lab)
+
+    assert not local_file().exists()
+
+
+def test_add_still_writes_a_folder_that_is_unchanged_since_the_scan(listing, lab):
+    discovery.add(scanned(lab, main=True), lab)
+
+    registry.reload()
+    tile = next(a for a in registry.current().suites if a.key == "kaila")
+    assert tile.entry == "main.py"
+
+
+def test_add_on_a_key_already_in_the_local_file_clears_its_dismissal_and_writes_nothing(
+        listing, put):
+    put(KAILA)
+    once = local_file().read_bytes()
+    discovery.dismiss("kaila", "never", TODAY)  # a leftover, as after a hand edit
+    assert "kaila" in discovery.load_dismissed()
+
+    put(KAILA)
+
+    assert "kaila" not in discovery.load_dismissed()
+    assert local_file().read_bytes() == once
+    assert local_file().read_text().count("[[suites]]") == 1
 
 
 # --- dismissals --------------------------------------------------------------

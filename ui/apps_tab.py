@@ -962,7 +962,7 @@ class AppsTab(TilePage):
         assert self.banner is not None
         index = self._row_index(suggestion)
         try:
-            discovery.add(suggestion)
+            discovery.add(suggestion, self.settings.resolved_lab_root())
         except discovery.DiscoveryError as error:
             self.banner.show_error(
                 suggestion.folder, f"Could not add {suggestion.name}: {self._reason(error)}."
