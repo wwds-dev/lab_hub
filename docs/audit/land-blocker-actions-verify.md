@@ -239,3 +239,11 @@ Added by the Build session; QA's verdict above is unchanged. Tests only, no prod
 - Touched groups: `test_land_blocker_actions`, `test_land_fast`, `test_handoff_ui`, `test_land_ui`, `test_progress_window`, `test_progress`: 244 passed, exit 0.
 - P3-8, P3-9, P3-10: in `TODO.md` under "Land blocker actions".
 - Not re-run: the full suite after these test-only additions (QA's full run, 1418 passed, stands for the production code, which did not change).
+
+## §2.2 owner run (2026-11-21)
+Outcome: **not run, no case available.** Open; the spec's §2.2 real-run evidence is still missing.
+- Installed Lab Hub was stale (built 02:15, before the merge at `657b6c6`, 05:54). Rebuilt from `main` at `657b6c6` with `./build_app.sh --install`; the build's self-test printed OK; installed 18:37.
+- The owner went to Land syndustryx and found nothing to land. Checked `/Users/as/Documents/lab/active/syndustryx`: branch `todo/ci-runner-2026-11-13` exists neither locally nor on the remote; `main` is clean and equals `origin/main` at `981ba49`; recent `main` commits are "conflicts resolved by Claude Code" merges, so the conflict was most likely resolved earlier. Open: `claude/a8-gaps`, `claude/a8-ux-fixes`, no reported `.claude/` conflict.
+- No prompt was built and no Claude Code session ran, so there is no prompt excerpt and no problem to report in the code.
+- Owner decision: "1, record it and commit": wait for the next natural protected-conflict stop in any repo and run §2.2 then (not a staged test repo).
+- Not verified: that the installed bundle shows the new stop text; that needs a real stop.
