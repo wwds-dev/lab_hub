@@ -219,10 +219,16 @@ def _check_text(where: str, values: dict) -> None:
         path = values[field]
         if path is None:
             continue
+        if any(unicodedata.category(c) == "Cc" for c in path):
+            # A NUL would make `os.path.realpath` raise in the scan, and the
+            # file is the owner's to mistype: it must never get past here.
+            raise RegistryError(f"{where}.{field} must not hold a control character")
         if path.startswith("/") or ".." in path.replace("\\", "/").split("/"):
             raise RegistryError(
                 f"{where}.{field} must be a relative path with no '..': {path!r}"
             )
+    if posixpath.normpath(values["project"]) == ".":
+        raise RegistryError(f"{where}.project must be a folder, not the lab folder itself")
 
 
 def parse(text: str, source: Path | None = None, *, local: bool = False) -> Registry:
@@ -237,6 +243,8 @@ def parse(text: str, source: Path | None = None, *, local: bool = False) -> Regi
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as error:
         raise RegistryError(f"not valid TOML: {error}") from error
+    except RecursionError as error:  # a value nested thousands deep
+        raise RegistryError("not valid TOML: nested too deeply") from error
     allowed = ("suites",) if local else GROUPS
     unknown = sorted(set(data) - set(allowed))
     if unknown:

@@ -933,9 +933,13 @@ class AppsTab(TilePage):
         no git, no network."""
         if self.banner is None or self.local_note is None:
             return
-        self.banner.set_suggestions(
-            discovery.suggestions(self.settings.resolved_lab_root(), discovery.today())
-        )
+        try:
+            found = discovery.suggestions(self.settings.resolved_lab_root(), discovery.today())
+        except Exception:  # noqa: BLE001
+            # The page must never fail on a name or folder it cannot read: ask
+            # about nothing this time.
+            found = ()
+        self.banner.set_suggestions(found)
         note = launcher.registry.local_note
         self.local_note.setText(note or "")
         self.local_note.setToolTip(

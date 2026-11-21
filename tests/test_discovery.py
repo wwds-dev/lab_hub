@@ -311,6 +311,15 @@ def test_a_dismissal_stored_on_disk_is_what_hides_a_folder(lab):
     assert folders(discovery.suggestions(lab, TODAY)) == ["kaila"]
 
 
+def test_a_project_name_the_os_cannot_take_gives_no_suggestions_not_an_error(lab):
+    """The registry refuses a NUL (`test_registry.py`), so this is the second
+    line: a list put in force directly must not make the page's scan raise."""
+    make_project(lab, "kaila")
+    registry.use(registry.Registry(suites=(_app("a", "a\x00b"),)))
+
+    assert discovery.suggestions(lab, TODAY) == ()
+
+
 def test_with_no_app_list_at_all_there_is_nothing_to_suggest(lab, monkeypatch):
     make_project(lab, "kaila")
     monkeypatch.setattr(registry, "candidates", lambda lab_root=None: [])

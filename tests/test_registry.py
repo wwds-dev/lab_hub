@@ -212,6 +212,12 @@ def test_an_empty_entry_is_refused_rather_than_read_as_no_launch_command():
         ("project", "../x", "project must be a relative"),
         ("project", "a/../../x", "project must be a relative"),
         ("project", "/etc", "project must be a relative"),
+        ("project", "a\u0000b", "project must not hold a control character"),
+        ("project", "a\nb", "project must not hold a control character"),
+        ("project", ".", "not the lab folder itself"),
+        ("project", "./", "not the lab folder itself"),
+        ("project", "a/..", "project must be a relative"),
+        ("entry", "m\u0000.py", "entry must not hold a control character"),
         ("entry", "../main.py", "entry must be a relative"),
         ("entry", "/bin/sh", "entry must be a relative"),
     ],
@@ -223,6 +229,28 @@ def test_the_fields_that_become_paths_and_bundle_names_are_checked(field, value,
     text = "[[suites]]\n" + "\n".join(f"{k} = {json.dumps(v)}" for k, v in entry.items())
     with pytest.raises(registry.RegistryError, match=complaint):
         registry.parse(text)
+
+
+DEEP = "a = " + "[" * 5000 + "]" * 5000 + "\n"  # well under the size cap, deep enough to recurse
+
+
+def test_a_value_nested_thousands_deep_is_a_bad_file_not_a_crash():
+    with pytest.raises(registry.RegistryError, match="nested too deeply"):
+        registry.parse(DEEP + ONE_APP)
+
+
+def test_a_deeply_nested_apps_toml_is_reported_in_last_error(tmp_path, monkeypatch):
+    path = tmp_path / "apps.toml"
+    path.write_text(ONE_APP)
+    monkeypatch.setattr(registry, "candidates", lambda lab_root=None: [path])
+    registry.use(None)
+    registry.current()
+
+    path.write_text(DEEP + ONE_APP)
+
+    assert registry.reload() is False
+    assert [a.key for a in launcher.APPS] == ["a"]
+    assert "nested too deeply" in (registry.last_error or "")
 
 
 def test_a_nested_project_and_entry_path_are_fine():
@@ -396,6 +424,17 @@ def test_a_bad_local_file_at_first_use_does_not_raise(listing):
 
     assert [a.key for a in found.suites] == ["a"]
     assert registry.local_ok is False and registry.local_note
+
+
+def test_a_deeply_nested_local_file_is_a_note_and_never_stops_the_hub(listing):
+    _local(DEEP + NO_LAUNCH)
+
+    found = registry.current()  # must not raise RecursionError
+
+    assert [a.key for a in found.suites] == ["a"]
+    assert registry.local_ok is False
+    assert "nested too deeply" in registry.local_note
+    assert registry.last_error is None
 
 
 def test_a_local_file_that_is_not_text_or_too_big_is_broken_not_fatal(listing):

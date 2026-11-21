@@ -498,7 +498,10 @@ def suggestions(lab_root: Path, today: date | None = None) -> tuple[Suggestion, 
     root = Path(lab_root)
     paths = [app.project for group in current.groups() for app in group]
     paths += sorted(registry.RESERVED)
-    registered = [os.path.realpath(root / path) for path in paths]
+    try:
+        registered = [os.path.realpath(root / path) for path in paths]
+    except (OSError, ValueError):  # a name the OS cannot take (the registry refuses NUL)
+        return ()
     return scan(root, registered, load_dismissed(), _day(today))
 
 
@@ -573,7 +576,7 @@ def add(s: Suggestion) -> None:
     try:
         before = tomllib.loads(old_text)
         existing = registry.parse(old_text, path, local=True).suites
-    except (tomllib.TOMLDecodeError, registry.RegistryError) as error:
+    except (tomllib.TOMLDecodeError, RecursionError, registry.RegistryError) as error:
         raise DiscoveryError(f"{path} does not parse: {error}") from error
     if any(app.key == s.folder for app in existing):
         _forget_quietly(s.folder)

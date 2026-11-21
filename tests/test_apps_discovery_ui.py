@@ -471,6 +471,20 @@ def test_the_page_scans_at_startup_and_on_refresh_but_never_on_the_poll(qapp, la
     assert len(scans) == 2
 
 
+@pytest.mark.parametrize("error", [ValueError("embedded null byte"), OSError("gone"), RuntimeError("x")])
+def test_a_scan_that_raises_shows_nothing_and_does_not_fail_the_page(qapp, lab, monkeypatch, error):
+    def explode(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(discovery, "suggestions", explode)
+
+    tab = _tab(lab)  # the startup scan
+    tab.recheck()  # and Refresh
+
+    assert tab.banner.rows == []
+    assert not tab.banner.isVisibleTo(tab)
+
+
 def test_only_the_apps_page_asks(qapp, lab, monkeypatch):
     monkeypatch.setattr(discovery, "suggestions",
                         lambda *a, **k: pytest.fail("a page that did not ask scanned"))
