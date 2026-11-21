@@ -161,6 +161,8 @@ def is_launcher_bundle(bundle: Path) -> bool:
 
 
 def bring_to_front(app: ExternalApp, lab_root: Path) -> str:
+    if not app.launchable:
+        raise LaunchError(f"{app.name} has no launch command.")
     if app.url is not None:
         open_url(app.url)
         return f"Opened {app.name} in your browser"
@@ -206,6 +208,8 @@ def bring_to_front(app: ExternalApp, lab_root: Path) -> str:
 
 def launch(app: ExternalApp, lab_root: Path, *, background: bool = False) -> str:
     """Start the app. Returns a line describing what was started."""
+    if not app.launchable:
+        raise LaunchError(f"{app.name} has no launch command.")
     extra_args = ["--background"] if background else []
     bundle = state.bundle_path(app, lab_root)
     if bundle is not None:

@@ -1767,3 +1767,131 @@ def test_a_window_that_does_not_open_is_reported_after_trying_every_one(tmp_path
     assert len(seen) == 2
     assert "cd /a && ./a.sh" in str(raised.value) and "Terminal not found" in str(raised.value)
     assert "cd /b" not in str(raised.value)
+
+
+# ----------------------------------------------------------------------
+# A project with no launch command (spec apps-discovery §13.2)
+# ----------------------------------------------------------------------
+def _no_launch(tmp_path, monkeypatch, *, with_bundle: bool = False):
+    """Kaila's shape: a checkout with a VERSION and nothing to start."""
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "Applications")
+    if with_bundle:
+        make_bundle(tmp_path / "Applications", "Kaila")
+    project = tmp_path / "kaila"
+    project.mkdir()
+    (project / "VERSION").write_text("2\n")
+    monkeypatch.setattr(launcher, "_commit_count", lambda _project: 12)
+    app = launcher.ExternalApp("kaila", "Kaila", "kaila", None, "A project.")
+    return app, project
+
+
+def test_an_app_without_an_entry_is_not_launchable(tmp_path, monkeypatch):
+    app, _ = _no_launch(tmp_path, monkeypatch)
+
+    assert not app.launchable
+
+
+def test_a_stray_bundle_with_its_name_is_never_this_projects_bundle(tmp_path, monkeypatch):
+    app, _ = _no_launch(tmp_path, monkeypatch, with_bundle=True)
+
+    assert launcher.bundle_path(app, tmp_path) is None
+    assert launcher.bundle_marker(app, tmp_path) is None
+    assert launcher.bundle_executable(app, tmp_path) is None
+    assert launcher.can_bring_to_front(app, tmp_path) is False
+
+
+def test_the_checkout_of_an_entry_less_app_is_its_folder(tmp_path, monkeypatch):
+    app, project = _no_launch(tmp_path, monkeypatch)
+
+    assert launcher.source_dir(app, tmp_path) == project
+    assert launcher.checkout_marker(app, tmp_path) is None
+    assert launcher.running_markers(app, tmp_path) == ()
+
+
+def test_an_entry_less_app_with_no_folder_has_no_checkout(tmp_path, monkeypatch):
+    app, project = _no_launch(tmp_path, monkeypatch, with_bundle=True)
+    (project / "VERSION").unlink()
+    project.rmdir()
+
+    assert launcher.source_dir(app, tmp_path) is None
+    assert launcher.version(app, tmp_path) == launcher.Version()
+    assert launcher.status(app, tmp_path)[0] == "missing"
+
+
+def test_an_entry_less_app_is_never_present_and_never_runs(tmp_path, monkeypatch):
+    app, _ = _no_launch(tmp_path, monkeypatch)
+    table = f"/usr/bin/python {tmp_path}/kaila/main.py\n{tmp_path}/Applications/Kaila.app/Contents/MacOS/Kaila"
+
+    assert launcher.presence(app, tmp_path, table) == launcher.Presence(False, False)
+    assert launcher.is_running(app, tmp_path, table) is False
+
+
+def test_the_version_of_an_entry_less_app_is_its_checkouts_even_beside_a_bundle(
+        tmp_path, monkeypatch):
+    app, project = _no_launch(tmp_path, monkeypatch, with_bundle=True)
+
+    found = launcher.version(app, tmp_path)
+
+    assert found == launcher.checkout_version(project)
+    assert found.text == "v2.012" and found.origin == "checkout"
+
+
+def test_an_entry_less_apps_build_status_is_unknown_not_runs_the_checkout(tmp_path, monkeypatch):
+    app, project = _no_launch(tmp_path, monkeypatch)
+
+    row = launcher.build_status(app, tmp_path)
+
+    assert row.verdict == "unknown" and not row.needs_rebuild
+    assert row.note == "it has no launch command, so there is no build to compare."
+    assert "runs the checkout directly" not in row.note
+    assert row.version.text == "v2.012"
+    assert row.command is None
+
+
+def test_the_build_report_skips_an_entry_less_app_however_it_is_asked(tmp_path, monkeypatch):
+    app, _ = _no_launch(tmp_path, monkeypatch)
+    other = launcher.ExternalApp("x", "X", "x", "main.py", "")
+    _project(tmp_path, "x")
+
+    assert [r.app.key for r in launcher.build_report(tmp_path, (app, other))] == ["x"]
+    assert launcher.build_report(tmp_path, (app,)) == ()
+    launcher.registry.use(launcher.registry.Registry(suites=(other, app)))
+    try:
+        assert [r.app.key for r in launcher.build_report(tmp_path)] == ["x"]
+    finally:
+        launcher.registry.use(None)
+
+
+def test_status_and_readiness_of_an_entry_less_app_say_there_is_nothing_to_start(
+        tmp_path, monkeypatch):
+    app, project = _no_launch(tmp_path, monkeypatch, with_bundle=True)
+
+    assert launcher.status(app, tmp_path) == ("source", str(project))
+    ready = launcher.readiness(app, tmp_path)
+    assert not ready.ok
+    assert ready.problem == "it has no launch command, so there is nothing to start"
+    assert ready.state == "source"
+
+
+def test_launching_or_raising_an_entry_less_app_is_refused_before_anything_runs(
+        tmp_path, monkeypatch):
+    app, _ = _no_launch(tmp_path, monkeypatch, with_bundle=True)
+
+    def boom(*args, **kwargs):
+        raise AssertionError("nothing may be started")
+
+    monkeypatch.setattr(launcher.subprocess, "run", boom)
+    monkeypatch.setattr(launcher.subprocess, "Popen", boom)
+    for call in (lambda: launcher.launch(app, tmp_path),
+                 lambda: launcher.launch(app, tmp_path, background=True),
+                 lambda: launcher.bring_to_front(app, tmp_path)):
+        with pytest.raises(launcher.LaunchError, match="Kaila has no launch command"):
+            call()
+
+
+def test_the_dirty_cache_comment_says_one_worker_may_fill_it():
+    """Lab Hub's tile verdict runs on a worker thread (ui/own_verdict.py)."""
+    source = Path(launcher.state.__file__).read_text()
+
+    assert "GUI thread only" not in source
+    assert "worker thread" in source

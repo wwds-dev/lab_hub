@@ -366,7 +366,7 @@ class MainWindow(QMainWindow):
         lab_root = self.settings.resolved_lab_root()
         table = launcher.process_table()
         for app in launcher.BACKUP_SYNC_APPS:
-            if launcher.is_running(app, lab_root, table):
+            if not app.launchable or launcher.is_running(app, lab_root, table):
                 continue
             try:
                 launcher.launch(app, lab_root, background=True)

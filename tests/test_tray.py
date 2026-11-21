@@ -42,8 +42,26 @@ def test_the_menu_lists_the_top_level_apps(menu_bar_item):
     labels = [a.text() for a in menu_bar_item._menu.actions() if a.text()]
 
     for app in launcher.SUITES + launcher.BACKUP_SYNC_APPS:
-        assert app.name in labels
+        if app.launchable:  # a tile with no launch command has no menu entry
+            assert app.name in labels
     assert "Unblock Tracker" not in labels
+
+
+def test_a_project_with_no_launch_command_has_no_menu_entry(qapp):
+    from lab_hub import launcher
+    from lab_hub.launcher import registry
+
+    registry.use(registry.Registry(suites=(
+        launcher.ExternalApp("a", "Alpha", "a", "main.py", "s"),
+        launcher.ExternalApp("kaila", "Kaila", "kaila", None, "s"),
+    )))
+    try:
+        labels = [a.text() for a in Tray(lambda: Path("/tmp"))._menu.actions() if a.text()]
+    finally:
+        registry.use(None)
+
+    assert "Alpha" in labels
+    assert "Kaila" not in labels
 
 
 def test_the_menu_lists_only_umbrella_apps(menu_bar_item):

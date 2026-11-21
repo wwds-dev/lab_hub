@@ -119,6 +119,8 @@ class Tray(QObject):
         self._app_actions = []
         # Unblock Tracker (the utilities group) is left off: Apps tab only.
         for app in launcher.SUITES + launcher.BACKUP_SYNC_APPS:
+            if not app.launchable:
+                continue  # a tile with nothing to start has no menu entry
             action = QAction(app.name, self._menu)
             action.triggered.connect(lambda _checked=False, a=app: self._launch(a))
             self._menu.insertAction(self._apps_end, action)

@@ -24,6 +24,25 @@ def test_wake_starts_missing_sync_apps_in_background(window, monkeypatch):
     ]
 
 
+def test_wake_never_starts_a_sync_entry_with_no_launch_command(window, monkeypatch):
+    from lab_hub.launcher import registry
+
+    started = []
+    monkeypatch.setattr(launcher, "process_table", lambda: "")
+    monkeypatch.setattr(launcher, "is_running", lambda *args: False)
+    monkeypatch.setattr(launcher, "launch", lambda app, root, **kw: started.append(app.key))
+    registry.use(registry.Registry(backup_sync=(
+        launcher.ExternalApp("a", "A", "a", "main.py", "s"),
+        launcher.ExternalApp("k", "K", "k", None, "s"),
+    )))
+    try:
+        window.start_sync_apps_in_background()
+    finally:
+        registry.use(None)
+
+    assert started == ["a"]
+
+
 def test_short_timer_delay_is_not_treated_as_wake(window, monkeypatch):
     calls = []
     window._last_wake_poll = 100

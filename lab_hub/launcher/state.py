@@ -40,6 +40,10 @@ def bundle_path(app: ExternalApp, lab_root: Path | None = None) -> Path | None:
     when none is installed — resolved, because the checkout may be reached
     through a symlink and the process table only ever shows the real path.
     """
+    if not app.launchable:
+        # Nothing to launch, so no bundle: a stray `<name>.app` is not this
+        # project's, and reporting it would offer a Launch that has no target.
+        return None
     path = APPLICATIONS / f"{app.name}.app"
     if path.is_dir():
         return path
@@ -116,6 +120,9 @@ def source_dir(app: ExternalApp, lab_root: Path) -> Path | None:
     build report and — worst — the running check down with it.
     """
     project = lab_root / app.project
+    if not app.launchable:
+        # No entry script to look for: the folder itself is the checkout.
+        return project if project.is_dir() else None
     if (project / app.entry).is_file():
         return project
 
@@ -183,6 +190,8 @@ def bundle_marker(app: ExternalApp, lab_root: Path | None = None) -> str | None:
 
 def checkout_marker(app: ExternalApp, lab_root: Path) -> str | None:
     """The entry script a source run shows on its command line."""
+    if not app.launchable:
+        return None
     project = source_dir(app, lab_root)
     return None if project is None else str(project / app.entry)
 
@@ -670,7 +679,10 @@ def _head_commit(project: Path) -> str:
 
 # Uncommitted edits move neither HEAD nor its ref, so the key above cannot see
 # them. A short time-to-live keeps `git status` to one run per checkout per
-# window instead of one per poll. Read and written from the GUI thread only.
+# window instead of one per poll. Mostly the GUI thread; Lab Hub's own tile
+# verdict (`ui/own_verdict.py`) also fills it from one worker thread. That is
+# safe: these caches are plain dict gets and sets, atomic under the GIL, and a
+# value computed twice is the same value.
 DIRTY_TTL_SECONDS = 10.0
 _DIRTY_CACHE: dict[tuple[str, int | None], tuple[float, bool]] = {}
 
@@ -842,7 +854,13 @@ def version(app: ExternalApp, lab_root: Path) -> Version:
     runs, and a tile with no bundle answers with the checkout it would start.
     A frozen bundle that carries no stamp answers *nothing* — borrowing the
     checkout's number there would describe code that is not what opens.
+
+    A project with no launch command opens nothing, so its version is simply
+    its checkout's (Kaila's tile), never a bundle's.
     """
+    if not app.launchable:
+        project = source_dir(app, lab_root)
+        return checkout_version(project) if project is not None else Version()
     bundle = bundle_path(app, lab_root)
     project = source_dir(app, lab_root)
     if bundle is not None and not bundle_runs_checkout(bundle):
@@ -904,6 +922,8 @@ def version(app: ExternalApp, lab_root: Path) -> Version:
 def _recorded_root_version(
     bundle: Path, root: Path, app: ExternalApp, project: Path | None
 ) -> Version:
+    if app.entry is None:
+        return Version()  # unreachable: `version` returns before it for these
     unreadable = None
     if not (root / app.entry).is_file():
         unreadable = "is missing or has no " + app.entry
@@ -1166,6 +1186,13 @@ def build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
     that needs a terminal is marked `by_hand`, so Update now does not run it
     only to watch it refuse.
     """
+    if not app.launchable:
+        # Without this a checkout-origin version would read "runs the checkout
+        # directly", which is untrue of a thing that runs nothing.
+        return BuildStatus(
+            app, version(app, lab_root), "unknown",
+            "it has no launch command, so there is no build to compare.",
+        )
     row = _build_status(app, lab_root)
     script, command = row.script, row.command
     root = Path(row.version.root) if row.version.root else None
@@ -1304,7 +1331,8 @@ def _build_status(app: ExternalApp, lab_root: Path) -> BuildStatus:
 def build_report(
     lab_root: Path, apps: tuple[ExternalApp, ...] | None = None
 ) -> tuple[BuildStatus, ...]:
-    return tuple(build_status(app, lab_root) for app in (apps or registry.current().apps))
+    chosen = apps or registry.current().apps
+    return tuple(build_status(app, lab_root) for app in chosen if app.launchable)
 
 
 def status(app: ExternalApp, lab_root: Path) -> tuple[str, str]:
@@ -1315,6 +1343,11 @@ def status(app: ExternalApp, lab_root: Path) -> tuple[str, str]:
     web app's checkout, which is how it always runs, so not a lesser state the
     way *source* is.
     """
+    if not app.launchable:
+        project = source_dir(app, lab_root)
+        if project is not None:
+            return "source", str(project)
+        return "missing", f"no checkout at {lab_root / app.project}"
     bundle = bundle_path(app, lab_root)
     if bundle is not None:
         if bundle.parent == APPLICATIONS:
@@ -1352,6 +1385,11 @@ class Readiness:
 def readiness(app: ExternalApp, lab_root: Path) -> Readiness:
     """Check now what `launch` would otherwise only discover on the way."""
     state, detail = status(app, lab_root)
+
+    if not app.launchable:
+        return Readiness(
+            state, detail, "it has no launch command, so there is nothing to start"
+        )
 
     if state in ("installed", "built"):
         if bundle_executable(app, lab_root) is None:
