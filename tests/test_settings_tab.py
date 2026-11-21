@@ -102,3 +102,193 @@ def test_build_script_bundles_every_licence_file():
     for name in LICENCE_FILES:
         folder = name.rpartition("/")[0] or "."
         assert f'--add-data "{name}:{folder}"' in script, name
+
+
+# --- Hidden projects (spec apps-discovery §12.4) ------------------------------
+def _hidden_setup(tmp_path, monkeypatch, *folders):
+    """A lab folder with these project folders, and the clock fixed."""
+    from datetime import date
+
+    from lab_hub import discovery
+
+    lab = tmp_path / "lab"
+    for name, readme in folders:
+        (lab / name).mkdir(parents=True)
+        if readme:
+            (lab / name / "README.md").write_text(readme)
+    monkeypatch.setattr(discovery, "today", lambda: date(2026, 11, 21))
+    return lab
+
+
+def _labels(tab):
+    return [item["label"].fullText() for item in tab.hidden_items]
+
+
+def test_hidden_projects_lists_live_never_and_not_now_only(qapp, tmp_path, monkeypatch):
+    from datetime import date, timedelta
+
+    from lab_hub import discovery
+
+    lab = _hidden_setup(tmp_path, monkeypatch, ("kaila", "# Kaila\n\nAssistant.\n"),
+                        ("overseer", "# Overseer\n"), ("lapsed", None), ("scratch", None))
+    today = date(2026, 11, 21)
+    discovery.dismiss("overseer", "not_now", today)
+    discovery.dismiss("kaila", "never", today)
+    discovery.dismiss("lapsed", "not_now", today - timedelta(days=15))  # asked again already
+    discovery.dismiss("gone", "never", today)  # its folder is gone: nothing to show again
+
+    tab = SettingsTab(config.Settings(lab_root=str(lab)))
+
+    assert _labels(tab) == ["Kaila · hidden for good", "Overseer · not asked until 5 Dec"]
+    assert not tab.hidden_empty.isVisibleTo(tab)
+
+
+@pytest.mark.parametrize(("day", "text"), [
+    ((2026, 11, 21), "not asked until 5 Dec"),  # a one-digit day, no leading zero
+    ((2026, 12, 20), "not asked until 3 Jan"),  # across the year
+    ((2026, 1, 10), "not asked until 24 Jan"),
+])
+def test_the_date_is_day_and_short_month_whatever_the_month(qapp, tmp_path, monkeypatch, day, text):
+    from datetime import date
+
+    from lab_hub import discovery
+
+    lab = _hidden_setup(tmp_path, monkeypatch, ("p", None))
+    monkeypatch.setattr(discovery, "today", lambda: date(*day))
+    discovery.dismiss("p", "not_now", date(*day))
+
+    tab = SettingsTab(config.Settings(lab_root=str(lab)))
+
+    assert _labels(tab) == [f"p · {text}"]
+
+
+def test_hidden_projects_card_has_its_heading_and_sits_after_lab_folder(qapp, tmp_path):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtWidgets import QLabel
+
+    tab = SettingsTab(config.Settings(lab_root=str(tmp_path)))
+    tab.resize(900, 3000)
+    tab.show()
+    qapp.processEvents()
+
+    titles = {
+        label.text(): label.mapTo(tab, QPoint(0, 0)).y()
+        for label in tab.findChildren(QLabel, "sectionTitle")
+    }
+    assert titles["LAB FOLDER"] < titles["HIDDEN PROJECTS"] < titles["START AT LOGIN"]
+    tab.close()
+
+
+def test_the_card_stays_with_a_line_when_nothing_is_hidden(qapp, tmp_path):
+    tab = SettingsTab(config.Settings(lab_root=str(tmp_path)))
+
+    assert tab.hidden_items == []
+    assert tab.hidden_empty.text() == "No hidden projects."
+    assert not tab.hidden_empty.isHidden()
+
+
+def test_show_again_rewrites_the_file_asks_the_apps_page_and_says_so(qapp, tmp_path, monkeypatch):
+    from datetime import date
+
+    from lab_hub import discovery
+
+    lab = _hidden_setup(tmp_path, monkeypatch, ("kaila", "# Kaila\n"), ("overseer", "# Overseer\n"))
+    discovery.dismiss("kaila", "never", date(2026, 11, 21))
+    discovery.dismiss("overseer", "never", date(2026, 11, 21))
+    tab = SettingsTab(config.Settings(lab_root=str(lab)))
+    asked, said = [], []
+    tab.suggestions_changed.connect(lambda: asked.append(True))
+    tab.notice.connect(said.append)
+
+    first = tab.hidden_items[0]["button"]
+    assert first.accessibleName() == "Show again, Kaila"
+    first.click()
+
+    assert set(discovery.load_dismissed()) == {"overseer"}
+    assert _labels(tab) == ["Overseer · hidden for good"]
+    assert asked == [True]
+    assert said == ["Kaila will be suggested again."]
+    # Focus: the next row's button.
+    assert tab.focusWidget() is tab.hidden_items[0]["button"]
+
+    tab.hidden_items[0]["button"].click()
+    assert discovery.load_dismissed() == {}
+    assert tab.hidden_empty.isVisibleTo(tab)
+    assert tab.focusWidget() is tab._area
+
+
+def test_a_failed_show_again_keeps_the_row_and_says_why(qapp, tmp_path, monkeypatch):
+    from datetime import date
+
+    from lab_hub import discovery
+
+    lab = _hidden_setup(tmp_path, monkeypatch, ("kaila", "# Kaila\n"))
+    discovery.dismiss("kaila", "never", date(2026, 11, 21))
+    tab = SettingsTab(config.Settings(lab_root=str(lab)))
+    asked = []
+    tab.suggestions_changed.connect(lambda: asked.append(True))
+
+    def boom(folder):
+        raise discovery.DiscoveryError("cannot write /x: read-only")
+
+    monkeypatch.setattr(discovery, "forget", boom)
+    tab.hidden_items[0]["button"].click()
+
+    item = tab.hidden_items[0]
+    assert _labels(tab) == ["Kaila · hidden for good"]
+    assert item["error"].text() == "Could not show Kaila again: cannot write /x: read-only."
+    assert item["error"].objectName() == "stateBad"
+    assert asked == []
+
+
+def test_a_long_name_is_cut_in_the_middle_with_all_of_it_in_the_tooltip(qapp, tmp_path, monkeypatch):
+    from datetime import date
+
+    from lab_hub import discovery
+
+    long = "a" * 30 + "-" + "b" * 30
+    lab = _hidden_setup(tmp_path, monkeypatch, (long, None))
+    discovery.dismiss(long, "never", date(2026, 11, 21))
+    tab = SettingsTab(config.Settings(lab_root=str(lab)))
+    tab.resize(560, 900)
+    tab.show()
+    qapp.processEvents()
+
+    item = tab.hidden_items[0]
+    assert "…" in item["label"].text() and item["label"].fullText().startswith(long)
+    assert long in item["label"].toolTip()
+    assert item["button"].width() >= 107
+    assert item["button"].isVisible()
+    tab.close()
+
+
+def test_hidden_names_are_plain_text(qapp, tmp_path, monkeypatch):
+    from datetime import date
+
+    from lab_hub import discovery
+
+    lab = _hidden_setup(tmp_path, monkeypatch, ("p", "# <b>Bold</b>\n"))
+    discovery.dismiss("p", "never", date(2026, 11, 21))
+
+    tab = SettingsTab(config.Settings(lab_root=str(lab)))
+
+    # "<b>" fails the name rule (spec §13.5), so the folder name shows.
+    assert _labels(tab) == ["p · hidden for good"]
+    from PySide6.QtCore import Qt
+    assert tab.hidden_items[0]["label"].textFormat() == Qt.TextFormat.PlainText
+
+
+def test_an_unchanged_list_is_not_rebuilt_under_the_keyboard(qapp, tmp_path, monkeypatch):
+    from datetime import date
+
+    from lab_hub import discovery
+
+    lab = _hidden_setup(tmp_path, monkeypatch, ("kaila", "# Kaila\n"))
+    discovery.dismiss("kaila", "never", date(2026, 11, 21))
+    tab = SettingsTab(config.Settings(lab_root=str(lab)))
+    first = tab.hidden_items[0]["button"]
+
+    tab.refresh()
+    tab.refresh()
+
+    assert tab.hidden_items[0]["button"] is first

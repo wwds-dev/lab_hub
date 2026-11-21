@@ -15,21 +15,37 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from lab_hub import APP_NAME, config, launcher, licence_paths, login_item, version
+from lab_hub import APP_NAME, config, discovery, launcher, licence_paths, login_item, version
 
 from . import theme
 from .tiles import Refreshable
-from .widgets import FolderField, scroll_column
+from .widgets import ElidedLabel, FolderField, discard_widget, scroll_column
+
+# English, on purpose: the date reads "5 Dec" whatever the Mac's language is
+# (spec apps-discovery §7), the form Land's own dates use.
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+NO_HIDDEN_TEXT = "No hidden projects."
+
+
+def hidden_text(folder: str, until) -> str:
+    """"Kaila · hidden for good" or "Kaila · not asked until 5 Dec"."""
+    if until is None:
+        return f"{folder} · hidden for good"
+    return f"{folder} · not asked until {until.day} {_MONTHS[until.month - 1]}"
 
 
 class SettingsTab(QWidget, Refreshable):
     settings_saved = Signal()
+    # A hidden project was given back: the Apps page should ask about it now.
+    suggestions_changed = Signal()
+    notice = Signal(str)  # a line for the status bar
 
     def __init__(self, settings: config.Settings, parent=None) -> None:
         super().__init__(parent)
         self.settings = settings
 
         area, column = scroll_column()
+        self._area = area
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(area)
@@ -99,6 +115,21 @@ class SettingsTab(QWidget, Refreshable):
         row.addStretch(1)
         card_layout.addLayout(row)
 
+        # --- projects the owner told Apps not to ask about --------------------
+        # (spec apps-discovery §12.4). It is about the lab folder, so it sits
+        # after it. The card stays when empty: it is where "Never" says to undo.
+        hidden_card, hidden_layout = theme.card()
+        hidden_layout.addWidget(theme.section_title("Hidden projects"))
+        self.hidden_rows = QVBoxLayout()
+        self.hidden_rows.setSpacing(theme.SPACE_S)
+        self.hidden_empty = theme.hint(NO_HIDDEN_TEXT)
+        hidden_layout.addLayout(self.hidden_rows)
+        hidden_layout.addWidget(self.hidden_empty)
+        # (folder, answer, until) as shown, so an unchanged list is not rebuilt
+        # under a button the keyboard is on.
+        self._hidden_shown: list[tuple] | None = None
+        self.hidden_items: list[dict] = []
+
         # --- start at login ---------------------------------------------
         login_card, login_layout = theme.card()
         login_layout.addWidget(theme.section_title("Start at login"))
@@ -165,18 +196,94 @@ class SettingsTab(QWidget, Refreshable):
 
         column.addWidget(look_card)
         column.addWidget(card)
+        column.addWidget(hidden_card)
         column.addWidget(login_card)
         column.addWidget(paths_card)
         column.addStretch(1)
 
         self._refresh_resolved()
         self._refresh_login()
+        self._refresh_hidden()
 
     # ------------------------------------------------------------------
     def refresh(self) -> None:
-        """Which checkouts the lab folder holds, and the login agent's state."""
+        """Which checkouts the lab folder holds, the login agent's state, and
+        the projects hidden from the Apps page."""
         self._refresh_resolved()
         self._refresh_login()
+        self._refresh_hidden()
+
+    def _refresh_hidden(self) -> None:
+        rows = discovery.hidden(self.settings.resolved_lab_root(), discovery.today())
+        shown = [(folder, item.answer, until) for folder, item, until in rows]
+        if shown == self._hidden_shown:
+            return
+        self._hidden_shown = shown
+        self._clear_hidden()
+        for folder, _answer, until in shown:
+            self._add_hidden_row(folder, until)
+        self.hidden_empty.setVisible(not shown)
+
+    def _clear_hidden(self) -> None:
+        for item in self.hidden_items:
+            discard_widget(self.hidden_rows, item["row"])
+        self.hidden_items = []
+
+    def _add_hidden_row(self, folder: str, until) -> None:
+        # The name the banner showed (the README's heading), not the folder on
+        # disk: "Kaila", not "kaila". One small README read per hidden project.
+        name = discovery.describe(self.settings.resolved_lab_root() / folder)[0]
+        row = QWidget()
+        outer = QVBoxLayout(row)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(theme.SPACE_XS)
+        line = QHBoxLayout()
+        line.setSpacing(theme.SPACE_M)
+        # A folder name is plain text; a long one is cut in the middle and the
+        # tooltip has all of it. The button never shrinks.
+        label = ElidedLabel(hidden_text(name, until), Qt.TextElideMode.ElideMiddle)
+        button = QPushButton("Show again")
+        button.setAutoDefault(False)
+        button.setAccessibleName(f"Show again, {name}")
+        button.setAccessibleDescription(hidden_text(name, until))
+        button.setFixedWidth(max(button.sizeHint().width(), 107))
+        button.clicked.connect(lambda _c=False, name=folder: self._show_again(name))
+        line.addWidget(label, 1)
+        line.addWidget(button)
+        outer.addLayout(line)
+        error = QLabel()
+        error.setObjectName("stateBad")
+        error.setWordWrap(True)
+        error.setTextFormat(Qt.TextFormat.PlainText)
+        error.hide()
+        outer.addWidget(error)
+        self.hidden_rows.addWidget(row)
+        self.hidden_items.append(
+            {"folder": folder, "name": name, "row": row, "label": label, "button": button,
+             "error": error}
+        )
+
+    def _show_again(self, folder: str) -> None:
+        """Give a hidden project back: it is asked about on the Apps page again."""
+        index = next((i for i, it in enumerate(self.hidden_items) if it["folder"] == folder), 0)
+        name = self.hidden_items[index]["name"] if self.hidden_items else folder
+        try:
+            discovery.forget(folder)
+        except discovery.DiscoveryError as error:
+            item = self.hidden_items[index]
+            item["error"].setText(f"Could not show {name} again: {str(error).rstrip('. ')}.")
+            item["error"].show()
+            item["button"].setFocus()
+            return
+        self._hidden_shown = None  # reread: this row is gone
+        self._refresh_hidden()
+        # Focus: the next row's button, else the previous one's, else the page.
+        if self.hidden_items:
+            self.hidden_items[min(index, len(self.hidden_items) - 1)]["button"].setFocus()
+        else:
+            self._area.setFocus()
+        self.suggestions_changed.emit()
+        self.notice.emit(f"{name} will be suggested again.")
 
     def _refresh_login(self) -> None:
         """Read the state off disk rather than trusting a remembered flag.
