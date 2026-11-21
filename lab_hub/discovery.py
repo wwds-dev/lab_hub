@@ -180,7 +180,8 @@ def _parse_dismissed(raw: bytes | None) -> dict[str, Dismissal] | None:
         return {}
     try:
         data = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
+    except (UnicodeDecodeError, ValueError, RecursionError, MemoryError):
+        # RecursionError: 60 KB of nested brackets is under the size cap.
         return None
     if not isinstance(data, dict):
         return None

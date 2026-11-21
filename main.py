@@ -112,6 +112,13 @@ def _probe_child_launches(lab_root) -> list[tuple[str, bool | None, str]]:
         if not app.runs_from_source:
             results.append((app.name, None, "only its built bundle is launched"))
             continue
+        if app.local:
+            # An entry from the owner's apps-local.toml is a folder found by a
+            # scan: Add promises that nothing in it is run, and its venv python
+            # is the project's own file. Only curated apps.toml entries are
+            # probed.
+            results.append((app.name, None, "added project: nothing of it is run here"))
+            continue
         project = launcher.source_dir(app, lab_root)
         if project is None:
             results.append((app.name, None, "no checkout to probe"))

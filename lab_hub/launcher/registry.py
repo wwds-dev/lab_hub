@@ -28,8 +28,10 @@ rolls an update back, so a typo in the owner's own file must not be able to.
 
 from __future__ import annotations
 
+import os
 import posixpath
 import re
+import stat
 import sys
 import tomllib
 import unicodedata
@@ -364,13 +366,31 @@ def _read_local() -> tuple[tuple[ExternalApp, ...] | None, str | None]:
     """(entries, None) for the local file; ((), None) when it is absent, which
     is not broken; (None, why) when it cannot be read or does not parse."""
     path = local_path()
+    # Opened as `discovery._snapshot` opens it: a link, a pipe or a device is a
+    # bad file, never followed and never waited on (a FIFO's open blocks, and
+    # this runs on the GUI thread at startup and on every Refresh).
     try:
-        with path.open("rb") as handle:
-            raw = handle.read(LOCAL_MAX_BYTES + 1)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
         return (), None
     except OSError as error:
-        return None, f"cannot read {path}: {error}"
+        return None, f"cannot read {path}: {error.strerror or error}"
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None, f"{path} is not a regular file"
+        chunks: list[bytes] = []
+        wanted = LOCAL_MAX_BYTES + 1
+        while wanted > 0:
+            chunk = os.read(fd, wanted)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            wanted -= len(chunk)
+        raw = b"".join(chunks)
+    except OSError as error:
+        return None, f"cannot read {path}: {error.strerror or error}"
+    finally:
+        os.close(fd)
     if len(raw) > LOCAL_MAX_BYTES:
         return None, f"{path} is over {LOCAL_MAX_BYTES // 1024} KiB"
     try:
