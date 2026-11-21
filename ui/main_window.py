@@ -24,7 +24,7 @@ from .apps_tab import AppsTab
 from .convert_tab import ConvertTab
 from .images_tab import ImagesTab
 from .video_tab import VideoTab
-from .dashboard_view import DashboardsPage, DashboardViewer
+from .dashboard_view import DashboardsPage, DashboardViewer, warm_up_web_engine
 from .links_tab import DashboardsTab, SitesTab
 from .narrator_tab import NarratorTab
 from .settings_tab import SettingsTab
@@ -625,6 +625,10 @@ def run() -> int:
     _Reopener(window, app)
     _QuitGuard(window, app)
     window.show_update_outcome()
+
+    # Before the user can go fullscreen: the first web view of a run otherwise
+    # drops the window out of fullscreen when Dashboards is first opened.
+    QTimer.singleShot(0, warm_up_web_engine)
 
     # Started by the login agent: stay in the menu bar instead of opening a
     # window nobody asked for. Only honoured when there *is* a menu bar item to

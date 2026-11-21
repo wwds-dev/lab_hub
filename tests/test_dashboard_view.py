@@ -193,3 +193,36 @@ def test_nothing_loads_until_the_page_is_on_screen(qapp, tmp_path):
     viewer.activate()
 
     assert [v.loaded for v in made] == ["https://claude.ai/artifact/b"]
+
+
+def test_web_engine_warm_up_runs_once_and_only_when_available(monkeypatch):
+    """The first web view of a run must exist before Dashboards is opened, or macOS
+    drops a fullscreen window when it is first shown (owner report, 2026-11-21)."""
+    from ui import dashboard_view
+
+    monkeypatch.setattr(dashboard_view, "_warmed", False)
+    monkeypatch.setattr(dashboard_view, "web_available", lambda: False)
+    assert dashboard_view.warm_up_web_engine() is False
+
+    monkeypatch.setattr(dashboard_view, "web_available", lambda: True)
+    started = []
+
+    class Stub:
+        def __init__(self, *a, **k):
+            started.append(type(self).__name__)
+
+        def setPage(self, *_):
+            pass
+
+        def deleteLater(self):
+            pass
+
+    import PySide6.QtWebEngineCore as core
+    import PySide6.QtWebEngineWidgets as widgets
+
+    monkeypatch.setattr(core, "QWebEngineProfile", type("Profile", (Stub,), {}))
+    monkeypatch.setattr(core, "QWebEnginePage", type("Page", (Stub,), {}))
+    monkeypatch.setattr(widgets, "QWebEngineView", type("View", (Stub,), {}))
+    assert dashboard_view.warm_up_web_engine() is True
+    assert dashboard_view.warm_up_web_engine() is False  # once per run
+    assert sorted(started) == ["Page", "Profile", "View"]

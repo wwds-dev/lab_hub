@@ -15,6 +15,12 @@ README and the specs in `docs/specs/` describe them.
 
 ## Unreleased
 
+### Fixed
+- **Opening Dashboards no longer takes the window out of fullscreen.** The first time
+  Dashboards was opened in a run, macOS dropped the window out of fullscreen (the
+  second time it did not). Lab Hub now starts the web engine once, right after the
+  window comes up, before anyone can have gone fullscreen.
+
 ### Changed
 - **Land checks that GitHub answers before it starts.** Each repo with an `origin` is
   asked once (about a second, at most 15 seconds) before any commit, merge, Claude
