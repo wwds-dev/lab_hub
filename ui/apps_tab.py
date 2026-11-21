@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import os
 import subprocess
 import time
 from dataclasses import replace
@@ -612,9 +613,12 @@ class AppsTab(TilePage):
         self.lander.step.connect(self._land_step)
         self.lander.repo_done.connect(self._land_repo_done)
         self.lander.finished.connect(self._land_finished)
+        self.lander.held.connect(self._land_held)
         # Cards Land was asked on, by repo name, held from the click: a hygiene
         # refresh or a rebuilt tile mid-Land must not lose the outcome.
         self._landing_cards: dict[str, AppCard] = {}
+        self._clearing: dict[str, str] = {}  # repo -> the row button now running for it
+        self._rerun_name = ""  # the repo a row's button cleared, until its Land starts
         # What is running in this process that a restart would end. The main
         # window replaces this with one that looks at every page and tool.
         self.busy_reasons: Callable[[], list[str]] = self._own_busy_reasons
@@ -977,7 +981,8 @@ class AppsTab(TilePage):
             else:
                 found, unplaced = handoff.collect(window.handoff_rows(), window.handoff_paths,
                                                   window.handoff_commands,
-                                                  forbidden=self._handoff_forbidden())
+                                                  forbidden=self._handoff_forbidden(),
+                                                  goals=getattr(window, "handoff_goals", {}))
                 listing = land_resolve.cwd_listing() if found else None
                 items = []
                 for h in found:
@@ -1205,6 +1210,15 @@ class AppsTab(TilePage):
         return dialog.chosen() if dialog.exec() == QDialog.DialogCode.Accepted else []
 
     def _land_planned(self, plans) -> None:
+        if self.land_window is not None:
+            self.land_window.set_clearing("")  # a row's button led here, or nothing did
+        rerun, self._rerun_name = self._rerun_name, ""
+        cleared = self._clearing.get(rerun, "")
+        self._clearing.clear()
+        window = self.land_window
+        if rerun and window is not None and [p.name for p in plans] == [rerun]:
+            self._rerun_planned(window, plans[0], cleared)
+            return
         try:
             answer = True if all(p.nothing for p in plans) else self.confirm_land(plans)
         except Exception:  # noqa: BLE001 - never leave the tiles on "Looking…"
@@ -1246,6 +1260,105 @@ class AppsTab(TilePage):
         self._land_window_owns_run = True
         self.land_window.start(plans)
         self.land_window.handoff_requested.connect(self._ask_claude_clicked)
+        self.land_window.clear_requested.connect(self.clear_land_row)
+
+    # -- a Land row's own button (spec land-blocker-actions §3) ----------------
+    def clear_land_row(self, name: str, action: str) -> None:
+        """Try again or Close it… on the Land window's row for repo `name`.
+        Clears the stop on the worker; then the repo is planned and confirmed
+        as Land always is, or the row says why the stop is still there."""
+        window = self.land_window
+        if window is None:
+            return
+        key = progress.plain(name)
+        result, path = window.results.get(key), window.handoff_paths.get(key)
+        if result is None or path is None:
+            return
+        if self.lander.busy:
+            QMessageBox.information(window, "Land", "Not now: Land is still running. Try "
+                                    "again when it has finished.")
+            return
+        stops: tuple = ()
+        if action == land_resolve.CLOSE:
+            stops = result.busy
+            if not stops or not self.confirm_close(name, Path(path), stops, window):
+                return
+        if not self.lander.clear(name, Path(path), action, stops):
+            return
+        self._clearing[name] = action
+        self._rerun_name = name  # its Land re-runs in this window (owner, P2-4)
+        what = ("Closing the processes, then looking at the repo…" if stops
+                else "Checking that origin answers…")
+        window.set_clearing(f"{name}: {what}")
+        card = self._card_for(name)
+        if card is not None:
+            self._landing_cards[name] = card
+            card.set_landing(what)
+        self._update_land_controls()
+
+    def _rerun_planned(self, window, plan, cleared: str = "") -> None:
+        """A row's button cleared its stop: confirm as Land always does, then
+        land that repo in the same window, resetting only its row (owner, P2-4)."""
+        try:
+            answer = True if plan.nothing else self.confirm_land([plan])
+        except Exception:  # noqa: BLE001 - never leave the tile on "Looking…"
+            answer = False
+        go = answer is True or (isinstance(answer, (list, tuple))
+                                and any(p is plan for p in answer))
+        if not go:  # cancelled: the row says the stop is gone and offers Try again
+            card = self._card_for(plan.name)
+            if card is not None:
+                card.set_landing(None)
+            self._landing_cards.clear()
+            window.restate(plan.name, land.LandResult(
+                plan.name, "not_landed",
+                f"cleared, but the Land was cancelled: {land_resolve.TRY_AGAIN}"), cleared)
+            self._update_land_controls()
+            return
+        if self.lander.run([plan]):
+            self._land_window_owns_run = True
+            window.rerun(plan)
+        self._update_land_controls()
+
+    def confirm_close(self, name: str, repo: Path, stops, parent) -> bool:
+        """The one confirm for Close it…: every process and its own folder, as
+        lsof sees it now (tests replace this)."""
+        listing = land_resolve.cwd_listing() or []
+        where = {f"{cmd} (pid {pid})": cwd for cmd, pid, cwd in listing}
+        mine = f" (pid {os.getpid()})"
+        lines = [f"{p}  in  {where.get(p, s.target)}  ({land.stop_view(s, repo).place})"
+                 for s in stops for p in s.processes if not p.endswith(mine)]
+        if not lines:
+            return False
+        box = QMessageBox(parent)
+        box.setWindowTitle("Close processes")
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setTextFormat(Qt.TextFormat.PlainText)
+        n = len(lines)
+        box.setText(f"Close {n} process{'es' if n != 1 else ''} running in {name}?")
+        box.setInformativeText(
+            "\n".join(lines) + "\n\nLab Hub asks each one to quit (SIGTERM, never a forced "
+            "kill) and waits up to 5 seconds. Unsaved work in a terminal or editor there can "
+            "be lost. A process that ignores the request stays open and stays on the row, "
+            "named: an interactive shell such as zsh does. Close its Terminal window, then "
+            "press Close it… again. When nothing is left, Land looks at the repo again and "
+            "asks you before it runs.")
+        close = box.addButton("Close them", QMessageBox.ButtonRole.DestructiveRole)
+        cancel = box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(cancel)
+        box.exec()
+        return box.clickedButton() is close
+
+    def _land_held(self, name: str, result) -> None:
+        """A row's button ran and the stop is still there."""
+        self._rerun_name = ""
+        card = self._card_for(name)
+        if card is not None:
+            card.show_outcome(result)
+        self._landing_cards.pop(name, None)
+        if self.land_window is not None:
+            self.land_window.restate(name, result, self._clearing.pop(name, ""))
+        self._update_land_controls()
 
     def _run_window(self) -> LandWindow | None:
         """The Land window, if it shows the Land now running; else None."""

@@ -555,6 +555,17 @@ From `docs/audit/2026-11-18-readiness-audit.md`. Items already in this file (fol
 - [ ] `P3` `design` `@me` Offline, a repo whose only work is local cleanup (delete landed branches, quarantine an untracked file) is now stopped by the preflight, as a merge is. Decide: stop it too (as built), or skip the check when the plan has no merge or push. Spec `land-network-preflight` §3, review P3-3.
 - [ ] `P3` `design` `@ai` Every `ls-remote` failure gets "cannot reach origin (no network?)", so a dead or renamed `origin` blocks Land with no override. Tell a missing remote apart from a network drop, or point to the Land log. Review P3-4.
 
+## Land blocker actions (2026-11-21)
+- [x] `P1` `feature` `@ai` **Every Land stop says what clears it: Ask Claude…, Try again or Close it… (2026-11-21).**
+  - Spec `docs/specs/land-blocker-actions.md` (owner: "Approve defaults"). Build note `docs/audit/land-blocker-actions-build.md`.
+  - Why: "'merge by hand' is a real blocker, since I don't know which prompt would resolve that".
+  - Code: `lab_hub/land_resolve.py` (`STOP_ACTIONS`, `clearing`, `close_processes`), `land.py`, `claude_resolve.py`, `handoff.py` (`blocker_goals`), `progress.py`, `ui/progress_window.py`, `ui/lander.py`, `ui/apps_tab.py`; tests `tests/test_land_blocker_actions.py`.
+  - Not done: owner merge and rebuild; one owner-watched Ask Claude run on syndustryx's `.claude/settings.json` conflict (spec §2.2), ending in "Landed" or a different, named stop.
+- [ ] `P3` `bug` `@ai` "land it by hand (Review branches → Open in Terminal)" is still the skip reason when Claude Code is missing or a repo has no test command (`repo_tidy._claude_blocker`). Not a Land stop; Ask Claude… cannot help without Claude Code either.
+- [ ] `P3` `test` `@ai` The §2.1 check scans only for banned words: a raw git or gitleaks error passed through `plain_reason` ends in no clearing sentence and relies on the Ask Claude… footer (QA `docs/audit/land-blocker-actions-verify.md` P3-8).
+- [ ] `P3` `process` `@owner` `app-context.md` `## Commands` and `## Test bar` are still placeholders, and the venv has no coverage, `pytest-timeout` or `pytest-randomly`: branch coverage, random order and timeouts are not verified (QA P3-9).
+- [ ] `P3` `test` `@ai` `test_land_resolve.py::test_a_file_that_appears_after_the_preview_is_not_committed_and_land_says_not_landed` fails with a long pytest temp path: the reason is cut at 180 characters before "untracked" (QA P3-10; pre-existing, commit `3cd5dd7`).
+
 ## Out of scope, deliberately
 
 Lab Hub does not replace the projects it launches. Each keeps its own repo, README, venv and build script. Changing what Sentinel AI does still means changing Sentinel AI.

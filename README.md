@@ -300,9 +300,9 @@ its tick-boxes). One press looks at that repo, says in one sentence what it will
 do ("sonar: commit open changes in 2 worktrees, merge 3 branches into master,
 push master to origin, delete 3 landed branches."), and asks once; **Details**
 lists every step. Progress shows on the tile, and the outcome is stated there:
-**Landed**, or **Not landed: <the reason in one line>** (for example "fix
-master's own tests, then Land again: they fail in a clean copy (ImportError:
-cannot import name 'macro'); waiting: feat"). Land leaves nothing open (spec `docs/specs/land-resolve-all.md`):
+**Landed**, or **Not landed: <the reason in one line>** (for example "master's
+own tests fail in a clean copy (ImportError: cannot import name 'macro'; waiting:
+feat): press Ask Claude… to fix them"). Land leaves nothing open (spec `docs/specs/land-resolve-all.md`):
 "Landed" means every worktree is clean, every branch is landed or archived and
 the default branch is level with origin; "Landed · 2 branches archived · 1 file
 quarantined" says what it put aside. "Not landed" is left only for what a
@@ -336,6 +336,40 @@ Claude Code or test step and skips the rest; work already landed stays landed.
 Only one Land runs at a time per page, and a repo is claimed while it lands, so
 the same repo can never be landed twice at once. `lab_hub/land.py`,
 `ui/lander.py`, `tests/test_land.py`, `tests/test_land_ui.py`.
+
+**Every stop says what clears it** (spec `docs/specs/land-blocker-actions.md`).
+No stop ends in "by hand" or "in Terminal". Most end in "press Ask Claude…": a
+`.claude/` conflict ("…: press Ask Claude… to merge it with Claude Code, with you
+watching"), a default branch whose own tests fail ("…: press Ask Claude… to fix
+them"), a paused merge or rebase, unresolved conflicts, a missing origin/HEAD, a
+wrong app path. For the first two, Ask Claude's prompt also says what to do,
+using only the branch, default branch and file names, quoted as data from git:
+merge in a temporary worktree, resolve the `.claude/` files with you, run the
+tests and ask before the merge lands; or reproduce and fix the failing tests on
+a branch and ask before merging. Two stops have their own button on the Land
+window's row, once the run has ended. After either clears its stop and you
+confirm, that repo lands again in the same Land window: only its row resets,
+the other rows and Ask Claude… stay. Cancel that confirmation and the row reads
+"cleared, but the Land was cancelled: press Try again".
+- **Try again** on "cannot reach origin (<what failed>), so no merge or test was
+  started" (what failed comes from git: name lookup, a port, the proxy, a
+  timeout) and on a late "could not fetch". A refused sign-in, key or repo name
+  is not a network fault: "origin refused access …: press Ask Claude…". It checks origin again; still down,
+  the row says why and nothing in git changes. Up, the repo is planned and
+  confirmed as any Land is.
+- **Close it…** on "a process is running in it (…)". One confirmation lists each
+  process with its pid and folder. Lab Hub sends each a polite quit (SIGTERM,
+  never a forced kill), only to a pid a fresh `lsof` still shows with the same
+  name in that checkout (never one in a worktree nested in it, never Lab Hub
+  itself or what started it), waits up to 5 seconds and checks again. Closed ones are logged as
+  "owner closed: zsh (pid N) in <folder>"; one that will not quit stays on the
+  row with Close it…; then the repo is planned and confirmed as any Land is.
+  An interactive shell such as zsh ignores that request: it stays on the row,
+  named ("it ignored the request to quit…; close its window"). Close its
+  Terminal window, then press Close it… again. A process in a separate repo
+  inside the checkout (shopfront's `website`) is never closed; that stop points
+  at Ask Claude…. Unsaved work in a closed terminal or editor can be lost: the
+  confirmation says so.
 
 Before that set runs, Land prepares the repo (`lab_hub/land_resolve.py`, ADR
 `docs/adr/0001-land-quarantine-and-archive-tags.md`):
