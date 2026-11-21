@@ -1,6 +1,6 @@
 # ADR 0007: Apps found in the lab folder live in a local registry file, and a tile may have no launch command
 
-Status: proposed, awaiting owner approval (Architect gate).
+Status: accepted, owner approved at the Architect gate 2026-11-21 ("Approve as recommended").
 Spec: `docs/specs/apps-discovery.md` §4.3, §4.6, §13.
 
 ## Context
