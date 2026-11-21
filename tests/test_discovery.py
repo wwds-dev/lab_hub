@@ -961,6 +961,21 @@ def test_a_corrupt_file_is_kept_as_dot_bad_before_an_answer_overwrites_it(isolat
     assert discovery.load_dismissed() == {"kaila": discovery.Dismissal("never", TODAY)}
 
 
+def test_a_second_corruption_does_not_overwrite_the_first_dot_bad(isolated_config):
+    write_dismissed(b"{bad1")
+    discovery.dismiss("kaila", "never", TODAY)
+    write_dismissed(b"{bad2")
+    discovery.dismiss("kaila", "never", TODAY)
+    write_dismissed(b"{bad3")
+    discovery.dismiss("kaila", "never", TODAY)
+
+    name = dismissed_file().name
+    kept = {n: dismissed_file().with_name(n).read_bytes()
+            for n in (name + ".bad", name + ".bad.1", name + ".bad.2")}
+    assert kept == {name + ".bad": b"{bad1", name + ".bad.1": b"{bad2", name + ".bad.2": b"{bad3"}
+    assert "kaila" in discovery.load_dismissed()
+
+
 def test_a_valid_file_is_not_set_aside(isolated_config):
     discovery.dismiss("kaila", "never", TODAY)
     discovery.dismiss("overseer", "never", TODAY)

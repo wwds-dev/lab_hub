@@ -12,7 +12,13 @@
 #   tools_only   a Tools page only — no Apps tile, no menu bar entry
 #
 # Fields (see `ExternalApp` in lab_hub/launcher/registry.py for what each does):
-#   key, name, project, entry, summary   required
+#   key, name, project, summary   required
+#   entry   optional: the script that starts it. Leave it out for a project with
+#           no launch command: its tile shows the version and repo state, with
+#           no Launch button, menu bar entry or Check builds row. Such a block
+#           cannot set service, url, args, bundle_dir, build, build_output or
+#           runs_from_source = false. An older Lab Hub rejects this whole file
+#           for it, so add one only after a build with this change is installed.
 #   service, url, runtime, args, bundle_dir, runs_from_source   optional
 #
 # One tile per umbrella app, and nothing else. The agents and sub-modules that

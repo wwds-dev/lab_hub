@@ -220,6 +220,17 @@ def _dump(answers: Mapping[str, Dismissal]) -> bytes:
     return (json.dumps(body, indent=2) + "\n").encode("utf-8")
 
 
+def _free_bad_name(path: Path) -> Path:
+    """`<name>.bad`, or `.bad.1`, `.bad.2`, ... when that is taken: a second
+    corruption must not overwrite the answers the first one set aside."""
+    candidate = path.with_name(path.name + ".bad")
+    number = 0
+    while _identity(candidate) is not None:
+        number += 1
+        candidate = path.with_name(f"{path.name}.bad.{number}")
+    return candidate
+
+
 def _update_dismissed(change: Callable[[dict[str, Dismissal]], None]) -> None:
     """Read, apply `change`, write atomically. A corrupt file is kept as
     `<name>.bad` first, so the older answers are not lost to the overwrite."""
@@ -228,7 +239,7 @@ def _update_dismissed(change: Callable[[dict[str, Dismissal]], None]) -> None:
     answers = _parse_dismissed(raw)
     if answers is None:
         try:
-            os.replace(path, path.with_name(path.name + ".bad"))
+            os.replace(path, _free_bad_name(path))
         except OSError as error:
             raise DiscoveryError(
                 f"cannot set aside {path}: {error.strerror or error}"
