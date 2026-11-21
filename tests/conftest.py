@@ -51,6 +51,26 @@ def isolated_config(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_real_discovery(monkeypatch):
+    """The Apps page must not scan the owner's real lab folder, and Lab Hub's
+    tile must not start its verdict thread (git) for every window a test builds.
+
+    `discovery.suggestions` answers nothing and `OwnVerdict.request` does
+    nothing; tests that want either patch it back (tests/test_discovery.py
+    keeps the real `suggestions` for itself). The second half applies once
+    `ui/own_verdict.py` exists.
+    """
+    from lab_hub import discovery
+
+    monkeypatch.setattr(discovery, "suggestions", lambda *args, **kwargs: ())
+    try:
+        from ui import own_verdict
+    except ImportError:
+        return
+    monkeypatch.setattr(own_verdict.OwnVerdict, "request", lambda self, lab_root: None)
+
+
+@pytest.fixture(autouse=True)
 def no_quiet_time(monkeypatch):
     """Tests make a file and land it at once. Land's quiet time (a file changed
     in the last minutes may belong to a live session, audit H1) would stop every
