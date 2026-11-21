@@ -166,6 +166,7 @@ class RowView:
     stage_notes: bool = False  # show each stage's time under its chip
     took: str = ""  # Land: how long this repo took, shown in the pill after the status
     openable: bool = False  # Land, finished: its steps can be opened
+    action: str = ""  # Land, finished: the row's own button, "retry" or "close" (land-blocker-actions)
 
 
 @dataclass(frozen=True)
@@ -218,6 +219,7 @@ class Row:
     started: float | None = None
     ended: float | None = None
     time_text: str = ""  # Land: how long it took, set when done if any step of it ran
+    action: str = ""  # Land: what clears its stop on the row ("retry", "close" or "")
     # Check builds only
     category: str = ""
     note: str = ""
@@ -521,6 +523,15 @@ class LandModel(RunModel):
                     f"{n} branches need your decision"
             else:
                 row.reason = plain(result.reason)
+        row.action = getattr(result, "clear_with", "")
+        self.touch()
+
+    def restate(self, name: str, reason: str, action: str) -> None:
+        """A row's button ran and the stop is still there: say why now (spec
+        land-blocker-actions §3.1, §3.2). Times and status stay."""
+        rows = [r for r in self.rows if name in (r.key, r.name)]
+        if rows:
+            rows[-1].reason, rows[-1].action = plain(reason), action
         self.touch()
 
     def _stages(self, row: Row) -> tuple[StageView, ...]:
@@ -572,7 +583,8 @@ class LandModel(RunModel):
             rows.append(RowView(
                 name=row.name, icon=icon, stages=self._stages(row), status=status,
                 tone=tone, reason=row.reason, expanded=row.state == RUNNING,
-                steps=steps, then=then, took=row.time_text, openable=openable))
+                steps=steps, then=then, took=row.time_text, openable=openable,
+                action="" if self.live else row.action))
         counts = (
             (f"{sum(r.state == DONE for r in self.rows)} landed", "ok"),
             (f"{sum(r.state == RUNNING for r in self.rows)} running", "run"),

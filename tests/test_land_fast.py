@@ -147,7 +147,8 @@ def test_a_protected_conflict_costs_no_test_and_no_claude(tested, stub, tmp_path
     out, runs, _ = resolve(tested, stub, tmp_path, "feat")
     assert not out.landed and runs == 0 and claude_calls(tmp_path) == 0
     assert cr.blocker_kind(out.message) == "protected"
-    assert ".claude/settings.json" in out.message and "by hand" in out.message
+    assert ".claude/settings.json" in out.message and "press Ask Claude…" in out.message
+    assert "by hand" not in out.message
     unchanged(tested, main0, feat0, tmp_path / "resolve")
 
 
@@ -233,7 +234,8 @@ def test_a_failing_main_is_one_stop_and_its_branches_stay(lab, tmp_path, quarant
     result = _land(lab, tmp_path)
     assert sorted(tried) == ["feat", "feat2"] and asked == []
     assert result.state == "not_landed" and result.archived == 0
-    assert result.reason.startswith("fix main's own tests, then Land again")
+    assert result.reason.startswith("main's own tests fail in a clean copy")
+    assert result.reason.endswith(": press Ask Claude… to fix them")
     assert "RuntimeError: Patch is already started" in result.reason
     [stop] = [n for n in result.notes if "own tests" in n]
     assert "feat" in stop and "feat2" in stop
@@ -249,7 +251,7 @@ def test_a_protected_conflict_is_a_stop_per_branch_and_is_never_archived(
     assert asked == [] and result.archived == 0 and result.state == "not_landed"
     stops = [n for n in result.notes if ".claude/settings.json" in n]
     assert len(stops) == 2 and any("feat2" in s for s in stops)
-    assert "by hand" in result.reason
+    assert result.reason == lr.PROTECTED_STOP
 
 
 def test_other_failures_still_go_to_triage(lab, tmp_path, quarantine, monkeypatch):

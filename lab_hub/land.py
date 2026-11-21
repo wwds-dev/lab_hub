@@ -35,7 +35,30 @@ MAX_REASON = 180
 # (spec land-network-preflight). A dead network must show in seconds, not after
 # a merge and a full test run.
 PREFLIGHT_TIMEOUT = 15
-NO_ORIGIN = "cannot reach origin (no network?): no merge or test was started"
+
+
+def no_origin(cause: str = "no network?") -> str:
+    """The network stop (spec land-blocker-actions §3.1): what failed, and Try again."""
+    return (f"cannot reach origin ({cause}), so no merge or test was started: "
+            f"{land_resolve.TRY_AGAIN}")
+
+
+NO_ORIGIN = no_origin()
+
+
+def network_cause(err: str) -> str:
+    """What failed, from git's own error: the proxy, the name lookup, or a port."""
+    low = (err or "").lower()
+    if "proxy" in low:
+        return "the proxy does not answer"
+    if "could not resolve" in low:
+        return "name lookup failed"
+    port = re.search(r"\bport (\d{1,5})\b", low)
+    if port:
+        return f"port {port.group(1)} does not answer"
+    if "timed out" in low:
+        return "no answer in time"
+    return "no network?"
 
 _PREFIX = re.compile(r"^(?:not landed|not done|skipped|failed)\s*[—-]\s*", re.IGNORECASE)
 # A real exception line ("ImportError: cannot import name ..."), not a pytest
@@ -66,7 +89,10 @@ def plain_reason(message: str) -> str:
         first = f"{first.rstrip(' .:')}: {error}"
     first = re.sub(r"\s+", " ", first)
     if len(first) > MAX_REASON:
-        first = first[: MAX_REASON - 1].rstrip() + "…"
+        # A cut never hides what clears the stop (spec land-blocker-actions §2.1).
+        tail = next((": " + a for a in land_resolve.STOP_ACTIONS if first.endswith(": " + a)), "")
+        keep = MAX_REASON - 1 - len(tail)
+        first = first[: keep].rstrip() + "…" + tail
     return first
 
 
@@ -86,7 +112,7 @@ def preflight(plan: LandPlan, log: Path | None = None) -> str:
     if rc == 0:
         return ""
     repo_tidy._log(f"{plan.name}: git {' '.join(args)}: {err or 'failed'}", log)
-    return NO_ORIGIN
+    return no_origin(network_cause(err))
 
 
 # ----------------------------------------------------------------------
@@ -365,11 +391,12 @@ def stop_view(stop: land_resolve.Stop, repo: Path) -> StopView:
             break
     if stop.processes and problem.startswith("a process is running in it"):
         problem = _who(stop.processes)
-        action = action.replace("that terminal or session", "those terminals or sessions") \
+        action = action.replace("to end it,", "to end them,") \
             if len(stop.processes) > 1 else action
     full = stop.label + ("\nProcesses: " + ", ".join(stop.processes) if stop.processes else "")
     cap = (lambda s: s[:1].upper() + s[1:])
-    return StopView(_place(stop, repo), problem, cap(action) + "." if action else "", full)
+    end = "" if action.endswith("…") else "."  # "Press Ask Claude…", not "…."
+    return StopView(_place(stop, repo), problem, cap(action) + end if action else "", full)
 
 
 @dataclass(frozen=True)
@@ -431,7 +458,8 @@ def make_plan(name: str, path: Path, *, claude: str | None | bool = True,
     if not path.is_absolute() or not (path / ".git").exists():
         return LandPlan(name, path, (), (repo_tidy.Skip(name, str(path), "not a git checkout"),),
                         stops=(land_resolve.Stop(name, str(path), "not a git checkout, nor a "
-                                                 "link to one: fix the app's path"),))
+                                                 "link to one (the app's path is wrong): "
+                                                 + land_resolve.ASK_CLAUDE),))
     if busy == "fresh":
         busy = repo_tidy.busy_dirs()
     prep, stops = land_resolve.prep(name, path, busy)
@@ -464,10 +492,30 @@ class LandResult:
     archived: int = 0  # branches kept as archive tags in this run
     quarantined: int = 0  # files moved to quarantine in this run
     stopped: bool = False  # the owner pressed Stop before this repo landed
+    stops: tuple[land_resolve.Stop, ...] = ()  # what only the owner can clear, first first
 
     @property
     def landed(self) -> bool:
         return self.state == "landed"
+
+    @property
+    def clear_with(self) -> str:
+        """The button on this repo's Land row (spec land-blocker-actions §3):
+        "retry" for the network stop, "close" when a worktree is busy with
+        processes Lab Hub can name, else "" (Ask Claude… covers the rest)."""
+        if self.state == "landed" or self.stopped or self.state == "nothing":
+            return ""
+        if land_resolve.clearing(self.reason) == land_resolve.RETRY:
+            return land_resolve.RETRY
+        if self.busy:
+            return land_resolve.CLOSE
+        return ""
+
+    @property
+    def busy(self) -> tuple[land_resolve.Stop, ...]:
+        """The stops Close it… clears: a worktree with named processes in it."""
+        return tuple(s for s in self.stops if s.processes
+                     and land_resolve.clearing(s.reason) == land_resolve.CLOSE)
 
     @property
     def line(self) -> str:
@@ -679,16 +727,22 @@ class _Run:
             if kind == "base":
                 waiting.setdefault(default, []).append(branch)
                 why.setdefault(default, message)
+            elif kind == "protected":
+                self.blocker_stops.append(land_resolve.Stop(
+                    plan.name, branch, land_resolve.PROTECTED_STOP,
+                    files=(claude_resolve.protected_files(plan.path, default, branch)
+                           or claude_resolve.protected_names(message)),
+                    base=default))
             else:
                 self.blocker_stops.append(land_resolve.Stop(plan.name, branch,
-                                                            plain_reason(message)))
+                                                            plain_reason(message), base=default))
         for default, branches in waiting.items():
             found = _ERROR_LINE.findall(why[default])
-            detail = f" ({found[-1].strip()[:120]})" if found else ""
+            detail = f"{found[-1].strip()[:100]}; " if found else ""
             self.blocker_stops.insert(0, land_resolve.Stop(
                 plan.name, default,
-                f"fix {default}'s own tests, then Land again: they fail in a clean copy"
-                f"{detail}; waiting: {', '.join(sorted(branches))}"))
+                f"{default}'s own tests fail in a clean copy ({detail}waiting: "
+                f"{', '.join(sorted(branches))}): {land_resolve.BASE_ACTION}", base=default))
         self.stops = self.blocker_stops + self.stops
 
     def triage(self) -> None:
@@ -820,7 +874,8 @@ def land(plan: LandPlan, *, progress=None, stop=None, log: Path | None = None,
         down = preflight(plan, log)
         if down:
             return LandResult(plan.name, "not_landed", down, remaining=_remaining(plan),
-                              notes=tuple(s.label for s in plan.stops))
+                              notes=tuple(s.label for s in plan.stops),
+                              stops=(land_resolve.Stop(plan.name, str(plan.path), down),))
         run = _Run(plan, say, stop, log, busy, now, tell, clock)
         run.prep()
         first = None if plan.prep or plan.relinked else plan.actions
@@ -838,7 +893,8 @@ def land(plan: LandPlan, *, progress=None, stop=None, log: Path | None = None,
         left = land_resolve.open_items(plan.path)
         notes = tuple(s.label for s in run.stops) + tuple(run.notes)
         counts = dict(done=run.done, failed=run.failed, remaining=remaining, notes=notes,
-                      archived=run.archived, quarantined=run.quarantined)
+                      archived=run.archived, quarantined=run.quarantined,
+                      stops=tuple(run.stops))
         if run.stopped:
             return LandResult(plan.name, "not_landed", "it was stopped", **counts)
         if run.stops or left:

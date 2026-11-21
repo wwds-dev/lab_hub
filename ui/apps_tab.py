@@ -612,6 +612,7 @@ class AppsTab(TilePage):
         self.lander.step.connect(self._land_step)
         self.lander.repo_done.connect(self._land_repo_done)
         self.lander.finished.connect(self._land_finished)
+        self.lander.held.connect(self._land_held)
         # Cards Land was asked on, by repo name, held from the click: a hygiene
         # refresh or a rebuilt tile mid-Land must not lose the outcome.
         self._landing_cards: dict[str, AppCard] = {}
@@ -977,7 +978,8 @@ class AppsTab(TilePage):
             else:
                 found, unplaced = handoff.collect(window.handoff_rows(), window.handoff_paths,
                                                   window.handoff_commands,
-                                                  forbidden=self._handoff_forbidden())
+                                                  forbidden=self._handoff_forbidden(),
+                                                  goals=getattr(window, "handoff_goals", {}))
                 listing = land_resolve.cwd_listing() if found else None
                 items = []
                 for h in found:
@@ -1205,6 +1207,8 @@ class AppsTab(TilePage):
         return dialog.chosen() if dialog.exec() == QDialog.DialogCode.Accepted else []
 
     def _land_planned(self, plans) -> None:
+        if self.land_window is not None:
+            self.land_window.set_clearing("")  # a row's button led here, or nothing did
         try:
             answer = True if all(p.nothing for p in plans) else self.confirm_land(plans)
         except Exception:  # noqa: BLE001 - never leave the tiles on "Looking…"
@@ -1246,6 +1250,70 @@ class AppsTab(TilePage):
         self._land_window_owns_run = True
         self.land_window.start(plans)
         self.land_window.handoff_requested.connect(self._ask_claude_clicked)
+        self.land_window.clear_requested.connect(self.clear_land_row)
+
+    # -- a Land row's own button (spec land-blocker-actions §3) ----------------
+    def clear_land_row(self, name: str, action: str) -> None:
+        """Try again or Close it… on the Land window's row for repo `name`.
+        Clears the stop on the worker; then the repo is planned and confirmed
+        as Land always is, or the row says why the stop is still there."""
+        window = self.land_window
+        if window is None:
+            return
+        key = progress.plain(name)
+        result, path = window.results.get(key), window.handoff_paths.get(key)
+        if result is None or path is None:
+            return
+        if self.lander.busy:
+            QMessageBox.information(window, "Land", "Not now: Land is still running. Try "
+                                    "again when it has finished.")
+            return
+        stops: tuple = ()
+        if action == land_resolve.CLOSE:
+            stops = result.busy
+            if not stops or not self.confirm_close(name, Path(path), stops, window):
+                return
+        if not self.lander.clear(name, Path(path), action, stops):
+            return
+        what = ("Closing the processes, then looking at the repo…" if stops
+                else "Checking that origin answers…")
+        window.set_clearing(f"{name}: {what}")
+        card = self._card_for(name)
+        if card is not None:
+            self._landing_cards[name] = card
+            card.set_landing(what)
+        self._update_land_controls()
+
+    def confirm_close(self, name: str, repo: Path, stops, parent) -> bool:
+        """The one confirm for Close it…: every process and its folder (tests
+        replace this)."""
+        lines = [f"{p}  in  {land.stop_view(s, repo).place} ({s.target})"
+                 for s in stops for p in s.processes]
+        box = QMessageBox(parent)
+        box.setWindowTitle("Close processes")
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setTextFormat(Qt.TextFormat.PlainText)
+        n = len(lines)
+        box.setText(f"Close {n} process{'es' if n != 1 else ''} running in {name}?")
+        box.setInformativeText(
+            "\n".join(lines) + "\n\nLab Hub asks each one to quit (SIGTERM, never a forced "
+            "kill) and waits up to 5 seconds. Unsaved work in a terminal or editor there can "
+            "be lost. Then Land looks at the repo again and asks you before it runs.")
+        close = box.addButton("Close them", QMessageBox.ButtonRole.DestructiveRole)
+        cancel = box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(cancel)
+        box.exec()
+        return box.clickedButton() is close
+
+    def _land_held(self, name: str, result) -> None:
+        """A row's button ran and the stop is still there."""
+        card = self._card_for(name)
+        if card is not None:
+            card.show_outcome(result)
+        self._landing_cards.pop(name, None)
+        if self.land_window is not None:
+            self.land_window.restate(name, result)
+        self._update_land_controls()
 
     def _run_window(self) -> LandWindow | None:
         """The Land window, if it shows the Land now running; else None."""

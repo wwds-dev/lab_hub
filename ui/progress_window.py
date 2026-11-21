@@ -403,7 +403,25 @@ class Row(QFrame):
         outer.addLayout(self.grid)
         self.reason = _label("", "stateWarn", wrap=True)
         self.reason.setContentsMargins(ICON_W + 6, 0, 0, 0)
-        outer.addWidget(self.reason)
+        # The stop's own button, on its row (spec land-blocker-actions §3.1, §3.2).
+        self.on_action = None  # set by the window: called with (row, action)
+        self.view_name = ""
+        self.try_button = QPushButton("Try again")
+        self.try_button.setAutoDefault(False)
+        self.try_button.setToolTip(_plain_tip(
+            "Check that origin answers, then Land this repo again. Changes nothing in git."))
+        self.try_button.clicked.connect(lambda _=False: self._act("retry"))
+        self.close_button = QPushButton("Close it…")
+        self.close_button.setAutoDefault(False)
+        self.close_button.clicked.connect(lambda _=False: self._act("close"))
+        for button in (self.try_button, self.close_button):
+            button.hide()
+        reason_line = QHBoxLayout()
+        reason_line.setContentsMargins(0, 0, 0, 0)
+        reason_line.addWidget(self.reason, 1)
+        reason_line.addWidget(self.try_button, 0, Qt.AlignmentFlag.AlignTop)
+        reason_line.addWidget(self.close_button, 0, Qt.AlignmentFlag.AlignTop)
+        outer.addLayout(reason_line)
         self.steps = StepList()
         wrap = QHBoxLayout()
         wrap.setContentsMargins(ICON_W + 6, 4, 0, 0)
@@ -427,6 +445,10 @@ class Row(QFrame):
             self.grid.addWidget(note, 1, 2 + i * span, 1, span)
             self.chips.append(chip)
             self.notes.append(note)
+
+    def _act(self, action: str) -> None:
+        if self.on_action is not None:
+            self.on_action(self, action)
 
     def _opener_toggled(self, on: bool) -> None:
         self.opener.setArrowType(Qt.ArrowType.DownArrow if on else Qt.ArrowType.RightArrow)
@@ -468,6 +490,13 @@ class Row(QFrame):
         _set_text(self.reason, view.reason)
         _set_name(self.reason, _TONE_NAME.get(view.reason_tone, "hint") or "hint")
         self.reason.setVisible(bool(view.reason))
+        self.view_name = view.name
+        self.try_button.setVisible(view.action == "retry")
+        self.close_button.setVisible(view.action == "close")
+        if view.action == "close":
+            self.close_button.setToolTip(_plain_tip(
+                f"Ask the processes running in {view.name}'s checkout to quit (SIGTERM), "
+                "then Land it again. You see each one and confirm first."))
         expanded = view.expanded or (view.openable and opened)
         self.steps.setVisible(expanded and bool(view.steps or view.then))
         if self.steps.isVisibleTo(self):
@@ -585,6 +614,7 @@ class _Run:
         self._open = set()
         for row in self.rows:
             row.on_open = self._row_opened
+            row.on_action = self._row_action
             self._rows_box.addWidget(row)
 
     def _row_opened(self, row: "Row", opened: bool) -> None:
@@ -598,6 +628,9 @@ class _Run:
         if self.model is not None:
             self.model.dirty = True
         self.draw()
+
+    def _row_action(self, row: "Row", action: str) -> None:
+        pass  # only the Land window has row buttons
 
     def changed(self) -> None:
         """The model moved: render within 100 ms, once, if anyone can see it."""
@@ -652,6 +685,7 @@ class _Run:
         self.handoff_note.hide()
         self.handoff_paths: dict = {}  # row name -> its folder (or None)
         self.handoff_commands: dict = {}  # row name -> the command the window shows
+        self.handoff_goals: dict = {}  # row name -> what Lab Hub asks for (land-blocker-actions)
         self._handoff_open = False  # the step allows it (Review, Done, Land's end)
         self._handoff_busy = ""  # set by the page: the job now running
         return button
@@ -706,6 +740,9 @@ class LandWindow(QWidget, _Run):
 
     stop_requested = Signal()
     handoff_requested = Signal()
+    # A row's own button (spec land-blocker-actions §3): the repo's plan name
+    # and "retry" or "close".
+    clear_requested = Signal(str, str)
 
     def __init__(self, parent: QWidget | None = None, *, clock=time.monotonic,
                  wall=datetime.now) -> None:
@@ -745,6 +782,9 @@ class LandWindow(QWidget, _Run):
                                         wall=self.wall,
                                         earlier=progress.earlier_line(durations.load_runs()))
         self.results: dict[str, object] = {}
+        self.plan_names = {progress.plain(p.name): p.name for p in plans}
+        self._clearing = ""  # a row's button is running: no second one meanwhile
+        self.handoff_goals = {}
         self.handoff_paths = {progress.plain(p.name): p.path for p in plans}
         self._handoff_open = False
         self.refresh_handoff()
@@ -780,8 +820,41 @@ class LandWindow(QWidget, _Run):
         if self.model is None:
             return
         self.results[progress.plain(name)] = result
+        self.handoff_goals[progress.plain(name)] = handoff.blocker_goals(
+            getattr(result, "stops", ()))
         self.model.on_repo_done(name, result)
         self.changed()
+
+    # -- a row's own button (spec land-blocker-actions §3) --------------------
+    def _row_action(self, row: "Row", action: str) -> None:
+        if self._clearing or self.model is None or self.model.live:
+            return
+        name = self.plan_names.get(row.view_name)
+        if name is not None:
+            self.clear_requested.emit(name, action)
+
+    def set_clearing(self, what: str) -> None:
+        """A row's button is running (`what`), or "" when it has ended."""
+        old, self._clearing = self._clearing, what
+        for row in self.rows:
+            for button in (row.try_button, row.close_button):
+                button.setEnabled(not what)
+        if what:
+            self.handoff_note.setText(what)
+            self.handoff_note.show()
+        elif old and self.handoff_note.text() == old:
+            self.handoff_note.hide()
+
+    def restate(self, name: str, result) -> None:
+        """The button ran and the stop is still there: the row says why now."""
+        if self.model is None:
+            return
+        self.results[progress.plain(name)] = result
+        self.handoff_goals[progress.plain(name)] = handoff.blocker_goals(
+            getattr(result, "stops", ()))
+        self.model.restate(name, result.reason, getattr(result, "clear_with", ""))
+        self.set_clearing("")
+        self.draw()
 
     def finish(self, results, line: str | None = None, details: tuple[str, ...] = ()) -> None:
         """The end state. Without `line`, one repo's outcome in its own words."""

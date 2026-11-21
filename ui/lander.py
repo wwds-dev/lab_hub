@@ -19,7 +19,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from lab_hub import claude_resolve, land
+from lab_hub import claude_resolve, land, land_resolve
 
 Repos = list[tuple[str, Path]]
 
@@ -30,6 +30,9 @@ class Lander(QObject):
     step = Signal(object)  # land.StepEvent, start and end of each step
     repo_done = Signal(str, object)  # repo name, land.LandResult
     finished = Signal(object)  # list[land.LandResult]
+    # A row's button ran and its stop is still there: repo name, the new
+    # land.LandResult for the row (spec land-blocker-actions §3.1, §3.2).
+    held = Signal(str, object)
 
     def __init__(self, parent: QObject | None = None, *, clock=time.monotonic) -> None:
         super().__init__(parent)
@@ -65,6 +68,17 @@ class Lander(QObject):
         self._start(lambda: self._run(plans), running=True)
         return True
 
+    def clear(self, name: str, path: Path, action: str,
+              stops: tuple[land_resolve.Stop, ...] = ()) -> bool:
+        """A Land row's button: "retry" checks origin, "close" closes the
+        processes in `stops` the owner confirmed. Then the repo is planned as
+        a Land is (`planned`), or the row is told why not (`held`). False if
+        a job is already running."""
+        if self.busy or action not in (land_resolve.RETRY, land_resolve.CLOSE):
+            return False
+        self._start(lambda: self._clear(name, path, action, stops), running=False)
+        return True
+
     def stop(self) -> None:
         """End the running Claude Code or test run and skip everything after it.
         A branch already landed stays landed; its push waits for the next Land."""
@@ -95,6 +109,35 @@ class Lander(QObject):
                 plans.append(land.LandPlan(name, path, (), ()))
                 self._events.put(("progress", name, f"could not read the repo: {exc}"))
         self._events.put(("planned", plans))
+
+    def _clear(self, name: str, path: Path, action: str, stops) -> None:
+        try:
+            held = self._cleared(name, path, action, stops)
+        except Exception as exc:  # noqa: BLE001 - the row must say something
+            held = land.LandResult(name, "not_landed", f"{type(exc).__name__}: {exc}")
+        if held is not None:
+            self._events.put(("held", name, held))
+            return
+        self._plan([(name, path)])
+
+    @staticmethod
+    def _cleared(name: str, path: Path, action: str, stops) -> land.LandResult | None:
+        """None when the stop is gone; else the row's new result."""
+        if action == land_resolve.RETRY:
+            why = land.preflight(land.LandPlan(name, path))
+            if not why:
+                return None
+            return land.LandResult(name, "not_landed", why,
+                                   stops=(land_resolve.Stop(name, str(path), why),))
+        left = []
+        for stop in stops:
+            done = land_resolve.close_processes(path, Path(stop.target), stop.processes)
+            if not done.clear:
+                left.append(land_resolve.Stop(name, stop.target, done.reason, done.left))
+        if not left:
+            return None
+        return land.LandResult(name, "not_landed", land.plain_reason(left[0].reason),
+                               stops=tuple(left))
 
     def _run(self, plans: list[land.LandPlan]) -> None:
         results = []
@@ -127,11 +170,14 @@ class Lander(QObject):
                 self.step.emit(event[1])
             elif kind == "repo_done":
                 self.repo_done.emit(event[1], event[2])
-            elif kind in ("planned", "finished"):
+            elif kind in ("planned", "finished", "held"):
                 done = event
         if done is not None:
             # Clear the busy state before the callback, so it may start the next job.
             self._thread = None
             self._running = False
             self._timer.stop()
-            (self.planned if done[0] == "planned" else self.finished).emit(done[1])
+            if done[0] == "held":
+                self.held.emit(done[1], done[2])
+            else:
+                (self.planned if done[0] == "planned" else self.finished).emit(done[1])
