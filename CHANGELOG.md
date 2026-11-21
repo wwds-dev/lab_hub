@@ -16,6 +16,10 @@ README and the specs in `docs/specs/` describe them.
 ## Unreleased
 
 ### Changed
+- **Text on an Apps tile is shown as typed.** A project's name, summary and version line
+  (and the tooltips that quote them) never turn into formatting or links, which matters
+  now that a tile's name and summary can come from a project's README. A long name is
+  cut to one line on a tile with no launch command, with the whole name in its tooltip.
 - **Land checks that GitHub answers before it starts.** Each repo with an `origin` is
   asked once (about a second, at most 15 seconds) before any commit, merge, Claude
   run or test. With no network it stops in seconds with "cannot reach origin (no
@@ -41,6 +45,52 @@ README and the specs in `docs/specs/` describe them.
   longer jumps to the next section. Sideways swipes are unchanged.
 
 ### Added
+- **Apps asks about new projects in your lab folder.** A folder directly inside the
+  lab folder that is its own git project, has Foundry's `docs/foundry/app-context.md`
+  and is not on the Apps page yet gets one question in a card at the top of the page:
+  "New project in your lab folder: Kaila", with the first sentence of its README and
+  three answers:
+  - **Add to Apps** gives it a tile at once, with no restart. Nothing is started or
+    changed in the project.
+  - **Not now** asks again in 14 days.
+  - **Never for this folder** stops the question for good. **Settings ▸ Hidden
+    projects** lists the hidden folders ("Kaila · hidden for good", or "Overseer · not
+    asked until 5 Dec") with a **Show again** button, so the answer can be undone.
+  - The card shows three projects at a time and says "and N more" under them. The
+    question never blocks anything else on the page.
+  - On a first run it asks about Kaila, Overseer and Shopfront HQ. It does not ask
+    about foundry, toolbox, Lab Hub or a linked worktree of another project.
+  - It looks again at start-up and on Refresh (Cmd+R). It reads folder names, checks
+    that a few files exist and reads the start of each README: no git, no network, no
+    program is run.
+- **A project with no launch command gets a tile with no Launch button.** It shows its
+  name, its one-sentence summary, its version and its repo state, with **Land** where
+  there is something to land and **Open in Terminal** always. It has no Launch, no
+  menu bar entry and no row in Check builds, and the tile says "No launch button: it
+  has no app to open yet." Kaila, Overseer and Shopfront HQ are tiles of this kind once
+  added.
+- **Lab Hub has its own tile**, last on the Apps page: its name, "This app: the
+  launcher for the lab's projects.", the build you are running (like `v2.170`, with the
+  commit and date in the tooltip), whether that build is up to date, **Land**
+  and **Open in Terminal**. The build line is the same verdict as Lab Hub's row in Check
+  builds, worked out in the background, so it may be blank for a moment after start-up
+  or Refresh. The tile has no Launch, Bring to front, Stop, Quit or Update now, and no
+  menu bar entry; when a newer build is ready it says "N behind" and its tooltip points
+  to Check builds.
+- **Your additions live in two files of their own**, in
+  `~/Library/Application Support/Lab Hub/`: `apps-local.toml` holds the tiles you added
+  (same format as `lab_hub/apps.toml`, `[[suites]]` only) and `apps-dismissed.json` holds
+  your Not now and Never answers. `apps.toml` is never written by Lab Hub. If a project
+  is in both, the `apps.toml` entry is used and the Apps page says so. If
+  `apps-local.toml` cannot be read, Lab Hub keeps the tiles it last had, says why on the
+  Apps page and in the status bar after Refresh, asks about nothing new and writes nothing
+  into that file. If `apps-dismissed.json` cannot be read, nothing is hidden and
+  Settings says so. A new Lab Hub build still installs even if `apps-local.toml` is
+  broken, because the update's self-test only reports it.
+- **`entry` is optional in `apps.toml`.** Leave it out for a project with no launch
+  command. A forgotten `entry` now gives such a tile, with the hint line, instead of an
+  error. An older Lab Hub rejects an `apps.toml` with such a block, so move
+  one there only after this version is installed.
 - **Choose what Land all lands.** Each repo card in the Land confirmation has a
   tick box, on by default. Untick a repo to leave it out: its card folds, its
   tile goes back at once, and the title, stop count, Claude Code cost panel,

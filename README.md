@@ -89,6 +89,86 @@ One tile per umbrella app: **Sentinel**, **Imprint**, **SONAR**, **Provisio**,
 2026-10-14, so it now has a menu bar entry too). The line under each name is that
 entry's `summary` in `lab_hub/apps.toml`; all of them were rewritten on 2026-10-14
 (Sentinel's names its eight agents, SYNDUSTRYX's describes the agent company it now is).
+Tiles added from the banner below come after these, and Lab Hub's own tile is last.
+
+**How the list is made.** Two files, read at start-up and on Refresh (Cmd+R):
+
+* `lab_hub/apps.toml` is the hand-written list, tracked in this repo. Lab Hub never
+  writes it.
+* `~/Library/Application Support/Lab Hub/apps-local.toml` holds the projects you chose
+  to add from the Apps page. It has the same format, with `[[suites]]` only, and is
+  read after `apps.toml`. If a project is in both, the `apps.toml` entry is used, and
+  the Apps page and the status bar say so. A copy of Lab Hub that cannot read the file
+  keeps the tiles it last had, says why in one line at the top of the Apps page,
+  suggests nothing new and writes nothing into the file; `--selftest` only reports it,
+  so a typo there cannot make an update roll back.
+
+**New projects ask first** (spec `docs/specs/apps-discovery.md`, ADR 0007;
+`lab_hub/discovery.py`, `ui/discovery_banner.py`). A folder directly inside the lab folder
+becomes a question when all of these hold: it is a real folder (not a link, a name
+starting with `.` or `_`, or a name with spaces or odd characters), it has its own
+`.git` folder (a `.git` *file* marks a linked worktree, which is skipped), it has
+Foundry's `docs/foundry/app-context.md`, it is not Lab Hub itself, it is not already
+listed (by the same folder, or one that holds a listed project), and you have not
+hidden it. On today's lab folder that is Kaila, Overseer and Shopfront HQ; foundry and
+toolbox have no `app-context.md`, so they are never asked about.
+
+The question is a card at the top of the Apps page, one row per project, at most three
+rows and then "and N more". Each row shows the project's name (the first `# ` heading of
+its README, else the folder name), the README's first sentence (at most 220
+characters, shown as plain text and never run), and three buttons:
+
+| Answer | What happens |
+| --- | --- |
+| **Add to Apps** | Writes one entry to `apps-local.toml` and shows the tile at once, with no restart. Nothing is started or changed in the project. |
+| **Not now** | Not asked again for 14 days (the answer is kept in `apps-dismissed.json`). |
+| **Never for this folder** | Not asked again. **Settings ▸ Hidden projects** lists it with **Show again**, which removes the answer and asks about the folder on the Apps page straight away. |
+
+Looking is cheap and local: folder names, a few file-exists checks and, for a project it
+would ask about, the first 8 KiB of its README. No git, no network, and no program is run. It happens at start-up and on
+Refresh, never on the 3-second poll, so a folder created later shows up at the next
+Cmd+R. The card never blocks Launch or Land. If nothing is to be asked, there is no card.
+
+An added entry holds only what can be read from the folder: `key` and `project` are the
+folder name, `name` and `summary` come from the README (a project with no README gets
+the summary "A project in your lab folder."), and `entry` is `main.py` only when the
+folder has one, else left out. No build command is guessed. A project added with
+`main.py` gets a Launch button that runs it from its own checkout, never the installed
+app of the same name.
+
+**A tile with no launch command.** `entry` is optional. A project without it (Kaila,
+Overseer and Shopfront HQ once added) gets a tile with its name, summary, version and
+repo state, **Land** where something needs landing, and **Open in Terminal**, always
+visible. It has no Launch button, no state pill, no menu bar entry and no Check builds
+row, and its hint line reads "No launch button: it has no app to open yet." When it
+gets an app to open, add `entry` to its block and the button appears. An entry with no
+`entry` cannot set `service`, `url`, `args`, `bundle_dir`, `build`, `build_output` or
+`runs_from_source = false`. **Ask Claude** is not a tile button: it is in the Land window,
+after a run, which covers these repos too.
+
+**Lab Hub's own tile** is built in code, never from a file, so it cannot be hidden or
+edited. It shows the name, "This app: the launcher for the lab's projects.", the build
+you are running as the window title shows it (`v2.170` style; the tooltip has the
+commit and date), and one verdict line, the same as Lab Hub's row in Check builds:
+"up to date", "N commits older than its source" (the version line then adds
+"· N behind"), or "runs the checkout directly" when started from source. That line
+comes from git, so it is worked out in the background at start-up and on Refresh and is
+blank until it arrives, never on the poll. The tile has **Land** and **Open in
+Terminal**, and none of Launch, Bring to front, Stop, Quit or Update now: you are already
+in the window, and Update now stays in Check builds (the behind tooltip says so). It is
+not a second row there.
+
+**Undoing and moving an answer, by hand.**
+
+* To bring back a project you hid: **Settings ▸ Hidden projects ▸ Show again**. A Not now
+  also lapses by itself after 14 days.
+* To take an added tile off the page: delete its block (it starts with the comment "Added by
+  Lab Hub on <date>." and `[[suites]]`) from `apps-local.toml`, then press Refresh. There
+  is no remove button.
+* To move an added tile into `apps.toml`: copy its block under the matching group there,
+  delete it from `apps-local.toml`, press Refresh. If both stay, `apps.toml` wins and the
+  Apps page notes the duplicate. Do this only with a build that has this change installed:
+  an older Lab Hub rejects a whole `apps.toml` that holds a block with no `entry`.
 
 **Provisio is a native app** as of 2026-10-07: `/Applications/Provisio.app`
 (its own `scripts/install_app.sh`), a window that starts and stops its own local
@@ -137,7 +217,8 @@ Lab Hub. Two doors to the same feature is how you end up with a standalone VPN
 Agent window that knows nothing about the Sentinel session that should own
 it. The same rule covers the menu bar, which lists only these umbrella apps.
 
-A tile shows where its app will start from:
+A tile with a Launch button shows where its app will start from (a tile with no launch
+command shows none of these):
 
 | State | Meaning |
 | --- | --- |
@@ -268,7 +349,9 @@ points at), so the tile can re-read the version on every poll without a
 small file read.
 
 **Check builds** on the launchpad answers the whole question at once: for every
-registered app, is what the button would open the newest thing there is? It
+registered app with a launch command, is what the button would open the newest thing
+there is? A tile with no launch command has no row, and Lab Hub's own tile reads the
+existing Lab Hub row instead of adding one. It
 reports `behind` (commits since the build), `uncommitted` (edits the commit
 count cannot see — it only moves on commit, so a bundle built from the last
 commit looks level while the source has since been edited), `unknown` (installed
@@ -294,7 +377,8 @@ call; Refresh (⌘R) also re-runs `git_autosync/scripts/hygiene.py` in the
 background (local git only, no fetch), so there is no button to press to look.
 `lab_hub/hygiene.py`, `tests/test_hygiene.py`.
 
-A tile with something to land shows **Land** beside Launch (spec
+A tile with something to land shows **Land** beside Launch, or beside Open in Terminal
+on a tile with no launch command (spec
 `docs/specs/land-from-tiles.md`; it replaced Check repos, the Resolve window and
 its tick-boxes). One press looks at that repo, says in one sentence what it will
 do ("sonar: commit open changes in 2 worktrees, merge 3 branches into master,
@@ -888,10 +972,24 @@ fail until they are updated (see TODO). A scoped Check build says which apps it 
 at and never reports "every app", which only the launchpad's all-apps report can claim.
 
 ### Settings
-Only the lab folder, and only because it cannot always be inferred: launching an
+Cards, top to bottom: **Appearance** (System / Light / Dark), **Lab folder**,
+**Hidden projects**, **Start at login**, **This build** (version and licences) and
+**Files** (where the settings are kept).
+
+**Lab folder** is the one setting that cannot always be inferred: launching an
 installed app does not need it, but running one from source does, and the
-Dashboards tab finds its catalog one folder up from it. Blank means auto-detect
-(`$LAB_ROOT`, then the checkout this was run from, then `~/Documents/lab/active`).
+Dashboards tab finds its catalog one folder up from it, and the Apps page looks in it
+for new projects. Blank means auto-detect (`$LAB_ROOT`, then the
+checkout this was run from, then `~/Documents/lab/active`). Saving a different folder
+makes the Apps page look again.
+
+**Hidden projects** lists the folders you answered Never ("Kaila · hidden for good") or
+Not now ("Overseer · not asked until 5 Dec") on the Apps page, by name, each with a
+**Show again** button. Show again removes the answer and the Apps page asks about that
+folder at once. A Not now that has run its 14 days, and a folder that no longer exists,
+are not listed. With none, the card says "No hidden projects."; if
+`apps-dismissed.json` cannot be read, it says so and nothing is hidden. A damaged file is
+kept as `apps-dismissed.json.bad` before the next answer replaces it.
 
 ## Adding an app
 
@@ -899,11 +997,15 @@ The registered apps live in `lab_hub/apps.toml`, not in code: four groups
 (`suites`, `backup_sync`, `utilities`, `tools_only`) of `ExternalApp` fields. Today
 `suites` holds six apps, `backup_sync` two, `utilities` one and `tools_only` none.
 Add an entry and press **Refresh** (Cmd+R) — the tiles and the menu bar are
-rebuilt, no rebuild of Lab Hub needed. The installed app reads the file from
+rebuilt, no rebuild of Lab Hub needed. Only `key`, `name`, `project` and `summary` are
+required: with no `entry` the tile has no Launch button (Apps, "A tile with no launch
+command"). A project you add from the Apps page goes to
+`~/Library/Application Support/Lab Hub/apps-local.toml` instead, and `apps.toml` wins
+if a project is in both (Apps, "How the list is made"). The installed app reads the file from
 its own checkout (`<lab folder>/lab_hub/lab_hub/apps.toml`) when it is there and
 the copy bundled at build time otherwise; a file that does not parse is named in
 the status bar and the last good list is kept. `--selftest` checks the bundled
-copy.
+copy and reports `apps-local.toml` without failing on it.
 
 **Refresh is the one re-check.** Every tab implements `Refreshable`
 (`ui/tiles.py`): `refresh()` looks again, `recheck()` also forgets stale notices
@@ -1040,8 +1142,11 @@ suppressed.
     lab_hub/             no Qt imports below this line
       config.py          settings, stored in Application Support
       apps.toml          the registered apps — edit, then Refresh
+      discovery.py       finds new projects in the lab folder; keeps your answers and
+                         the entries you add (apps-dismissed.json, apps-local.toml)
       launcher/          finding, checking and starting them:
-        registry.py      ExternalApp and the groups, read from apps.toml
+        registry.py      ExternalApp and the groups, read from apps.toml, then
+                         apps-local.toml
         state.py         presence, running, version, build report, readiness
         control.py       launch, stop, bring to front, open helpers
       sites.py           the websites, and what an answer from one means
@@ -1053,7 +1158,9 @@ suppressed.
       main_window.py     the window, sidebar pages, quit guard, hide path
       sidebar.py         the left-hand navigation
       theme.py           Graphite and Paper, the only place colours live
-      apps_tab.py        app tiles, Check builds
+      apps_tab.py        app tiles, Lab Hub's own tile, Check builds
+      discovery_banner.py  the new-project question at the top of Apps
+      own_verdict.py     Lab Hub's own build verdict, worked out off the UI thread
       tools_tab.py       the All tools overview
       swipe.py           trackpad swipes between pages
       dock.py            Dock icon policy and orderOut:, via ctypes
