@@ -78,13 +78,6 @@ def lab(tmp_path):
     return root
 
 
-@pytest.fixture
-def restore_theme(qapp):
-    before = theme.mode()
-    yield qapp
-    theme.apply(qapp, mode=before)
-
-
 def _tab(lab: Path, apps=None, discover=True, **kwargs) -> AppsTab:
     if apps is None:
         apps = lambda: launcher.SUITES + (self_update.OWN_TILE,)  # noqa: E731
@@ -253,7 +246,7 @@ def test_a_name_and_summary_from_a_readme_are_plain_text(qapp):
 
 
 @pytest.mark.parametrize("mode", ["dark", "light"])
-def test_a_long_name_and_summary_do_not_widen_a_no_launch_tile(qapp, restore_theme, mode):
+def test_a_long_name_and_summary_do_not_widen_a_no_launch_tile(qapp, pristine_theme, mode):
     theme.apply(qapp, mode=mode)
     long = launcher.ExternalApp(
         "x", "A" * 60, "x", None, "word " * 44)  # the longest a README name and summary can be

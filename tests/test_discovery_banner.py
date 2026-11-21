@@ -43,13 +43,6 @@ def _drop_banners():
         shiboken6.delete(_BANNERS.pop())
 
 
-@pytest.fixture
-def restore_theme(qapp):
-    before = theme.mode()
-    yield qapp
-    theme.apply(qapp, mode=before)
-
-
 # --- the banner ---------------------------------------------------------------
 def test_the_banner_words_tooltips_and_accessible_names(qapp):
     banner = make_banner()
@@ -164,7 +157,7 @@ def test_the_tab_order_is_add_not_now_never_row_by_row(qapp):
 
 
 @pytest.mark.parametrize("mode", ["dark", "light"])
-def test_three_long_rows_never_make_the_banner_wider_than_the_column(qapp, restore_theme, mode):
+def test_three_long_rows_never_make_the_banner_wider_than_the_column(qapp, pristine_theme, mode):
     theme.apply(qapp, mode=mode)
     banner = make_banner()
     banner.set_suggestions(tuple(

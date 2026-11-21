@@ -98,6 +98,27 @@ def no_site_checks():
 
 
 @pytest.fixture
+def pristine_theme(qapp):
+    """For a test that applies a theme: put the application back as it was.
+
+    `theme.apply` leaves a stylesheet, palette and style on the QApplication, so
+    restoring only the mode (what tests/test_theme.py's own fixture does) leaves
+    every later test in a styled app. Some tests are sized for an unstyled one
+    (tests/test_land_confirm.py's screen-height check), and they pass or fail by
+    file order.
+    """
+    from ui import theme
+
+    before = (theme._chosen, theme._mode, qapp.styleSheet(), qapp.palette(),
+              qapp.style().objectName())
+    yield qapp
+    theme._chosen, theme._mode = before[0], before[1]
+    qapp.setStyle(before[4])
+    qapp.setPalette(before[3])
+    qapp.setStyleSheet(before[2])
+
+
+@pytest.fixture
 def fake_tray():
     return FakeTray()
 
