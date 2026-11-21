@@ -406,9 +406,15 @@ def test_land_shows_on_lab_hub_tile_when_its_repo_needs_attention(qapp, lab, mon
     card = tab.cards[0]
     assert _visible(card.land_button, card)
     assert card.hygiene.text() == "2 files to land"
+    planned = []
+    # No real Lander thread: only what the page asks it to look at.
+    monkeypatch.setattr(tab.lander, "plan", lambda repos: planned.append(list(repos)) or True)
+
     card.land_button.click()  # asks the page, exactly as any tile does
-    assert tab.lander.busy or card.land_button.text() in ("Land", "Landing…")
-    tab.lander.shutdown(0.1)
+
+    assert planned == [[("lab_hub", row.path)]]
+    assert tab._landing_cards["lab_hub"] is card
+    assert card.land_button.text() == "Landing…" and card.outcome.text() == "Looking at the repo…"
 
 
 def test_a_clean_lab_hub_repo_offers_no_land(qapp, lab, monkeypatch):
@@ -423,11 +429,13 @@ def test_a_clean_lab_hub_repo_offers_no_land(qapp, lab, monkeypatch):
 
 
 def test_check_builds_has_exactly_one_lab_hub_row_with_the_tile_present(window, monkeypatch):
-    """The tile reads the existing row; it must not add a second one."""
-    root = window.settings.resolved_lab_root()
+    """The tile reads the existing row; it must not add a second one. The real
+    `build_report` runs, over a registry with one launchable app, so a change
+    that made it count Lab Hub too would show two rows here."""
+    alpha = launcher.ExternalApp("alpha", "Alpha", "alpha", "main.py", "s")
+    registry.use(registry.Registry(suites=(alpha,)))
     own = BuildStatus(self_update.SELF, Version("v2", "bundle"), "current", "matches")
     monkeypatch.setattr(self_update, "self_status", lambda *a, **k: own)
-    monkeypatch.setattr(launcher, "build_report", lambda *a, **k: ())
     views = []
     real = progress.build_check_view
 
@@ -443,7 +451,9 @@ def test_check_builds_has_exactly_one_lab_hub_row_with_the_tile_present(window, 
     window.apps_tab.show_build_report()
 
     names = [item.name for item in views[0].items]
-    assert sum("Lab Hub" in name for name in names) == 1, (root, names)
+    assert sum("Lab Hub" in name for name in names) == 1, names
+    assert sum("Alpha" in name for name in names) == 1, names
+    assert len(names) == 2, names
 
 
 # --- the page: scan, answers, files -------------------------------------------
