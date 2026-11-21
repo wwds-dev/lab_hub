@@ -1472,6 +1472,35 @@ def test_the_verdict_line_for_a_run_from_source_is_what_self_status_says(lab, re
     assert self_update.verdict_line(row) == "runs the checkout directly"
 
 
+def test_the_verdict_line_is_not_up_to_date_for_a_build_ahead_of_main(row_for, lab, repo):
+    ahead = _branch_commit(repo)
+    row = row_for(lab["target"], commit=ahead, verdict="current")
+
+    line = self_update.verdict_line(row)
+
+    assert row.verdict == "current"
+    assert line == f"built from {ahead}, ahead of main."
+
+
+def test_the_verdict_line_is_not_up_to_date_when_level_with_main_but_edits_are_in_no_build(
+        row_for, lab, repo):
+    (repo / "main.py").write_text("x = 1\n")
+    level = _git(repo, "rev-parse", "--short=7", "main")
+    said = ("level with the last commit, but the checkout has uncommitted changes "
+            "that are not in this build.")
+    # build_status's own row for this case, which self_status then calls current.
+    given = launcher.BuildStatus(
+        self_update.SELF, launcher.Version(text="v2.172", commit=level), "uncommitted",
+        said, repo / "build_app.sh", "cd x && ./build_app.sh --install", project=repo)
+    row = row_for(lab["target"], verdict_row=given)
+
+    line = self_update.verdict_line(row)
+
+    assert row.verdict == "current"
+    assert "in no build until they are committed to main" in row.note
+    assert line == said
+
+
 @pytest.mark.parametrize("verdict, note", [
     ("unknown", "its release number comes from the bundle."),
     ("missing", "no checkout here, so there is nothing to compare it against."),

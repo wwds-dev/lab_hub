@@ -194,7 +194,8 @@ def verdict_line(row: BuildStatus) -> str:
 
     The words are the build report's own: "up to date", "N commits older than
     its source", "runs the checkout directly". A row that could not be judged
-    says what `build_status` said. The tile's tooltip for the behind case is
+    says what `build_status` said, and so does a current one that is ahead of
+    main or level with edits that are in no build. The tile's tooltip for the behind case is
     the UI's (spec §7); it has no Update now button, only a pointer to Check
     builds.
     """
@@ -206,6 +207,11 @@ def verdict_line(row: BuildStatus) -> str:
     if row.verdict == "current":
         if row.note.startswith(_RUNS_DIRECTLY):
             return _RUNS_DIRECTLY
+        if " ahead of " in row.note or "uncommitted" in row.note:
+            # `self_status` calls these current (Update now has nothing to do),
+            # but "up to date" would hide what the row says: say its first
+            # sentence, in build_status's own words.
+            return row.note.split(". ", 1)[0].rstrip(".") + "."
         return "up to date"
     return row.note
 
