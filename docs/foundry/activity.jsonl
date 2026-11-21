@@ -230,3 +230,5 @@
 {"ts": "2026-11-20T12:33:33", "phase": "define", "state": "start", "spec": "land-live-session-guard"}
 {"ts": "2026-11-20T12:34:05", "phase": "define", "state": "done", "spec": "land-live-session-guard"}
 {"ts": "2026-11-20T13:34:58", "phase": "build", "state": "done", "spec": "land-live-session-guard"}
+{"ts": "2026-11-21T01:56:57", "phase": "define", "state": "start", "spec": "land-network-preflight"}
+{"ts": "2026-11-21T01:57:13", "phase": "define", "state": "done", "spec": "land-network-preflight"}
