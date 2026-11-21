@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 from collections.abc import Callable
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -195,6 +197,95 @@ class RunPanel(QWidget):
         self.progress.setValue(0)
         self._finish("Stopped.")
         self.append("\nStopped.")
+
+
+def plain_tip(text: str) -> str:
+    """A tooltip that shows `text` as typed. Qt renders a tooltip as rich text
+    when it looks like HTML, and this text is git, pytest and Claude output, or
+    a name read from a file."""
+    return "<qt>" + html.escape(text).replace("\n", "<br>") + "</qt>"
+
+
+# Widgets taken out of a layout and waiting for `deleteLater`; see `discard_widget`.
+_DISCARDED: set = set()
+
+
+def discard_widget(layout, widget: QWidget) -> None:
+    """Take a widget out of a layout and have it deleted once the event loop runs.
+
+    Unparented first: a row taken out with `removeWidget` and left to its parent
+    was deleted a second time when the parent went (a segfault seen in the
+    suite). Python then owns it, so it is kept alive until Qt has really
+    deleted it: it may be the row whose button is mid-click, and dropping the
+    last reference there would delete the button under its own signal.
+    """
+    layout.removeWidget(widget)
+    widget.hide()
+    widget.setParent(None)
+    _DISCARDED.add(widget)
+    widget.destroyed.connect(lambda _obj=None, w=widget: _DISCARDED.discard(w))
+    widget.deleteLater()
+
+
+class ElidedLabel(QLabel):
+    """One line of plain text that shortens itself instead of widening its row.
+
+    A QLabel's minimum width is its text's width, so a long name (a README
+    heading, a folder name) would push a card wider than the window. This one
+    keeps the full text, shows as much as fits with an ellipsis, and puts the
+    full text in its tooltip while it is cut. It shows the text whole until Qt
+    has given it a size, so a label nobody has laid out reads as typed.
+    """
+
+    def __init__(
+        self,
+        text: str = "",
+        mode: Qt.TextElideMode = Qt.TextElideMode.ElideRight,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self._full = ""
+        self._note = ""
+        self._mode = mode
+        self._sized = False
+        self.setTextFormat(Qt.TextFormat.PlainText)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        self.setText(text)
+
+    def fullText(self) -> str:
+        return self._full
+
+    def setText(self, text: str) -> None:  # noqa: N802 - Qt override
+        self._full = text
+        self._elide()
+
+    def setNote(self, note: str) -> None:  # noqa: N802 - mirrors setText
+        """Tooltip text that stays whether or not the text is cut."""
+        self._note = note
+        self._elide()
+
+    def sizeHint(self):  # noqa: N802 - Qt override
+        hint = super().sizeHint()
+        hint.setWidth(self.fontMetrics().horizontalAdvance(self._full) + 2)
+        return hint
+
+    def minimumSizeHint(self):  # noqa: N802 - Qt override
+        hint = super().minimumSizeHint()
+        hint.setWidth(0)
+        return hint
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt override
+        super().resizeEvent(event)
+        self._sized = True
+        self._elide()
+
+    def _elide(self) -> None:
+        shown = self._full
+        if self._sized:
+            shown = self.fontMetrics().elidedText(self._full, self._mode, max(self.width(), 0))
+        super().setText(shown)
+        parts = ([self._full] if shown != self._full else []) + ([self._note] if self._note else [])
+        self.setToolTip(plain_tip("\n".join(parts)) if parts else "")
 
 
 def scroll_column(spacing: int = theme.SPACE_L, max_width: int | None = None) -> tuple[QWidget, QVBoxLayout]:
