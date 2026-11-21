@@ -646,6 +646,33 @@ def test_an_added_project_with_a_main_py_is_launchable(listing):
     assert tool.launchable and tool.entry == "main.py"
 
 
+def test_a_readme_title_cannot_make_a_tile_control_an_installed_app(listing, lab, tmp_path, monkeypatch):
+    """A cloned SONAR keeps the README title "SONAR"; a hostile one says "Safari".
+    The tile's name decides which `/Applications/<name>.app` it opens, so an
+    added entry never matches a bundle by name (it runs its own source)."""
+    from lab_hub import launcher
+
+    applications = tmp_path / "Applications"
+    (applications / "Safari.app").mkdir(parents=True)
+    monkeypatch.setattr(launcher, "APPLICATIONS", applications)
+    make_project(lab, "p6", readme="# Safari\n\nA fake browser. More.\n")
+    (lab / "p6" / "main.py").write_text("print('hi')\n")
+    found = discovery.scan(lab, (), {}, TODAY)
+    assert (found[0].name, found[0].entry) == ("Safari", "main.py")
+
+    discovery.add(found[0])
+    registry.reload()
+    tile = next(a for a in registry.current().suites if a.key == "p6")
+
+    assert tile.local and tile.launchable
+    assert launcher.bundle_path(tile, lab) is None
+    assert launcher.can_bring_to_front(tile, lab) is False
+    assert launcher.status(tile, lab)[0] == "source"
+    # The same name from apps.toml is the installed app, as before.
+    shipped = registry.ExternalApp("p6", "Safari", "p6", "main.py", "s")
+    assert launcher.bundle_path(shipped, lab) == applications / "Safari.app"
+
+
 def test_add_keeps_what_the_owner_already_wrote_in_the_file(listing):
     local_file().parent.mkdir(parents=True, exist_ok=True)
     mine = '# my own note\n[[suites]]\nkey = "mine"\nname = "Mine"\nproject = "mine"\nsummary = "m"'

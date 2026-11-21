@@ -156,6 +156,14 @@ def test_every_shipped_entry_is_launchable_and_passes_the_new_field_rules():
     assert found.apps == found.suites + found.backup_sync + found.utilities
 
 
+def test_the_shipped_entries_are_not_local_and_a_file_cannot_say_it_is():
+    assert not any(app.local for app in registry.load(registry.PACKAGE_REGISTRY).apps)
+    with pytest.raises(registry.RegistryError, match="unknown field"):
+        registry.parse(ONE_APP + "local = true\n")
+    with pytest.raises(registry.RegistryError, match="unknown field"):
+        registry.parse(ONE_APP + "local = true\n", local=True)
+
+
 def test_only_launchable_apps_are_in_apps_menu_bar_apps_and_launchpad():
     found = registry.parse(ONE_APP + NO_LAUNCH)
 
@@ -293,6 +301,15 @@ def test_local_entries_join_after_the_hand_written_suites_launchable_first(listi
     assert [a.key for a in found.suites] == ["a", "b", "kaila"]
     assert registry.local_note is None and registry.local_ok
     assert [a.key for a in found.apps] == ["a", "b"]
+
+
+def test_entries_read_from_the_local_file_are_marked_local(listing):
+    _local(NO_LAUNCH)
+
+    found = {a.key: a for a in registry.current().suites}
+
+    assert found["kaila"].local is True
+    assert found["a"].local is False
 
 
 def test_an_absent_local_file_is_not_a_broken_one(listing):

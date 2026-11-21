@@ -44,8 +44,11 @@ def bundle_path(app: ExternalApp, lab_root: Path | None = None) -> Path | None:
         # Nothing to launch, so no bundle: a stray `<name>.app` is not this
         # project's, and reporting it would offer a Launch that has no target.
         return None
+    # A name read from the owner's local file came from a README, so it must
+    # not pick an installed bundle: that app's tile would then control someone
+    # else's installed app.
     path = APPLICATIONS / f"{app.name}.app"
-    if path.is_dir():
+    if not app.local and path.is_dir():
         return path
     if app.bundle_dir is None or lab_root is None:
         return None

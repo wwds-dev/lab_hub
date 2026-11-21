@@ -33,7 +33,7 @@ import re
 import sys
 import tomllib
 import unicodedata
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from pathlib import Path
 
 REGISTRY_NAME = "apps.toml"
@@ -96,6 +96,12 @@ class ExternalApp:
     # `build_desktop.py` writes `dist/SYNDUSTRYX.app` and installs nothing.
     build: str | None = None
     build_output: str | None = None
+    # Read from the owner's local file (`LOCAL_NAME`), never from a TOML key:
+    # `parse(local=True)` sets it. Its name came from a README, so it never
+    # selects an installed `/Applications/<name>.app` (`state.bundle_path`): a
+    # clone of SONAR keeps the title "SONAR" and must run its own source, not
+    # open the installed SONAR.
+    local: bool = False
 
     @property
     def served(self) -> bool:
@@ -110,7 +116,8 @@ class ExternalApp:
 GROUPS = ("suites", "backup_sync", "utilities", "tools_only")
 
 _REQUIRED = ("key", "name", "project", "summary")
-_FIELDS = {f.name: f for f in fields(ExternalApp)}
+# `local` is set by the reader, not by a file.
+_FIELDS = {f.name: f for f in fields(ExternalApp) if f.name != "local"}
 # Fields that only mean something for an app Lab Hub can start or build.
 _NEEDS_ENTRY = ("url", "service", "args", "bundle_dir", "build", "build_output")
 
@@ -258,6 +265,8 @@ def parse(text: str, source: Path | None = None, *, local: bool = False) -> Regi
         if not isinstance(raw, list):
             raise RegistryError(f"{group} must be an array of tables ([[{group}]])")
         apps = tuple(_app(group, index, item) for index, item in enumerate(raw))
+        if local:
+            apps = tuple(replace(app, local=True) for app in apps)
         for app in apps:
             if app.key in seen:
                 raise RegistryError(f"the key '{app.key}' is used twice")
