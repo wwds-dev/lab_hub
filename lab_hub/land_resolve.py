@@ -621,7 +621,7 @@ def link_stop(checkout: Path, old: str, new: str, who: str = "it",
               fix_in: str = "the branch") -> str:
     """The stop when moving `checkout` from `old` to `new` would bring a link
     or file that §3.2 refuses, or "" when there is none."""
-    cannot = f"{who} may add a link that git cannot check: Land again, or land it by hand"
+    cannot = f"{who} may add a link that git cannot check: Land again, or press Ask Claude…"
     found = incoming(checkout, old, new)
     if found is None:
         return cannot
@@ -647,7 +647,7 @@ def link_stop(checkout: Path, old: str, new: str, who: str = "it",
         text += f"; also at {', '.join(others[:2])}"
         if len(others) > 2:
             text += f" and {len(others) - 2} more"
-    return f"{text}: remove the {what} from {fix_in}, then Land again"
+    return f"{text}: press Ask Claude… to remove the {what} from {fix_in}"
 
 
 def merge_link_stop(repo: Path, default: str, branch: str) -> str:
@@ -660,7 +660,7 @@ def merge_link_stop(repo: Path, default: str, branch: str) -> str:
         return ""  # git refuses that merge itself; the merge path says why (review P3-1)
     tree = out.splitlines()[0].strip() if out else ""
     if not trees or rc not in (0, 1) or not _OID.fullmatch(tree):
-        return "it may add a link that git cannot check: Land again, or land it by hand"
+        return "it may add a link that git cannot check: Land again, or press Ask Claude…"
     return link_stop(trees[0].path, f"refs/heads/{default}", tree)
 
 
@@ -764,22 +764,80 @@ class Stop:
     target: str
     reason: str
     processes: tuple[str, ...] = ()  # every "cmd (pid N)" in the worktree, for Details
+    files: tuple[str, ...] = ()  # a protected-file conflict: the conflicted .claude/ files
+    base: str = ""  # a merge stop: the default branch the branch (target) goes into
 
     @property
     def label(self) -> str:
-        return f"{self.repo_name}: {self.target} — {self.reason}"
+        files = ""
+        if self.files:  # names a branch chose: shown safe (review P3-6, security P3-1)
+            more = f" and {len(self.files) - 3} more" if len(self.files) > 3 else ""
+            files = f" (conflicts in {', '.join(_shown(f) for f in self.files[:3])}{more})"
+        return f"{self.repo_name}: {self.target} — {self.reason}{files}"
 
 
-# The one action each known stop asks for: the reason ends with ": <action>".
-# Only these are split off for the confirmation (spec land-confirm-dialog §8);
-# any other reason is shown whole, never cut at a colon inside a path or error.
-STOP_ACTIONS = (
-    "close that terminal or session, then Land again",
-    "finish or abort it in Terminal",
-    "resolve them in Terminal",
-    "set origin/HEAD",
-    "fix the app's path",
-)
+# What clears a stop (spec land-blocker-actions §3): its own button on the Land
+# row, or Ask Claude… (a Claude Code session the owner watches).
+ASK = "ask"
+CLOSE = "close"
+RETRY = "retry"
+CLEARING = frozenset({ASK, CLOSE, RETRY})
+
+ASK_CLAUDE = "press Ask Claude…"  # the one shared sentence (§3.3)
+CLOSE_IT = "press Close it… to end it, then Land runs again"
+TRY_AGAIN = "press Try again"
+PROTECTED_ACTION = "press Ask Claude… to merge it with Claude Code, with you watching"
+BASE_ACTION = "press Ask Claude… to fix them"
+PROTECTED_STOP = f"a conflict in .claude/ that Land may not resolve: {PROTECTED_ACTION}"
+
+# The one action each known stop asks for: the reason ends with ": <action>",
+# and what clears it. Only these are split off for the confirmation (spec
+# land-confirm-dialog §8); any other reason is shown whole, never cut at a
+# colon inside a path or error.
+STOP_ACTIONS = {
+    CLOSE_IT: CLOSE,
+    ASK_CLAUDE: ASK,
+    PROTECTED_ACTION: ASK,
+    BASE_ACTION: ASK,
+    TRY_AGAIN: RETRY,
+}
+# Every `claude_resolve.blocker_kind` value: a merge stop only a person can
+# clear, and what clears it (a test fails for a kind missing here).
+BLOCKER_ACTIONS = {"base": ASK, "protected": ASK, "link": ASK}
+# Reasons that say the network failed, not git: Try again clears them (§3.1).
+NETWORK_STARTS = ("cannot reach origin", "could not fetch")
+
+
+_REFUSED = ("permission denied", "authentication failed", "repository not found",
+            "could not read username", "could not read password", "returned error: 403",
+            "returned error: 401", "access denied")
+
+
+def refused(text: str) -> bool:
+    """git's error says origin refused us (sign-in, key, repo name), not that
+    the network is down: Try again cannot clear it (review P3-5)."""
+    low = (text or "").lower()
+    return any(word in low for word in _REFUSED)
+
+
+def clearing(reason: str) -> str:
+    """What clears a stop with this reason: RETRY, CLOSE or ASK (any other)."""
+    text = (reason or "").strip()
+    if text.startswith(NETWORK_STARTS) and not refused(text):
+        return RETRY
+    for action, how in STOP_ACTIONS.items():
+        if text.endswith(": " + action):
+            return how
+    return ASK
+
+
+def for_land(reason: str) -> str:
+    """A git-side reason in Land's words: "…, or commit it yourself" becomes
+    Ask Claude (spec land-blocker-actions §2.1); anything else unchanged."""
+    for tail in ("commit it yourself", "commit them yourself"):
+        if reason.endswith(tail):
+            return reason[: -len(tail)] + ASK_CLAUDE
+    return reason
 
 
 def in_own_tree(wt: rt.Worktree, trees: list[rt.Worktree], busy) -> bool:
@@ -814,19 +872,25 @@ def _worktree_stop_full(repo: Path, wt: rt.Worktree, busy,
     `listing` returns one shared `lsof` reading (security review P3-3)."""
     paused = rt.paused_operation(wt.path)
     if paused:
-        return f"{paused} is in progress: finish or abort it in Terminal", ()
+        return f"{paused} is in progress: {ASK_CLAUDE}", ()
     if rt.has_conflicts(wt.path):
-        return "it has unresolved conflicts: resolve them in Terminal", ()
+        return f"it has unresolved conflicts: {ASK_CLAUDE}", ()
     if busy is None:
-        return "could not check whether a process is running in it (lsof failed)", ()
+        return f"could not check whether a process is running in it (lsof failed): {ASK_CLAUDE}", ()
     if in_own_tree(wt, rt.worktrees(repo), busy):
-        found = processes_in(wt, rt.worktrees(repo), listing() if listing else None)
+        seen = listing() if listing else None
+        found = processes_in(wt, rt.worktrees(repo), seen)
         who = _first(found)
-        return (f"a process is running in it{f' ({who})' if who else ''}: close that "
-                "terminal or session, then Land again"), tuple(found)
+        if not found:  # nobody Close it… may close: in a repo nested in it, or unnamed
+            nested = _first(processes_in(wt, rt.worktrees(repo), seen, nested=True))
+            if nested:
+                return (f"a process is running in a separate repo inside it ({nested}): "
+                        f"{ASK_CLAUDE}"), ()
+            return f"a process is running in it: {ASK_CLAUDE}", ()
+        return f"a process is running in it ({who}): {CLOSE_IT}", tuple(found)
     # No process inside it is not proof nobody works here: a session opened in
     # another folder edits these files too (audit H1).
-    return rt.settling(wt.path), ()
+    return for_land(rt.settling(wt.path)), ()
 
 
 def _first(found: list[str], limit: int = 3) -> str:
@@ -874,14 +938,154 @@ def cwd_listing() -> list[tuple[str, str, Path]] | None:
 
 
 def processes_in(wt: rt.Worktree, trees: list[rt.Worktree],
-                 listing: list[tuple[str, str, Path]] | None = None) -> list[str]:
+                 listing: list[tuple[str, str, Path]] | None = None,
+                 nested: bool = False) -> list[str]:
     """Every "cmd (pid N)" whose current folder is this worktree (not one
-    nested in it), in lsof's order; [] when lsof cannot tell."""
+    nested in it, nor a separate repo inside it), in lsof's order; [] when lsof
+    cannot tell. `nested=True`: only those in a separate repo inside it."""
     if listing is None:
         listing = cwd_listing() or []
-    found = [f"{cmd} (pid {pid})" for cmd, pid, cwd in listing
-             if in_own_tree(wt, trees, (cwd,))]
+    found = [f"{cmd} (pid {pid})" for cmd, pid, cwd in _in_tree(wt, trees, listing)
+             if in_nested_repo(wt.path, cwd) == nested]
     return list(dict.fromkeys(found))
+
+
+def _in_tree(wt, trees, listing):
+    return [(cmd, pid, cwd) for cmd, pid, cwd in listing if in_own_tree(wt, trees, (cwd,))]
+
+
+def in_nested_repo(root: Path, cwd: Path) -> bool:
+    """`cwd` is inside a separate repo (a `.git` between it and `root`), such
+    as shopfront/website: its processes are not this checkout's to close
+    (review P1-2, security P2-1). Fails closed: True when it cannot tell."""
+    try:
+        root, here = root.resolve(), Path(cwd).resolve()
+    except OSError:
+        return True
+    for step in [here, *here.parents]:
+        if step == root:
+            return False
+        try:
+            if (step / ".git").exists():
+                return True
+        except OSError:
+            return True
+    return True  # not under root at all
+
+
+# ----------------------------------------------------------------------
+# Close it… (spec land-blocker-actions §3.2)
+# ----------------------------------------------------------------------
+CLOSE_WAIT = 5.0  # seconds a closed process gets to exit
+_LISTED = re.compile(r"^(?P<cmd>.*) \(pid (?P<pid>[1-9]\d{0,9})\)$")
+
+
+@dataclass(frozen=True)
+class Closed:
+    """What Close it… did in one worktree."""
+    closed: tuple[str, ...] = ()  # "cmd (pid N)" sent SIGTERM and gone from the folder
+    left: tuple[str, ...] = ()  # still running in the folder after the wait (lsof)
+    skipped: tuple[str, ...] = ()  # listed but not signalled: moved, gone, renamed, Lab Hub
+    unknown: bool = False  # lsof could not tell: nothing was signalled
+    ignored: tuple[str, ...] = ()  # of `left`, those sent SIGTERM that did not quit
+
+    @property
+    def clear(self) -> bool:
+        return not self.unknown and not self.left
+
+    @property
+    def reason(self) -> str:
+        """The row's text when the worktree is still busy; "" when it is clear."""
+        if self.unknown:
+            return f"could not check which processes run in it (lsof failed): {ASK_CLAUDE}"
+        if self.ignored:  # owner, 2026-11-21: "Option 1, accept it" (no SIGKILL, no SIGHUP)
+            return (f"still running after Close it…: {_first(list(self.ignored))} (it ignored "
+                    f"the request to quit, as an interactive shell such as zsh does; close its "
+                    f"window): {CLOSE_IT}")
+        if self.left:
+            return f"a process is running in it ({_first(list(self.left))}): {CLOSE_IT}"
+        return ""
+
+
+def _alive(pid: int, kill) -> bool:
+    # A zombie counts as alive until the wait ends; it is never reaped here,
+    # so a child Lab Hub runs keeps its exit status (QProcess, subprocess).
+    try:
+        kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # it exists; we may not signal it
+    return True
+
+
+def close_processes(repo: Path, folder: Path, listed: tuple[str, ...], *,
+                    log: Path | None = None, me: int | None = None, wait: float | None = None,
+                    listing=cwd_listing, kill=os.kill, sleep=None, clock=None) -> Closed:
+    """SIGTERM each listed "cmd (pid N)" still running in `folder` (a worktree of
+    `repo`), wait up to `wait` seconds, and re-check with lsof.
+
+    Never SIGKILL. A pid is signalled only when a fresh lsof reading shows it
+    with the same name and its current folder in this worktree (not one nested
+    in it), and it is not Lab Hub itself: a pid the owner did not see in the
+    confirm, or one reused since, is never touched. Fails closed when lsof
+    cannot tell."""
+    import signal
+    import time
+
+    sleep = sleep or time.sleep
+    clock = clock or time.monotonic
+    wait = CLOSE_WAIT if wait is None else wait
+    me = os.getpid() if me is None else me
+    trees = rt.worktrees(repo)
+    wt = next((t for t in trees if _same_dir(t.path, folder)), None)
+    now = listing() if wt is not None else None
+    if wt is None or now is None:
+        return Closed(skipped=tuple(listed), unknown=True)
+    here = {(cmd, pid) for cmd, pid, cwd in _in_tree(wt, trees, now)
+            if not in_nested_repo(wt.path, cwd)}
+    never = {me, os.getppid(), 0, 1}  # Lab Hub, whoever started it, the kernel, launchd
+    targets, skipped = [], []
+    for entry in dict.fromkeys(listed):
+        m = _LISTED.match(entry)
+        if m is None or int(m["pid"]) in never or (m["cmd"], m["pid"]) not in here:
+            skipped.append(entry)
+            continue
+        targets.append((entry, int(m["pid"])))
+    sent = []
+    for entry, pid in targets:
+        try:
+            kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            continue  # gone already: Lab Hub closed nothing (review P3-3)
+        except OSError as exc:
+            rt._log(f"Land: could not close {entry} in {folder}: {exc}", log)
+            continue
+        sent.append((entry, pid))
+    end = clock() + wait
+    while any(_alive(pid, kill) for _, pid in sent) and clock() < end:
+        sleep(0.2)
+    after = listing()
+    if not after:  # an empty reading after a signal is not "all closed" (review P3-2)
+        return Closed(skipped=tuple(skipped), unknown=True)
+    # Lab Hub, its parent and its own lsof run are never on the row.
+    left = [e for e in processes_in(wt, rt.worktrees(repo), after)
+            if not e.endswith((f" (pid {me})", f" (pid {os.getppid()})"))
+            and not e.startswith("lsof (pid ")]
+    closed = tuple(entry for entry, _ in sent if entry not in left)
+    ignored = tuple(entry for entry, _ in sent if entry in left)
+    for entry in closed:
+        rt._log(f"owner closed: {entry} in {folder}", log)
+    for entry in ignored:  # security P3-4
+        rt._log(f"owner asked to close, still running: {entry} in {folder}", log)
+    return Closed(closed, tuple(left), tuple(skipped), ignored=ignored)
+
+
+def _same_dir(a: Path, b: Path) -> bool:
+    try:
+        return a.resolve() == Path(b).resolve()
+    except OSError:
+        return False
 
 
 def _rescue_needed(repo: Path, wt: rt.Worktree) -> bool:
@@ -904,7 +1108,7 @@ def prep(name: str, repo: Path, busy) -> tuple[list[Step], list[Stop]]:
     stops: list[Stop] = []
     default = rt.default_branch(repo)
     if default is None:
-        return steps, [Stop(name, str(repo), "no default branch found: set origin/HEAD")]
+        return steps, [Stop(name, str(repo), f"no default branch found (origin/HEAD is not set): {ASK_CLAUDE}")]
     seen: list = []
 
     def listing():  # one lsof run for every busy worktree of this repo, only when needed

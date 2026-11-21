@@ -44,6 +44,37 @@ def web_available() -> bool:
     return True
 
 
+_warmed = False
+
+
+def warm_up_web_engine() -> bool:
+    """Start QtWebEngine once, early, so opening Dashboards later cannot leave fullscreen.
+
+    On macOS the first web view of a run takes the window out of native fullscreen
+    when it is first shown (verified with PySide6 6.12: lazy first view -> fullscreen
+    lost; any earlier view, even a discarded one -> kept). Without this, going
+    fullscreen and then opening Dashboards for the first time threw the window back
+    to normal size. The view is off the record and deleted at once; the real views
+    keep their own persistent profile. Returns True when it started the engine.
+    """
+    global _warmed
+    if _warmed or not web_available():
+        return False
+    _warmed = True
+    from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+
+    profile = QWebEngineProfile()  # no name: off the record, nothing written to disk
+    view = QWebEngineView()
+    page = QWebEnginePage(profile, view)
+    view.setPage(page)
+    # Page before profile: Qt warns, and on some versions aborts, when a profile goes first.
+    page.deleteLater()
+    view.deleteLater()
+    profile.deleteLater()
+    return True
+
+
 def _real_view_factory(page_owner: QWidget) -> Callable[[], QWidget]:
     """Build web views that share one persistent profile and open new windows outside."""
     from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile

@@ -129,7 +129,8 @@ def test_a_failed_step_is_reported_in_one_sentence_and_the_rest_still_run(lab, t
     assert result.state == "not_landed" and result.failed >= 1
     # land-fast §3.2 (owner-approved 2026-11-17): a failing default branch is one
     # stop that leads with the action, then the error.
-    assert result.reason.startswith("fix main's own tests, then Land again")
+    assert result.reason.startswith("main's own tests fail in a clean copy")
+    assert result.reason.endswith(": press Ask Claude… to fix them")
     assert "cannot import name 'macro'" in result.reason
     assert "not landed" not in result.reason and "\n" not in result.reason
     assert result.line.startswith("Not landed: ")

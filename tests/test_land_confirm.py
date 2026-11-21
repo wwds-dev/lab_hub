@@ -23,8 +23,8 @@ def _act(repo, name, kind, target, detail="", branch="main"):
 
 def busy_stop(name, target, processes):
     who = land_resolve._first(list(processes))
-    return land_resolve.Stop(name, str(target), f"a process is running in it ({who}): close "
-                             "that terminal or session, then Land again", tuple(processes))
+    return land_resolve.Stop(name, str(target), f"a process is running in it ({who}): "
+                             + land_resolve.CLOSE_IT, tuple(processes))
 
 
 def screenshot_plans():
@@ -71,7 +71,7 @@ def test_a_busy_stop_is_place_problem_action_with_processes_counted():
     main, tree = hub.stop_views
     assert main.place == "Main checkout"
     assert main.problem == "63 processes running in it, including node, gk and zsh"
-    assert main.action == "Close those terminals or sessions, then Land again."
+    assert main.action == "Press Close it… to end them, then Land runs again."
     assert "pid" not in main.problem and "zsh (pid 5059)" in main.full
     assert tree.place == "Worktree priceless-moore-a19001"
     assert tree.problem == "disclaimer, claude and zsh running in it"
@@ -81,14 +81,14 @@ def test_one_process_keeps_the_singular_action():
     stop = busy_stop("r", LAB, ("zsh (pid 1)",))
     view = land.stop_view(stop, LAB)
     assert view.problem == "zsh running in it"
-    assert view.action == "Close that terminal or session, then Land again."
+    assert view.action == "Press Close it… to end it, then Land runs again."
 
 
 @pytest.mark.parametrize("reason,problem,action", [
-    ("rebase is in progress: finish or abort it in Terminal", "rebase is in progress",
-     "Finish or abort it in Terminal."),
-    ("it has unresolved conflicts: resolve them in Terminal", "it has unresolved conflicts",
-     "Resolve them in Terminal."),
+    ("rebase is in progress: press Ask Claude…", "rebase is in progress",
+     "Press Ask Claude…"),
+    ("it has unresolved conflicts: press Ask Claude…", "it has unresolved conflicts",
+     "Press Ask Claude…"),
     ("could not check whether a process is running in it (lsof failed)",
      "could not check whether a process is running in it (lsof failed)", ""),
     ("gitleaks failed: exit 2: bad config", "gitleaks failed: exit 2: bad config", ""),
@@ -101,10 +101,10 @@ def test_only_known_actions_are_split_off(reason, problem, action):
 
 
 def test_a_path_that_is_no_checkout_names_the_path():
-    stop = land_resolve.Stop("r", "/apps/r", "not a git checkout, nor a link to one: "
-                             "fix the app's path")
+    stop = land_resolve.Stop("r", "/apps/r", "not a git checkout, nor a link to one (the "
+                             "app's path is wrong): press Ask Claude…")
     view = land.stop_view(stop, Path("/apps/r"))
-    assert (view.place, view.action) == ("/apps/r", "Fix the app's path.")
+    assert (view.place, view.action) == ("/apps/r", "Press Ask Claude…")
 
 
 def test_one_claude_panel_with_one_total_and_every_fact():
@@ -325,7 +325,7 @@ def test_repeated_process_names_say_how_many():
     stop = busy_stop("r", LAB, ("limactl (pid 1)", "limactl (pid 2)", "ssh (pid 3)"))
     view = land.stop_view(stop, LAB)
     assert view.problem == "3 processes running in it: limactl and ssh"
-    assert view.action == "Close those terminals or sessions, then Land again."
+    assert view.action == "Press Close it… to end them, then Land runs again."
     two = land.stop_view(busy_stop("r", LAB, ("zsh (pid 1)", "zsh (pid 2)")), LAB)
     assert two.problem == "2 processes running in it: zsh"
 

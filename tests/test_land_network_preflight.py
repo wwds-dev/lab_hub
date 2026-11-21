@@ -15,7 +15,7 @@ from lab_hub import land, repo_tidy
 from .test_land import plan_for, run
 from .test_repo_tidy import lab, make_branch, sh, squash_land  # noqa: F401 (fixture)
 
-SENTENCE = "cannot reach origin (no network?): no merge or test was started"
+SENTENCE = land.NO_ORIGIN  # spec land-blocker-actions §3.1: ends in "press Try again"
 
 
 def record_git(monkeypatch):
@@ -122,7 +122,7 @@ def test_the_stop_comes_before_prep_moves_anything(lab, tmp_path):
     assert (lab / "f.txt").read_text() == "mine"
 
 
-def test_a_timeout_gets_the_same_sentence_and_the_log_line(lab, tmp_path, monkeypatch):
+def test_a_timeout_says_so_in_the_same_sentence_and_the_log_line(lab, tmp_path, monkeypatch):
     make_branch(lab, "feat", "f.txt")
     plan = plan_for(lab)
     real = repo_tidy.git
@@ -135,7 +135,7 @@ def test_a_timeout_gets_the_same_sentence_and_the_log_line(lab, tmp_path, monkey
     monkeypatch.setattr(repo_tidy, "git", hang)
     events = []
     result = run(plan, tmp_path, events=events.append)
-    assert result.reason == SENTENCE and events == []
+    assert result.reason == land.no_origin("no answer in time") and events == []
     assert "timed out after 15 seconds" in (tmp_path / "land.log").read_text()
 
 

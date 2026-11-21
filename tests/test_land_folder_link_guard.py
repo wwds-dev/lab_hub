@@ -73,7 +73,7 @@ def test_land_stops_a_branch_whose_venv_link_would_replace_the_real_venv(
     assert asked == []
     assert result.state == "not_landed", result
     assert "it adds a link at .venv where this checkout has a real folder" in result.reason
-    assert "remove the link from the branch, then Land again" in result.reason
+    assert "press Ask Claude… to remove the link from the branch" in result.reason
 
 
 def test_without_claude_the_branch_is_still_a_named_stop(lab, tmp_path, quarantine):
@@ -164,7 +164,7 @@ def test_preps_switch_stops_when_the_default_branch_brings_the_link(lab, tmp_pat
     result = run(plan_for(lab), tmp_path)
     assert intact(lab) and tidy.current_branch(lab) == "claude/redesign"
     assert "main adds a link at .venv where this checkout has a real folder" in result.reason
-    assert "remove the link from main, then Land again" in result.reason
+    assert "press Ask Claude… to remove the link from main" in result.reason
 
 
 def test_a_switch_link_stop_holds_every_branch_and_archives_none(lab, tmp_path, quarantine,
@@ -231,8 +231,8 @@ def test_a_pull_link_stop_holds_every_branch_and_archives_none(lab, tmp_path, qu
     assert intact(lab) and asked == [] and lr.archives([("repo", lab)]) == []
     assert "feat" in tidy.local_branches(lab)
     assert result.state == "not_landed"
-    assert ("origin/main adds a link at .venv where this checkout has a real folder: remove "
-            "the link from main on the remote, then Land again") in result.reason
+    assert ("origin/main adds a link at .venv where this checkout has a real folder: press "
+            "Ask Claude… to remove the link from main on the remote") in result.reason
 
 
 def test_land_again_after_the_remote_is_fixed_pulls(lab, tmp_path, quarantine):
@@ -403,8 +403,8 @@ def test_a_plain_file_named_like_the_folder_is_stopped_too(lab, tmp_path, quaran
     real_folder(lab)
     result = run(plan_for(lab), tmp_path)
     assert intact(lab) and result.state == "not_landed"
-    assert ("it adds a file at .venv where this checkout has a real folder: remove the file "
-            "from the branch, then Land again") in result.reason
+    assert ("it adds a file at .venv where this checkout has a real folder: press Ask "
+            "Claude… to remove the file from the branch") in result.reason
 
 
 def test_a_file_named_like_an_ignored_folder_stops_without_the_folder(lab, tmp_path):
@@ -469,11 +469,11 @@ def test_the_stop_names_three_paths_and_counts_the_rest(lab, tmp_path):
     branch_with(lab, tmp_path, "five", links=[(f"p{i}", "/abs") for i in range(1, 6)])
     assert stop(lab, "five") == (
         "it adds a link at p1 whose target is an absolute path; also at p2, p3 "
-        "and 2 more: remove the link from the branch, then Land again")
+        "and 2 more: press Ask Claude… to remove the link from the branch")
     branch_with(lab, tmp_path, "four", links=[(f"q{i}", "/abs") for i in range(1, 5)])
     assert "; also at q2, q3 and 1 more:" in stop(lab, "four")
     branch_with(lab, tmp_path, "three", links=[(f"r{i}", "/abs") for i in range(1, 4)])
-    assert "; also at r2, r3: remove" in stop(lab, "three")
+    assert "; also at r2, r3: press Ask Claude… to remove" in stop(lab, "three")
 
 
 @pytest.mark.parametrize("name, shown", [

@@ -15,6 +15,12 @@ README and the specs in `docs/specs/` describe them.
 
 ## Unreleased
 
+### Fixed
+- **Opening Dashboards no longer takes the window out of fullscreen.** The first time
+  Dashboards was opened in a run, macOS dropped the window out of fullscreen (the
+  second time it did not). Lab Hub now starts the web engine once, right after the
+  window comes up, before anyone can have gone fullscreen.
+
 ### Changed
 - **The new-project question names the folder.** When a project's README title differs from
   its folder name (ignoring case), the row reads "Shopfront HQ (shopfront)", so a title
@@ -24,10 +30,30 @@ README and the specs in `docs/specs/` describe them.
   (and the tooltips that quote them) never turn into formatting or links, which matters
   now that a tile's name and summary can come from a project's README. A long name is
   cut to one line on a tile with no launch command, with the whole name in its tooltip.
+- **Every Land stop says what clears it.** No stop row ends in "merge it by hand",
+  "close that terminal" or "in Terminal" any more. A `.claude/` conflict reads "a
+  conflict in .claude/ that Land may not resolve: press Ask Claude… to merge it with
+  Claude Code, with you watching"; a failing default branch reads "main's own tests
+  fail in a clean copy (…): press Ask Claude… to fix them"; the other stops Ask
+  Claude… clears end in "press Ask Claude…". For those two, Ask Claude's session is
+  told what to do: merge the branch in a temporary worktree with you and ask before it
+  lands, or fix the failing tests on a branch and ask before merging.
+- **Try again on the network stop.** "cannot reach origin" now says what failed (name
+  lookup, a port, the proxy, a timeout) and has a **Try again** button on its Land row:
+  it checks origin again, changes nothing in git while it is down, and lands the repo
+  (after the usual confirmation) once it answers.
+- **Close it… on a busy checkout.** "a process is running in it" has a **Close it…**
+  button: you confirm the listed processes, Lab Hub asks each to quit (SIGTERM only,
+  only processes still in that checkout, never itself), waits up to 5 seconds, checks
+  again with `lsof`, and logs "owner closed: …". One that will not quit stays on the row,
+  named: an interactive zsh ignores the request, so close its Terminal window and press
+  Close it… again. A process in a separate repo inside the checkout is never closed.
+- After Try again or Close it… clears a stop, that repo lands again in the same Land
+  window: only its row resets; after Land all, the other repos' rows stay.
 - **Land checks that GitHub answers before it starts.** Each repo with an `origin` is
   asked once (about a second, at most 15 seconds) before any commit, merge, Claude
   run or test. With no network it stops in seconds with "cannot reach origin (no
-  network?): no merge or test was started", instead of reporting it after a merge and a full
+  network?), so no merge or test was started: press Try again", instead of reporting it after a merge and a full
   test run (50 minutes for imprint on 2026-11-21). Repos with no `origin`, or with
   nothing to land, are not asked. The check in the push step stays.
 - **Land and Resolve leave a repo alone while its files are still changing.** A

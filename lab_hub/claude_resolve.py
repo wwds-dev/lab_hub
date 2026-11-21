@@ -1018,13 +1018,42 @@ def base_fail_reason(default: str, status: str, output: str) -> str:
 
 def protected_reason(files: list[str]) -> str:
     names = ", ".join(_flat(f, 120) for f in files[:3]) + (" and more" if len(files) > 3 else "")
-    return (f"{_PROTECTED}: merge it by hand, then Land again ({names}; Claude Code may not "
-            "edit .claude/ files)")
+    return (f"{_PROTECTED} ({names}; Claude Code may not edit .claude/ files in an "
+            "unattended Land): press Ask Claude… to merge it with Claude Code, with you "
+            "watching")
+
+
+def protected_files(repo: Path, default: str, branch: str) -> tuple[str, ...]:
+    """The conflicted files of merging `branch` into `default` that an
+    unattended Claude run may not edit, for Ask Claude's prompt (spec
+    land-blocker-actions §3.4). Read from git; () when git cannot say."""
+    try:
+        files = conflicted_files(repo, default, branch)
+        installed = foundry_app(repo, f"refs/heads/{default}")
+    except Exception:  # noqa: BLE001 - a courtesy for the prompt, never a stop
+        return ()
+    return tuple(f for f in files if protected(f, installed))
+
+
+def protected_names(message: str) -> tuple[str, ...]:
+    """The file names `protected_reason` put in a merge's message (cut at 120
+    characters, at most three): the fallback when git cannot list them now."""
+    text = re.sub(r"^\s*(?:not landed|skipped)\s*—\s*", "", message or "")
+    head = _PROTECTED + " ("
+    if not text.startswith(head):
+        return ()
+    inner = text[len(head):].split("; Claude Code may not", 1)[0].removesuffix(" and more")
+    return tuple(n for n in inner.split(", ") if n)
+
+
+# Every value `blocker_kind` returns; `land_resolve.BLOCKER_ACTIONS` says what
+# clears each (spec land-blocker-actions §2.1, tested).
+BLOCKER_KINDS = ("base", "protected", "link")
 
 
 def blocker_kind(message: str) -> str:
-    """"base" or "protected" when a merge stopped for a reason only a person
-    can clear (land-fast §3.2, §3.3); "" otherwise."""
+    """"base", "protected" or "link" when a merge stopped for a reason only a
+    person can clear (land-fast §3.2, §3.3); "" otherwise."""
     # Only the start counts: what follows can quote file names and test
     # output, which a branch controls (review P3-4, security P3).
     text = re.sub(r"^\s*(?:not landed|skipped)\s*—\s*", "", message or "")
