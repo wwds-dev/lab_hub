@@ -785,6 +785,7 @@ class LandWindow(QWidget, _Run):
         self.results: dict[str, object] = {}
         self.plan_names = {progress.plain(p.name): p.name for p in plans}
         self._clearing = ""  # a row's button is running: no second one meanwhile
+        self._rerun = False  # one repo lands again in this window (owner, P2-4)
         self.handoff_goals = {}
         self.handoff_paths = {progress.plain(p.name): p.path for p in plans}
         self._handoff_open = False
@@ -846,6 +847,30 @@ class LandWindow(QWidget, _Run):
         elif old and self.handoff_note.text() == old:
             self.handoff_note.hide()
 
+    def rerun(self, plan) -> None:
+        """Land `plan`'s repo again here, after its row's button cleared the
+        stop: only its row is reset; the others and Ask Claude… stay."""
+        if self.model is None:
+            return
+        key = progress.plain(plan.name)
+        self.plan_names[key] = plan.name
+        self.handoff_paths[key] = plan.path
+        self.results.pop(key, None)
+        self.handoff_goals.pop(key, None)
+        self.model.rerun(plan)
+        self._rerun = True
+        self.set_clearing("")
+        self._handoff_open = False
+        self.refresh_handoff()
+        self.stop_button.setEnabled(True)
+        self.stop_button.setText("Stop landing")
+        self.stop_button.show()
+        self.note.setText("Closing this window doesn't stop landing.")
+        self.hide_button.setText("Hide")
+        self.show()
+        self.raise_()
+        self.draw()
+
     def restate(self, name: str, result, action: str = "") -> None:
         """The button ran and the stop is still there: the row says why now.
         The repo's other stops stay, with their Ask Claude goals (review P2-3):
@@ -868,6 +893,9 @@ class LandWindow(QWidget, _Run):
         """The end state. Without `line`, one repo's outcome in its own words."""
         if self.model is None:
             return
+        rerun, self._rerun = self._rerun, False
+        if rerun and line is None:  # the window's outcome counts every row it shows
+            results = list(self.results.values())
         if line is None:
             if len(results) == 1:
                 line = f"{results[0].name}: {results[0].line}"
@@ -878,7 +906,7 @@ class LandWindow(QWidget, _Run):
         first_finish = self.model.live
         self.model.finish(line, "warn" if bad else "ok", details)
         ran = [r for r in self.model.rows if r.state != progress.NOTHING]
-        if first_finish and ran:  # one entry per run that did something (review P3-4)
+        if first_finish and ran and not rerun:  # one entry per run that did something
             durations.record_run(self.model.ended_wall or self.wall(), len(ran),
                                  sum(1 for r in results if r.state == "landed"),
                                  self.model.elapsed(), self.model.stopped)

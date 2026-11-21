@@ -34,6 +34,8 @@ README and the specs in `docs/specs/` describe them.
   again with `lsof`, and logs "owner closed: …". One that will not quit stays on the row,
   named: an interactive zsh ignores the request, so close its Terminal window and press
   Close it… again. A process in a separate repo inside the checkout is never closed.
+- After Try again or Close it… clears a stop, that repo lands again in the same Land
+  window: only its row resets; after Land all, the other repos' rows stay.
 - **Land checks that GitHub answers before it starts.** Each repo with an `origin` is
   asked once (about a second, at most 15 seconds) before any commit, merge, Claude
   run or test. With no network it stops in seconds with "cannot reach origin (no

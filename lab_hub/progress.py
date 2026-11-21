@@ -526,6 +526,27 @@ class LandModel(RunModel):
         row.action = getattr(result, "clear_with", "")
         self.touch()
 
+    def rerun(self, plan) -> None:
+        """A row's button cleared its stop: that repo lands again in this window
+        (owner, P2-4: "1, re-run in the same window"). Only its row is reset;
+        the other rows keep their outcome."""
+        rows = [r for r in self.rows if plan.name in (r.key, r.name)]
+        if not rows:
+            return
+        row = rows[-1]
+        row.units = [Unit(a.kind, a.label, durations.estimate(self.history, row.subject, a.kind))
+                     for a in (*getattr(plan, "prep", ()), *plan.actions)]
+        row.state, row.status, row.tone = WAITING, "", ""
+        row.reason, row.action, row.time_text = "", "", ""
+        row.started = row.ended = None
+        if not row.units:
+            row.state, row.status, row.tone = NOTHING, "Nothing to land", "muted"
+        self.started = self.clock()
+        self.ended = self.ended_wall = None
+        self.outcome = self.outcome_tone = ""
+        self.details = ()
+        self.touch()
+
     def restate(self, name: str, reason: str, action: str) -> None:
         """A row's button ran and the stop is still there: say why now (spec
         land-blocker-actions §3.1, §3.2). Times and status stay."""

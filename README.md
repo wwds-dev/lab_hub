@@ -347,7 +347,10 @@ using only the branch, default branch and file names, quoted as data from git:
 merge in a temporary worktree, resolve the `.claude/` files with you, run the
 tests and ask before the merge lands; or reproduce and fix the failing tests on
 a branch and ask before merging. Two stops have their own button on the Land
-window's row, once the run has ended:
+window's row, once the run has ended. After either clears its stop and you
+confirm, that repo lands again in the same Land window: only its row resets,
+the other rows and Ask Claude… stay. Cancel that confirmation and the row reads
+"cleared, but the Land was cancelled: press Try again".
 - **Try again** on "cannot reach origin (<what failed>), so no merge or test was
   started" (what failed comes from git: name lookup, a port, the proxy, a
   timeout) and on a late "could not fetch". A refused sign-in, key or repo name

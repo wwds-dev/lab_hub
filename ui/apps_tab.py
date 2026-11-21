@@ -618,6 +618,7 @@ class AppsTab(TilePage):
         # refresh or a rebuilt tile mid-Land must not lose the outcome.
         self._landing_cards: dict[str, AppCard] = {}
         self._clearing: dict[str, str] = {}  # repo -> the row button now running for it
+        self._rerun_name = ""  # the repo a row's button cleared, until its Land starts
         # What is running in this process that a restart would end. The main
         # window replaces this with one that looks at every page and tool.
         self.busy_reasons: Callable[[], list[str]] = self._own_busy_reasons
@@ -1211,7 +1212,13 @@ class AppsTab(TilePage):
     def _land_planned(self, plans) -> None:
         if self.land_window is not None:
             self.land_window.set_clearing("")  # a row's button led here, or nothing did
+        rerun, self._rerun_name = self._rerun_name, ""
+        cleared = self._clearing.get(rerun, "")
         self._clearing.clear()
+        window = self.land_window
+        if rerun and window is not None and [p.name for p in plans] == [rerun]:
+            self._rerun_planned(window, plans[0], cleared)
+            return
         try:
             answer = True if all(p.nothing for p in plans) else self.confirm_land(plans)
         except Exception:  # noqa: BLE001 - never leave the tiles on "Looking…"
@@ -1279,6 +1286,7 @@ class AppsTab(TilePage):
         if not self.lander.clear(name, Path(path), action, stops):
             return
         self._clearing[name] = action
+        self._rerun_name = name  # its Land re-runs in this window (owner, P2-4)
         what = ("Closing the processes, then looking at the repo…" if stops
                 else "Checking that origin answers…")
         window.set_clearing(f"{name}: {what}")
@@ -1286,6 +1294,30 @@ class AppsTab(TilePage):
         if card is not None:
             self._landing_cards[name] = card
             card.set_landing(what)
+        self._update_land_controls()
+
+    def _rerun_planned(self, window, plan, cleared: str = "") -> None:
+        """A row's button cleared its stop: confirm as Land always does, then
+        land that repo in the same window, resetting only its row (owner, P2-4)."""
+        try:
+            answer = True if plan.nothing else self.confirm_land([plan])
+        except Exception:  # noqa: BLE001 - never leave the tile on "Looking…"
+            answer = False
+        go = answer is True or (isinstance(answer, (list, tuple))
+                                and any(p is plan for p in answer))
+        if not go:  # cancelled: the row says the stop is gone and offers Try again
+            card = self._card_for(plan.name)
+            if card is not None:
+                card.set_landing(None)
+            self._landing_cards.clear()
+            window.restate(plan.name, land.LandResult(
+                plan.name, "not_landed",
+                f"cleared, but the Land was cancelled: {land_resolve.TRY_AGAIN}"), cleared)
+            self._update_land_controls()
+            return
+        if self.lander.run([plan]):
+            self._land_window_owns_run = True
+            window.rerun(plan)
         self._update_land_controls()
 
     def confirm_close(self, name: str, repo: Path, stops, parent) -> bool:
@@ -1319,6 +1351,7 @@ class AppsTab(TilePage):
 
     def _land_held(self, name: str, result) -> None:
         """A row's button ran and the stop is still there."""
+        self._rerun_name = ""
         card = self._card_for(name)
         if card is not None:
             card.show_outcome(result)

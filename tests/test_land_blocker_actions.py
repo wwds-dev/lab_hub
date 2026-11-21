@@ -513,6 +513,79 @@ def test_try_again_on_the_land_window_lands_once_origin_answers(
     row.try_button.click()
     assert pump(lambda: tab.cards[0].outcome.text() == "Landed")
     assert len(asked) == 2 and (lab / "f.txt").exists()
+    # The same window, its row reset and landed (owner, P2-4).
+    assert pump(lambda: not tab.lander.busy and not window.model.live)
+    assert tab.land_window is window and len(window.rows) == 1
+    assert window.model.snapshot().rows[0].status == "Landed"
+    assert window.rows[0].try_button.isHidden()
+    _drop(tab)
+
+
+def test_try_again_after_land_all_keeps_the_other_rows_in_the_same_window(
+        qapp, tmp_path, lab, monkeypatch, no_claude):
+    """Owner, P2-4: "1, re-run in the same window"."""
+    from .test_land_ui import pump, tab_for
+    from .test_hygiene import _drop, _row, _write
+
+    origin = tmp_path / "other-origin.git"  # its own origin: the two never diverge
+    sh(tmp_path, "init", "-q", "--bare", "-b", "main", str(origin))
+    other = tmp_path / "other"
+    sh(tmp_path, "clone", "-q", str(origin), str(other))
+    sh(other, "checkout", "-q", "-b", "main")
+    commit(other, "o.txt")
+    sh(other, "push", "-q", "-u", "origin", "main")
+    sh(other, "remote", "set-head", "origin", "main")
+    make_branch(lab, "feat", "f.txt")
+    make_branch(other, "work", "w.txt")
+    _write(tmp_path, [_row(tmp_path, "repo", ["1 branch not merged into main"]),
+                      _row(tmp_path, "other", ["1 branch not merged into main"])])
+    good = sh(lab, "remote", "get-url", "origin")
+    sh(lab, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+    tab = tab_for(qapp, tmp_path, ["repo", "other"], monkeypatch, check_builds=True)
+    tab.refresh()
+    asked = []
+    tab.confirm_land = lambda plans: asked.append([p.name for p in plans]) or True
+    tab.land_all()
+    assert pump(lambda: not tab.lander.busy and tab.land_window is not None
+                and len(tab.land_window.results) == 2 and not tab.land_window.model.live)
+    window = tab.land_window
+    views = {v.name: v for v in window.model.snapshot().rows}
+    assert views["repo"].action == lr.RETRY and views["other"].status == "Landed"
+    sh(lab, "remote", "set-url", "origin", good)
+    repo_row = next(r for r in window.rows if r.view_name == "repo")
+    repo_row.try_button.click()
+    assert pump(lambda: not tab.lander.busy and not window.model.live
+                and window.results.get("repo") is not None)
+    assert tab.land_window is window and len(window.rows) == 2
+    views = {v.name: v for v in window.model.snapshot().rows}
+    assert views["repo"].status == "Landed" and views["other"].status == "Landed", (
+        views["repo"].reason, window.results["repo"])
+    assert asked == [["repo", "other"], ["repo"]]
+    _drop(tab)
+
+
+def test_a_cancelled_land_after_a_clear_leaves_try_again_on_the_row(
+        qapp, tmp_path, lab, monkeypatch, no_claude):
+    """Review P3-1: the row does not keep the old stop text."""
+    from .test_land_ui import has_work, pump, tab_for
+    from .test_hygiene import _drop
+
+    has_work(tmp_path, lab)
+    good = sh(lab, "remote", "get-url", "origin")
+    sh(lab, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+    tab = tab_for(qapp, tmp_path, ["repo"], monkeypatch)
+    tab.refresh()
+    answers = [True, []]
+    tab.confirm_land = lambda plans: answers.pop(0)
+    tab.cards[0].land_button.click()
+    assert pump(lambda: not tab.lander.busy and tab.land_window is not None
+                and tab.land_window.results)
+    window = tab.land_window
+    sh(lab, "remote", "set-url", "origin", good)
+    window.rows[0].try_button.click()
+    assert pump(lambda: not tab.lander.busy and not answers)
+    assert window.rows[0].reason.text().startswith("cleared, but the Land was cancelled")
+    assert not window.rows[0].try_button.isHidden() and not (lab / "f.txt").exists()
     _drop(tab)
 
 

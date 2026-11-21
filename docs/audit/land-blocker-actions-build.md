@@ -47,8 +47,9 @@ all three §6 recommendations). Built 2026-11-21 by an `engineer` session on bra
 1. After Try again or Close it… clears the stop, the repo goes through the **normal Land
    confirmation** (plan, confirm, run) rather than running unconfirmed: the plan may have
    changed, and the confirmation carries the Claude Code cost disclosure.
-2. On Land all, a row's button lands that one repo; its new Land window replaces the
-   multi-repo one (tiles keep every repo's outcome).
+2. ~~On Land all, a row's button lands that one repo in a new window.~~ Owner, P2-4:
+   "1, re-run in the same window": the repo lands again in the same Land window and only
+   its row resets (`LandModel.rerun`, `LandWindow.rerun`, `AppsTab._rerun_planned`).
 3. "could not fetch: …" (the late fetch in the push step) also gets Try again.
 4. Out of scope, left as is: `repo_tidy._claude_blocker`'s "land it by hand (Review
    branches → Open in Terminal)" is a skip reason when Claude Code is missing, not a Land
@@ -76,10 +77,12 @@ Review `docs/audit/land-blocker-actions-review.md`, security
 - P2-2: link stops end "press Ask Claude… to remove the link from <where>"; the gitleaks
   push stop ends "press Ask Claude… to remove it from those commits".
 - P2-3: `LandWindow.restate` keeps the repo's other stops and their Ask Claude goals.
-- P2-4: owner decision asked (see TODO / this file once answered).
+- P2-4: owner chose "1, re-run in the same window"; built, tested
+  (`test_try_again_after_land_all_keeps_the_other_rows_in_the_same_window`).
 - P3-2, P3-4, P3-5, P3-6, P3-7 (the `if stops:` test): fixed. P3-3: "gone already" is no
   longer logged as closed; a zombie child still makes Close it… wait the full 5 s (not
-  reaped, so a child Lab Hub runs keeps its exit status). P3-1: see P2-4.
+  reaped, so a child Lab Hub runs keeps its exit status). P3-1: fixed; a cancelled confirm leaves "cleared, but the Land was cancelled: press
+  Try again" on the row.
 - P3-8, accepted exceptions: "install or sign in to Claude Code, then Land again" and
   "Claude Code could not decide (…): Land again, or decide in Review branches": Ask
   Claude… needs Claude Code, so it cannot clear these.
