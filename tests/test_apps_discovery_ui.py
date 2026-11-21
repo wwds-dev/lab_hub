@@ -322,12 +322,31 @@ def test_the_verdict_line_and_the_behind_suffix(qapp, lab):
     assert card.version.text() == f"{version.version_string()} · 3 behind"
     assert card.version.objectName() == "stateWarn"
     assert BEHIND_TIP == "A newer build is ready to install: use Check builds."
-    assert BEHIND_TIP in card.version.toolTip() or plain_tip(BEHIND_TIP) in card.version.toolTip()
-    assert version.tooltip().split(" — ")[0] in card.version.toolTip()
+    assert card.version.toolTip() == plain_tip(version.tooltip() + "\n" + BEHIND_TIP)
 
     card.set_verdict(OwnResult(row=_row("current", note="runs the checkout directly, so ...")))
     assert card.verdict.text() == "runs the checkout directly"
     assert card.version.objectName() == "hint" and "behind" not in card.version.text()
+
+
+def test_a_projects_version_text_is_shown_as_typed_never_as_markup(qapp, lab, monkeypatch):
+    """A VERSION file is the project's own; `<b>` in it must not render."""
+    marked = Version(text="<b>BOLD</b>.007", origin="checkout", detail="from <i>VERSION</i>",
+                     commit="abc1234")
+    monkeypatch.setattr(launcher, "version", lambda app, root: marked)
+    card = AppCard(KAILA)
+
+    card.refresh_version(lab)
+
+    assert card.version.textFormat() == Qt.TextFormat.PlainText
+    assert "<b>" in card.version.text(), "the characters are kept, not interpreted"
+    tip = card.version.toolTip()
+    assert tip.startswith("<qt>") and "&lt;i&gt;VERSION&lt;/i&gt;" in tip and "<i>" not in tip
+
+    monkeypatch.setattr(launcher, "version",
+                        lambda app, root: Version(detail="read <b>VERSION</b> failed"))
+    card.refresh_version(lab)
+    assert "<b>" not in card.version.toolTip() and "&lt;b&gt;" in card.version.toolTip()
 
 
 def test_a_failed_verdict_leaves_the_line_blank_with_the_reason(qapp, lab):
@@ -493,6 +512,24 @@ def test_a_scan_that_raises_shows_nothing_and_does_not_fail_the_page(qapp, lab, 
 
     assert tab.banner.rows == []
     assert not tab.banner.isVisibleTo(tab)
+
+
+def test_a_new_lab_folder_in_settings_rescans_and_asks_for_the_verdict_again(
+        qapp, lab, tmp_path, monkeypatch):
+    other = tmp_path / "other"
+    other.mkdir()
+    tab = _page_with_projects(lab, monkeypatch, "kaila")
+    assert [r.suggestion.folder for r in tab.banner.rows] == ["kaila"]
+    asked = []
+    monkeypatch.setattr(OwnVerdict, "request", lambda self, root: asked.append(root))
+
+    tab.apply_settings(config.Settings(lab_root=str(other)))
+
+    assert tab.banner.rows == [], "the banner followed the folder"
+    assert asked == [config.Settings(lab_root=str(other)).resolved_lab_root()]
+    make_project(other, "overseer", readme="# Overseer\n\nAbout it.\n")
+    tab.apply_settings(config.Settings(lab_root=str(other)))
+    assert [r.suggestion.folder for r in tab.banner.rows] == ["overseer"]
 
 
 def test_only_the_apps_page_asks(qapp, lab, monkeypatch):

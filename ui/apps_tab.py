@@ -136,6 +136,8 @@ class AppCard(Tile):
         self.version = QLabel()
         self.version.setObjectName("hint")
         self.version.setWordWrap(True)
+        # A VERSION file is the project's own text: shown as typed, never as markup.
+        self.version.setTextFormat(Qt.TextFormat.PlainText)
 
         # Work not yet committed, pushed or merged: read from git_autosync's
         # report, so it costs a file read and never a git call on this thread.
@@ -331,10 +333,10 @@ class AppCard(Tile):
         found = launcher.version(self.app, lab_root)
         if not found.known:
             self.version.setText("")
-            self.version.setToolTip(
+            self.version.setToolTip(plain_tip(
                 f"Lab Hub cannot tell which build of {self.app.name} is installed."
                 + (f" {found.detail}." if found.detail else "")
-            )
+            ))
             self.restyle(self.version, "hint")
             return
 
@@ -348,7 +350,7 @@ class AppCard(Tile):
             if found.commit
             else f" Commit unknown: {found.commit_note or 'no evidence'}."
         )
-        self.version.setToolTip(
+        self.version.setToolTip(plain_tip(
             f"{self.app.name} {found.text} — {found.detail}.{commit}"
             + (
                 " Whether the working checkout has moved past it cannot be told: its "
@@ -362,7 +364,7 @@ class AppCard(Tile):
                 if found.stale
                 else ""
             )
-        )
+        ))
         self.restyle(self.version, "stateWarn" if found.stale else "hint")
 
     def refresh_hygiene(self, row: hygiene.RepoRow | None) -> None:
@@ -1024,6 +1026,11 @@ class AppsTab(TilePage):
         for card in self.cards:
             card.refresh_version(lab_root)
         self.refresh()
+        # A new lab folder is a Refresh moment: the banner and Lab Hub's verdict
+        # were for the old one (Add would otherwise write an entry for a folder
+        # that is not there).
+        self._scan()
+        self._request_own_verdict()
 
     def show_build_report(self) -> None:
         """Say, for every registered app, whether it is the newest available.
