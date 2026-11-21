@@ -468,12 +468,14 @@ def test_a_long_sentence_is_cut_on_a_word_boundary_with_an_ellipsis(tmp_path):
 
 def test_a_five_megabyte_readme_is_read_to_the_cap_and_no_further(tmp_path, monkeypatch):
     project = readme(tmp_path, "# Big\n\n" + "word " * 1_000_000)
-    wanted = []
+    wanted, got = [], []
     real_read = os.read
 
     def spy(fd, count):
         wanted.append(count)
-        return real_read(fd, count)
+        data = real_read(fd, count)
+        got.append(len(data))
+        return data
 
     monkeypatch.setattr(os, "read", spy)
 
@@ -481,6 +483,7 @@ def test_a_five_megabyte_readme_is_read_to_the_cap_and_no_further(tmp_path, monk
 
     assert name == "Big" and summary.endswith("…") and len(summary) <= 220
     assert wanted and max(wanted) <= discovery.README_MAX_BYTES == 8192
+    assert sum(got) <= 8192, "the total, not only each call: a loop to EOF would read 5 MB"
 
 
 def test_invalid_utf8_is_replaced_not_raised(tmp_path):
@@ -507,6 +510,15 @@ def test_control_bidi_zero_width_and_private_use_characters_are_dropped(tmp_path
         assert not any(c in text for c in "\0‮​\x07")
 
 
+def test_surrogate_and_unassigned_code_points_are_dropped_too(tmp_path):
+    # Cs cannot survive a UTF-8 decode, so `_clean` is tried directly; Cn (U+0378
+    # is unassigned) comes through a real file.
+    assert discovery._clean("a\ud800b\udfffc") == "abc"
+    project = readme(tmp_path, "# Ka\u0378ila\n\nText\u0378 here.\n")
+
+    assert discovery.describe(project) == ("Kaila", "Text here.")
+
+
 def test_whitespace_runs_collapse_and_a_tab_is_a_space(tmp_path):
     project = readme(tmp_path, "# T\n\nOne\t\ttwo   three   four.\n")
 
@@ -528,6 +540,78 @@ def test_a_fifo_or_symlink_readme_returns_instead_of_hanging(tmp_path):
     assert discovery.describe(fifo) == ("fifo", FALLBACK)
     assert discovery.describe(linked) == ("linked", FALLBACK)
     assert discovery.describe(adir) == ("adir", FALLBACK)
+
+
+def _lstat_says_regular(monkeypatch, path: Path, like: Path) -> None:
+    """The swap-after-`lstat` case: the check sees an ordinary file, the open
+    then meets whatever was put in its place."""
+    real, regular = os.lstat, os.lstat(like)
+
+    def lstat(target, *args, **kwargs):
+        return regular if os.fspath(target) == os.fspath(path) else real(target, *args, **kwargs)
+
+    monkeypatch.setattr(os, "lstat", lstat)
+
+
+def _swapped_in(tmp_path, make) -> tuple[Path, Path]:
+    project = tmp_path / "swapped"
+    project.mkdir()
+    make(project / "README.md")
+    plain = tmp_path / "plain.txt"
+    plain.write_text("x")
+    return project, plain
+
+
+def test_a_readme_that_is_not_a_regular_file_is_never_opened(tmp_path, monkeypatch):
+    project, _ = _swapped_in(tmp_path, os.mkfifo)
+    opened = []
+    real_open = os.open
+    monkeypatch.setattr(os, "open", lambda *a, **k: opened.append(a) or real_open(*a, **k))
+
+    assert discovery.describe(project) == ("swapped", FALLBACK)
+    assert opened == [], "the lstat check comes before the open"
+
+
+def test_a_link_swapped_in_after_the_lstat_check_is_still_not_followed(tmp_path, monkeypatch):
+    target = tmp_path / "secret.txt"
+    target.write_text("# Leaked\n\nSecret.\n")
+    project, plain = _swapped_in(tmp_path, lambda path: path.symlink_to(target))
+    _lstat_says_regular(monkeypatch, project / "README.md", plain)
+
+    assert discovery.describe(project) == ("swapped", FALLBACK), "O_NOFOLLOW"
+
+
+def test_a_pipe_swapped_in_after_the_lstat_check_does_not_hang_the_scan(tmp_path, monkeypatch):
+    import threading
+
+    project, plain = _swapped_in(tmp_path, os.mkfifo)
+    fifo = project / "README.md"
+    _lstat_says_regular(monkeypatch, fifo, plain)
+    result = []
+    worker = threading.Thread(target=lambda: result.append(discovery.describe(project)), daemon=True)
+
+    worker.start()
+    worker.join(3)
+    hung = worker.is_alive()
+    if hung:  # let the blocked open through so the thread does not outlive the test
+        os.close(os.open(fifo, os.O_RDWR))
+        worker.join(3)
+
+    assert not hung, "O_NONBLOCK: opening a pipe nobody writes to must not wait"
+    assert result == [("swapped", FALLBACK)]
+
+
+def test_a_pipe_with_text_in_it_is_not_read_even_if_lstat_called_it_regular(tmp_path, monkeypatch):
+    project, plain = _swapped_in(tmp_path, os.mkfifo)
+    fifo = project / "README.md"
+    _lstat_says_regular(monkeypatch, fifo, plain)
+    writer = os.open(fifo, os.O_RDWR | os.O_NONBLOCK)
+    try:
+        os.write(writer, b"# Evil\n\nBad text.\n")
+
+        assert discovery.describe(project) == ("swapped", FALLBACK), "the fstat check"
+    finally:
+        os.close(writer)
 
 
 def test_an_empty_readme_gives_the_fallback(tmp_path):
@@ -566,19 +650,25 @@ def test_a_hostile_string_round_trips_to_exactly_one_table_with_exact_values(val
     assert data == {"suites": [{"key": "k", "name": "N", "project": "k", "summary": value}]}
 
 
-def test_the_hostile_table_would_catch_a_naive_writer():
-    """Mutation check, kept as a test: with `f'"{v}"'` in place of
-    `toml_string`, at least one row above fails to round-trip."""
-    broken = 0
-    for value in HOSTILE:
-        try:
-            data = tomllib.loads(_one_entry(f'"{value}"'))
-        except tomllib.TOMLDecodeError:
-            broken += 1
-            continue
-        if data != {"suites": [{"key": "k", "name": "N", "project": "k", "summary": value}]}:
-            broken += 1
-    assert broken >= 8
+def _entry_text_reads_back_exactly(value: str) -> bool:
+    """The module's own path: `render_entry`, read back by `tomllib`."""
+    text = discovery.render_entry(discovery.Suggestion("k", "N", value, None))
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return False
+    return data == {"suites": [{"key": "k", "name": "N", "project": "k", "summary": value}]}
+
+
+def test_the_hostile_table_would_catch_a_naive_writer(monkeypatch):
+    """Mutation check, kept as a test and run through the module: the real
+    `toml_string` passes every row, and with `f'"{v}"'` swapped in for it at
+    least 8 rows stop reading back as written."""
+    assert all(_entry_text_reads_back_exactly(value) for value in HOSTILE)
+
+    monkeypatch.setattr(discovery, "toml_string", lambda value: f'"{value}"')
+
+    assert sum(not _entry_text_reads_back_exactly(value) for value in HOSTILE) >= 8
 
 
 def test_toml_string_escapes_every_control_character_and_nothing_raw_survives():
@@ -733,6 +823,33 @@ def test_an_entry_the_registry_would_refuse_is_never_written(listing, bad):
         discovery.add(bad)
 
     assert not local_file().exists()
+
+
+def test_add_checks_what_it_would_write_even_if_the_writer_were_broken(listing, monkeypatch):
+    """The second layer (spec 13.3, verify before writing). With a naive writer
+    this README makes two valid entries, so the registry's own rules accept the
+    last one; only the comparison with the fields meant refuses it."""
+    monkeypatch.setattr(discovery, "toml_string", lambda value: f'"{value}"')
+    hostile = discovery.Suggestion(
+        "p1", "P1", 'x"\n[[suites]]\nkey = "evil"\nname = "E"\nproject = "e"\nsummary = "z', None)
+
+    with pytest.raises(discovery.DiscoveryError, match="did not read back"):
+        discovery.add(hostile)
+
+    assert not local_file().exists()
+
+
+def test_add_refuses_a_file_that_would_outgrow_what_the_registry_reads(listing, monkeypatch):
+    discovery.add(KAILA)
+    before = local_file().read_bytes()
+    monkeypatch.setattr(registry, "LOCAL_MAX_BYTES", len(before) + 20)
+    registry.reload()
+    assert registry.local_ok, "the file as it is still fits"
+
+    with pytest.raises(discovery.DiscoveryError, match="too big"):
+        discovery.add(discovery.Suggestion("overseer", "Overseer", "Another project.", None))
+
+    assert local_file().read_bytes() == before
 
 
 def test_add_refuses_a_local_file_it_cannot_parse_and_leaves_its_bytes(listing):

@@ -41,9 +41,10 @@ def test_the_menu_lists_the_top_level_apps(menu_bar_item):
 
     labels = [a.text() for a in menu_bar_item._menu.actions() if a.text()]
 
-    for app in launcher.SUITES + launcher.BACKUP_SYNC_APPS:
-        if app.launchable:  # a tile with no launch command has no menu entry
-            assert app.name in labels
+    launchable = [a for a in launcher.SUITES + launcher.BACKUP_SYNC_APPS if a.launchable]
+    assert launchable, "a registry of only no-launch apps would make this loop assert nothing"
+    for app in launchable:  # a tile with no launch command has no menu entry
+        assert app.name in labels
     assert "Unblock Tracker" not in labels
 
 

@@ -496,6 +496,17 @@ def test_merge_local_is_pure_and_keeps_the_base(tmp_path):
     assert merged != base, "equality sees the local entries, so reload notices an edit"
 
 
+def test_merge_local_keeps_only_the_first_of_two_local_entries_with_one_key():
+    base = registry.parse(ONE_APP)
+    kaila = registry.parse(NO_LAUNCH).suites[0]
+    twin = registry.ExternalApp("kaila", "Twin", "twin", None, "s")  # a hand edit can do this
+
+    merged, notes = registry.merge_local(base, (kaila, twin))
+
+    assert [a.name for a in merged.suites] == ["A", "Kaila"]
+    assert len(notes) == 1 and notes[0].startswith("kaila is already in apps.toml")
+
+
 def test_the_reserved_keys_match_lab_hubs_own_row_and_tile():
     from lab_hub import self_update
 

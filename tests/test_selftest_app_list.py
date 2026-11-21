@@ -74,9 +74,25 @@ def test_a_broken_apps_toml_is_still_a_problem(monkeypatch, tmp_path, capsys):
     assert any("an app list was skipped" in p for p in problems)
 
 
-def test_the_selftest_itself_asks_that_function(monkeypatch):
-    """`selftest` must put `_app_list_problems()` into its `problems`, so the
-    two cannot drift apart."""
-    import inspect
+def test_the_selftest_itself_asks_that_function(monkeypatch, capsys):
+    """`selftest` must put what `_app_list_problems()` returns into its
+    `problems`, so the two cannot drift apart: run it with that function
+    stubbed and the probes that start programs stubbed out."""
+    from ui import appkit_guard
 
-    assert "_app_list_problems()" in inspect.getsource(main.selftest)
+    monkeypatch.setattr(main, "_probe_child_launches", lambda lab_root: [])
+    monkeypatch.setattr(main, "_probe_dock_policy", lambda: "stubbed")
+    monkeypatch.setattr(main, "_probe_web_render", lambda: (True, "stubbed"))
+    monkeypatch.setattr(main, "_probe_tls", lambda: (True, "stubbed"))
+    monkeypatch.setattr(main, "_probe_conversion", lambda: (True, "stubbed"))
+    monkeypatch.setattr(appkit_guard, "install", lambda: True)
+    monkeypatch.setattr(main, "_app_list_problems", lambda: ["THE APP LIST IS BAD"])
+
+    code = main.selftest()
+
+    assert code == 1
+    assert "- THE APP LIST IS BAD" in capsys.readouterr().out
+
+    monkeypatch.setattr(main, "_app_list_problems", lambda: [])
+    main.selftest()
+    assert "THE APP LIST IS BAD" not in capsys.readouterr().out

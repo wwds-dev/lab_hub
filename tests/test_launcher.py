@@ -1889,9 +1889,40 @@ def test_launching_or_raising_an_entry_less_app_is_refused_before_anything_runs(
             call()
 
 
-def test_the_dirty_cache_comment_says_one_worker_may_fill_it():
-    """Lab Hub's tile verdict runs on a worker thread (ui/own_verdict.py)."""
-    source = Path(launcher.state.__file__).read_text()
+def test_the_launcher_caches_are_only_read_and_written_never_cleared_or_walked():
+    """Lab Hub's tile verdict (ui/own_verdict.py) fills the git caches from one
+    worker thread while the GUI thread fills them too. That is safe only while
+    each cache is a plain dict with single gets and sets: a `.clear()`, a `del`
+    or a loop over one could meet a second writer mid-way. Checked on the code,
+    not on its comment."""
+    import ast
 
-    assert "GUI thread only" not in source
-    assert "worker thread" in source
+    tree = ast.parse(Path(launcher.state.__file__).read_text())
+
+    def target(node):
+        return node.target if isinstance(node, ast.AnnAssign) else node.targets[0]
+
+    caches = {
+        target(node).id
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.AnnAssign, ast.Assign))
+        and isinstance(target(node), ast.Name) and target(node).id.endswith("_CACHE")
+    }
+    assert {"_COUNT_CACHE", "_COMMIT_CACHE", "_DIRTY_CACHE", "_BEHIND_CACHE",
+            "_ROOT_BEHIND_CACHE", "_SHALLOW_CACHE"} <= caches
+
+    def is_cache(node) -> bool:
+        return isinstance(node, ast.Name) and node.id in caches
+
+    walked = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if is_cache(node.func.value) and node.func.attr != "get":
+                walked.append((node.lineno, node.func.attr))
+        elif isinstance(node, ast.Delete):
+            walked += [(node.lineno, "del") for t in node.targets
+                       if isinstance(t, ast.Subscript) and is_cache(t.value)]
+        elif isinstance(node, (ast.For, ast.comprehension)) and is_cache(node.iter):
+            walked.append((getattr(node, "lineno", 0), "iterated"))
+
+    assert walked == []
