@@ -1410,3 +1410,89 @@ def test_a_skipped_lab_hub_is_not_counted_and_is_named_after_another_failure(qap
         "1 of 1 rebuild failed: X. See the live output. "
         "Lab Hub itself was not rebuilt; its row says why.")
     assert window.cancel_button.text() == "Close"
+
+
+# -- Lab Hub's tile (spec apps-discovery §13.4) -------------------------------------
+def test_the_build_row_and_the_tile_use_keys_no_registry_file_may_define():
+    from lab_hub.launcher import registry
+
+    assert self_update.SELF.key in registry.RESERVED
+    assert self_update.SELF.project in registry.RESERVED
+    assert self_update.OWN_TILE.key in registry.RESERVED
+    assert self_update.OWN_TILE.project in registry.RESERVED
+    assert (self_update.OWN_TILE.key, self_update.OWN_TILE.project) == (
+        self_update.SELF.key, self_update.SELF.project)
+
+
+def test_the_tile_is_the_no_launch_kind_and_is_in_no_registry_group():
+    from lab_hub.launcher import registry
+
+    tile = self_update.OWN_TILE
+
+    assert tile.entry is None and not tile.launchable
+    assert tile.name == "Lab Hub"
+    assert tile.summary == "This app: the launcher for the lab's projects."
+    assert tile not in registry.current().suites + registry.current().apps
+    assert tile.key not in {a.key for group in registry.current().groups() for a in group}
+    assert self_update.SELF.launchable, "the build row still compares the installed bundle"
+
+
+def test_no_shipped_registry_entry_has_a_reserved_key_or_folder():
+    from lab_hub.launcher import registry
+
+    shipped = registry.load(registry.PACKAGE_REGISTRY)
+
+    assert all(a.key not in registry.RESERVED for group in shipped.groups() for a in group)
+    assert all(a.project not in registry.RESERVED for group in shipped.groups() for a in group)
+
+
+def _row(verdict: str, note: str = "n.", behind: int = 0) -> launcher.BuildStatus:
+    return launcher.BuildStatus(
+        self_update.SELF, launcher.Version(text="v2.172", behind=behind), verdict, note)
+
+
+@pytest.mark.parametrize("behind, line", [
+    (1, "1 commit older than its source"),
+    (3, "3 commits older than its source"),
+    (0, "older than its source"),
+])
+def test_the_verdict_line_says_how_far_behind_it_is(behind, line):
+    assert self_update.verdict_line(_row("behind", behind=behind)) == line
+
+
+def test_the_verdict_line_says_up_to_date_for_a_current_build():
+    assert self_update.verdict_line(
+        _row("current", "built at v2.172 and level with main.")) == "up to date"
+
+
+def test_the_verdict_line_for_a_run_from_source_is_what_self_status_says(lab, repo):
+    row = self_update.self_status(repo.parent, running=None)
+
+    assert row.note.startswith("runs the checkout directly")
+    assert self_update.verdict_line(row) == "runs the checkout directly"
+
+
+@pytest.mark.parametrize("verdict, note", [
+    ("unknown", "its release number comes from the bundle."),
+    ("missing", "no checkout here, so there is nothing to compare it against."),
+    ("uncommitted", "level with the last commit, but the checkout has uncommitted changes."),
+])
+def test_a_row_that_cannot_be_called_current_or_behind_says_build_statuss_own_words(verdict, note):
+    assert self_update.verdict_line(_row(verdict, note)) == note
+
+
+def test_the_tile_adds_nothing_to_the_check_builds_report(monkeypatch, tmp_path):
+    """`build_report` reads the registry, which never holds OWN_TILE; Lab Hub's
+    row is appended once, by `self_status`."""
+    from lab_hub.launcher import registry
+
+    registry.use(registry.Registry(suites=(
+        launcher.ExternalApp("a", "A", "a", "main.py", "s"),
+        launcher.ExternalApp("kaila", "Kaila", "kaila", None, "s"),
+    )))
+    try:
+        keys = [row.app.key for row in launcher.build_report(tmp_path)]
+    finally:
+        registry.use(None)
+
+    assert "lab_hub" not in keys and "kaila" not in keys

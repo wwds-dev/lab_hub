@@ -61,7 +61,10 @@ OUTCOME_MAX_BYTES = 4096
 _SHA = re.compile(r"[0-9a-f]{40}")
 _UNSET = object()  # "ask the running process", as opposed to an explicit None
 
-# Lab Hub as a build-report row. Never registered: no tile, no menu bar entry.
+# Lab Hub as a build-report row. It has no registry entry and no menu bar entry;
+# its Apps tile is `OWN_TILE` below. It keeps `entry="main.py"` because
+# `self_status` compares the installed bundle against this checkout. Its key
+# and project are in `registry.RESERVED`, so no registry file can define them.
 SELF = ExternalApp(
     key="lab_hub",
     name="Lab Hub",
@@ -69,6 +72,20 @@ SELF = ExternalApp(
     entry="main.py",
     summary="This app.",
 )
+
+# Lab Hub's own tile on the Apps page (spec `apps-discovery` §5, ADR 0007):
+# built here, never read from a registry file, so it can be neither hidden nor
+# edited. No entry, so it is the no-launch kind: no Launch, Bring to front,
+# Stop or Quit, and it is in no group, so the tray and Settings never see it.
+OWN_TILE = ExternalApp(
+    key="lab_hub",
+    name="Lab Hub",
+    project="lab_hub",
+    entry=None,
+    summary="This app: the launcher for the lab's projects.",
+)
+
+_RUNS_DIRECTLY = "runs the checkout directly"
 
 
 # -- which copy is running --------------------------------------------------
@@ -172,6 +189,27 @@ def staged_bundle() -> Path:
 
 
 # -- the build-report row ---------------------------------------------------
+def verdict_line(row: BuildStatus) -> str:
+    """One line for Lab Hub's tile from its build row (`self_status`).
+
+    The words are the build report's own: "up to date", "N commits older than
+    its source", "runs the checkout directly". A row that could not be judged
+    says what `build_status` said. The tile's tooltip for the behind case is
+    the UI's (spec §7); it has no Update now button, only a pointer to Check
+    builds.
+    """
+    if row.verdict == "behind":
+        count = row.version.behind
+        if count > 0:
+            return f"{count} commit{'' if count == 1 else 's'} older than its source"
+        return "older than its source"
+    if row.verdict == "current":
+        if row.note.startswith(_RUNS_DIRECTLY):
+            return _RUNS_DIRECTLY
+        return "up to date"
+    return row.note
+
+
 def self_status(lab_root: Path, *, running: object = _UNSET) -> BuildStatus:
     """Lab Hub's own row: the installed build against its checkout, and the
     command Update now may run for it (None, with the reason in the note, when
@@ -185,7 +223,7 @@ def self_status(lab_root: Path, *, running: object = _UNSET) -> BuildStatus:
         return replace(
             row, verdict="current", restarts=True, command=None, by_hand=False,
             forward=False, guide=None,
-            note="runs the checkout directly, so it is always what the source "
+            note=f"{_RUNS_DIRECTLY}, so it is always what the source "
                  "says; Update now has nothing to restart.")
     row = replace(build_status(SELF, lab_root), restarts=True)
 

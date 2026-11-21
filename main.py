@@ -204,6 +204,44 @@ def _probe_dock_policy() -> str:
     )
 
 
+def _app_list_problems() -> list[str]:
+    """Print what the app list says and return what fails the self-test.
+
+    The app list is data now, read at runtime. The bundled copy is the
+    fallback for a Mac with no Lab Hub checkout, so it has to be in the
+    bundle and it has to parse; a broken checkout copy is reported, since
+    Refresh would quietly keep the last good list.
+
+    The owner's own file (`apps-local.toml`) is printed and never a problem:
+    the self-update helper self-tests the installed copy and rolls the update
+    back on failure, and a typo in a file this build does not ship must not be
+    able to undo an update (ADR 0007).
+    """
+    from lab_hub.launcher import registry
+
+    problems: list[str] = []
+    bundled_ok = True
+    try:
+        bundled = registry.load(registry.PACKAGE_REGISTRY)
+        bundled_note = f"{len(bundled.apps)} apps"
+    except registry.RegistryError as error:
+        bundled_ok, bundled_note = False, str(error)
+    print(f"  app list:        {registry.PACKAGE_REGISTRY} ({bundled_note})")
+    if not bundled_ok:
+        problems.append(f"the bundled app list is unusable: {bundled_note}")
+    try:
+        in_force = registry.current()
+        print(f"  app list used:   {in_force.source} ({len(in_force.apps)} apps)")
+    except registry.RegistryError as error:
+        problems.append(f"no usable app list: {error}")
+    if registry.last_error:
+        print(f"  app list note:   {registry.last_error}")
+        problems.append(f"an app list was skipped: {registry.last_error}")
+    if registry.local_note:
+        print(f"  added projects:  {registry.local_note}")
+    return problems
+
+
 def selftest() -> int:
     from lab_hub import APP_NAME, asset_path, config, launcher
 
@@ -360,29 +398,7 @@ def selftest() -> int:
     if not any(ok for _name, ok, _detail in probed):
         print("    (nothing probed — no project venv with PySide6 available)")
 
-    # The app list is data now, read at runtime. The bundled copy is the
-    # fallback for a Mac with no Lab Hub checkout, so it has to be in the
-    # bundle and it has to parse; a broken checkout copy is reported, since
-    # Refresh would quietly keep the last good list.
-    from lab_hub.launcher import registry
-
-    bundled_ok = True
-    try:
-        bundled = registry.load(registry.PACKAGE_REGISTRY)
-        bundled_note = f"{len(bundled.apps)} apps"
-    except registry.RegistryError as error:
-        bundled_ok, bundled_note = False, str(error)
-    print(f"  app list:        {registry.PACKAGE_REGISTRY} ({bundled_note})")
-    if not bundled_ok:
-        problems.append(f"the bundled app list is unusable: {bundled_note}")
-    try:
-        in_force = registry.current()
-        print(f"  app list used:   {in_force.source} ({len(in_force.apps)} apps)")
-    except registry.RegistryError as error:
-        problems.append(f"no usable app list: {error}")
-    if registry.last_error:
-        print(f"  app list note:   {registry.last_error}")
-        problems.append(f"an app list was skipped: {registry.last_error}")
+    problems.extend(_app_list_problems())
 
     # Reported but never fatal: whether the other apps are installed says
     # nothing about whether this build is sound. A bundle that has lost its

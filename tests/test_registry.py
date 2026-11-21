@@ -438,3 +438,10 @@ def test_merge_local_is_pure_and_keeps_the_base(tmp_path):
     assert [a.key for a in base.suites] == ["a"]
     assert merged.source == base.source
     assert merged != base, "equality sees the local entries, so reload notices an edit"
+
+
+def test_the_reserved_keys_match_lab_hubs_own_row_and_tile():
+    from lab_hub import self_update
+
+    assert {self_update.SELF.key, self_update.SELF.project} <= registry.RESERVED
+    assert {self_update.OWN_TILE.key, self_update.OWN_TILE.project} <= registry.RESERVED
