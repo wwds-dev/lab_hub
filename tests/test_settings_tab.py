@@ -310,6 +310,28 @@ def test_hidden_names_are_plain_text(qapp, tmp_path, monkeypatch):
     assert tab.hidden_items[0]["label"].textFormat() == Qt.TextFormat.PlainText
 
 
+def test_a_failed_show_again_reports_its_reason_as_plain_text(qapp, tmp_path, monkeypatch):
+    from datetime import date
+
+    from PySide6.QtCore import Qt
+
+    from lab_hub import discovery
+
+    lab = _hidden_setup(tmp_path, monkeypatch, ("kaila", "# Kaila\n"))
+    discovery.dismiss("kaila", "never", date(2026, 11, 21))
+    tab = SettingsTab(config.Settings(lab_root=str(lab)))
+
+    def broken(folder):
+        raise discovery.DiscoveryError("<b>disk</b> <a href='x'>full</a>")
+
+    monkeypatch.setattr(discovery, "forget", broken)
+    tab._show_again("kaila")
+
+    error = tab.hidden_items[0]["error"]
+    assert "<b>disk</b>" in error.text()  # shown as typed, never rendered
+    assert error.textFormat() == Qt.TextFormat.PlainText
+
+
 def test_an_unchanged_list_is_not_rebuilt_under_the_keyboard(qapp, tmp_path, monkeypatch):
     from datetime import date
 

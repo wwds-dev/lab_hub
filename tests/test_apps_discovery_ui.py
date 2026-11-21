@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 import shiboken6
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QCoreApplication, Qt
 from PySide6.QtWidgets import QPushButton, QScrollArea
 
 from lab_hub import config, discovery, hygiene, launcher, progress, self_update, version
@@ -56,7 +56,11 @@ def _drop_tabs():
         if tab._hygiene_proc is not None:
             tab._hygiene_proc.kill()
             tab._hygiene_proc.waitForFinished(2000)
+        # A LayoutRequest queued a singleShot(0, equalise): run it now, while the
+        # cards exist, so no later test's event loop meets a deleted tile.
+        QCoreApplication.processEvents()
         shiboken6.delete(tab)
+        QCoreApplication.processEvents()
     registry.use(None)
     registry.last_error = None
 
