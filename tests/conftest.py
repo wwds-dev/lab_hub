@@ -57,16 +57,13 @@ def no_real_discovery(monkeypatch):
 
     `discovery.suggestions` answers nothing and `OwnVerdict.request` does
     nothing; tests that want either patch it back (tests/test_discovery.py
-    keeps the real `suggestions` for itself). The second half applies once
-    `ui/own_verdict.py` exists.
+    keeps the real `suggestions` for itself, tests/test_own_verdict.py the real
+    `request`).
     """
     from lab_hub import discovery
+    from ui import own_verdict
 
     monkeypatch.setattr(discovery, "suggestions", lambda *args, **kwargs: ())
-    try:
-        from ui import own_verdict
-    except ImportError:
-        return
     monkeypatch.setattr(own_verdict.OwnVerdict, "request", lambda self, lab_root: None)
 
 
