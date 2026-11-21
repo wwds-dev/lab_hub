@@ -551,6 +551,10 @@ From `docs/audit/2026-11-18-readiness-audit.md`. Items already in this file (fol
 - [ ] `P3` `infra` `@me` **Decide: bundle ID `com.netrunner3000.labhub` (audit L6).** `build_app.sh:14` names the retired identity; changing it resets TCC/LaunchServices.
 - [ ] `P3` `docs` `@ai` **Refresh stale docs (audit M2, L7, L8).** `lab-wide-build-marker.md` and `release-root-behind.md` statuses; README:869-872 "expected to fail" Backstage note; app-context's "no `LICENSE`" evidence; the duplicate Backstage-leftover items in this file; delete tracked `_to_delete/`.
 
+## Land network preflight — follow-ups (2026-11-21)
+- [ ] `P3` `design` `@me` Offline, a repo whose only work is local cleanup (delete landed branches, quarantine an untracked file) is now stopped by the preflight, as a merge is. Decide: stop it too (as built), or skip the check when the plan has no merge or push. Spec `land-network-preflight` §3, review P3-3.
+- [ ] `P3` `design` `@ai` Every `ls-remote` failure gets "cannot reach origin (no network?)", so a dead or renamed `origin` blocks Land with no override. Tell a missing remote apart from a network drop, or point to the Land log. Review P3-4.
+
 ## Out of scope, deliberately
 
 Lab Hub does not replace the projects it launches. Each keeps its own repo, README, venv and build script. Changing what Sentinel AI does still means changing Sentinel AI.
