@@ -16,6 +16,12 @@ README and the specs in `docs/specs/` describe them.
 ## Unreleased
 
 ### Changed
+- **Land checks that GitHub answers before it starts.** Each repo with an `origin` is
+  asked once (about a second, at most 15 seconds) before any commit, merge, Claude
+  run or test. With no network it stops in seconds with "cannot reach origin (no
+  network?): no merge or test was started", instead of reporting it after a merge and a full
+  test run (50 minutes for imprint on 2026-11-21). Repos with no `origin`, or with
+  nothing to land, are not asked. The check in the push step stays.
 - **Land and Resolve leave a repo alone while its files are still changing.** A
   checkout or worktree with a changed or new file that was modified in the last
   15 minutes is not committed, switched or cleaned up: a session may still be

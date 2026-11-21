@@ -31,6 +31,11 @@ from . import claude_resolve, land_resolve, repo_tidy
 # What a person can read on a tile line. A longer reason is cut, never wrapped
 # into a paragraph; the full text is in the log and the Details.
 MAX_REASON = 180
+# How long Land waits to learn whether `origin` answers, before any slow work
+# (spec land-network-preflight). A dead network must show in seconds, not after
+# a merge and a full test run.
+PREFLIGHT_TIMEOUT = 15
+NO_ORIGIN = "cannot reach origin (no network?): no merge or test was started"
 
 _PREFIX = re.compile(r"^(?:not landed|not done|skipped|failed)\s*[—-]\s*", re.IGNORECASE)
 # A real exception line ("ImportError: cannot import name ..."), not a pytest
@@ -63,6 +68,25 @@ def plain_reason(message: str) -> str:
     if len(first) > MAX_REASON:
         first = first[: MAX_REASON - 1].rstrip() + "…"
     return first
+
+
+def preflight(plan: LandPlan, log: Path | None = None) -> str:
+    """"" when `origin` answers or the repo has none; else the sentence to stop with.
+
+    One read-only `git ls-remote` of the default branch. The late fetch in the
+    push step stays: the network can still drop mid-run."""
+    git = repo_tidy.git
+    if git(plan.path, "remote", "get-url", "origin")[0] != 0:
+        return ""
+    args = ["ls-remote", "--heads", "origin"]
+    default = repo_tidy.default_branch(plan.path)
+    if default:
+        args.append(default)
+    rc, _, err = git(plan.path, *args, timeout=PREFLIGHT_TIMEOUT)
+    if rc == 0:
+        return ""
+    repo_tidy._log(f"{plan.name}: git {' '.join(args)}: {err or 'failed'}", log)
+    return NO_ORIGIN
 
 
 # ----------------------------------------------------------------------
@@ -789,6 +813,13 @@ def land(plan: LandPlan, *, progress=None, stop=None, log: Path | None = None,
             return LandResult(plan.name, "nothing")
         if plan.stops and not (plan.path / ".git").exists():
             return LandResult(plan.name, "not_landed", plain_reason(plan.stops[0].reason),
+                              notes=tuple(s.label for s in plan.stops))
+        if stop is not None and stop.stopped:
+            return LandResult(plan.name, "not_landed", "it was stopped",
+                              remaining=_remaining(plan))
+        down = preflight(plan, log)
+        if down:
+            return LandResult(plan.name, "not_landed", down, remaining=_remaining(plan),
                               notes=tuple(s.label for s in plan.stops))
         run = _Run(plan, say, stop, log, busy, now, tell, clock)
         run.prep()
