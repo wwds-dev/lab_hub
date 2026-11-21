@@ -52,10 +52,12 @@ def test_the_apps_tab_lists_the_suites(window):
 
     `sentinel_ai` is archived and `create_and_publish` was renamed to
     `imprint`, so neither belongs here any more. Provisio and SYNDUSTRYX (the
-    Antfarm workstation) joined on 2026-10-07.
+    Antfarm workstation) joined on 2026-10-07. Lab Hub's own tile comes last
+    (spec apps-discovery §5).
     """
     assert _keys(window.apps_tab) == [
         "sentinel", "imprint", "sonar", "provisio", "syndustryx", "backstage",
+        "lab_hub",
     ]
 
 
@@ -107,7 +109,9 @@ def test_every_launchable_app_is_reachable(window):
     on_screen |= {c.app.key for c in window.unblock_tracker_tab.cards}
     on_screen |= {c.app.key for c in window.backstage_tab.cards}
 
-    assert on_screen == {app.key for app in launcher.APPS}
+    # Lab Hub's own tile has no launch command, so it is the one tile that is
+    # not an app in `launcher.APPS` (spec apps-discovery §13.6).
+    assert on_screen == {app.key for app in launcher.APPS} | {"lab_hub"}
 
 
 def test_no_tab_label_hides_an_accelerator(window):

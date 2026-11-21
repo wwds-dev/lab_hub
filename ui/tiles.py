@@ -20,7 +20,7 @@ from PySide6.QtCore import QEvent, QTimer, Qt
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from . import theme
-from .widgets import scroll_column
+from .widgets import ElidedLabel, scroll_column
 
 # Slow enough to be invisible in Activity Monitor, quick enough that the card
 # is right by the time you have finished reading it.
@@ -79,7 +79,7 @@ class Tile(QWidget):
     (under it), `extra` (under the detail) and `buttons`.
     """
 
-    def __init__(self, name: str, summary: str, parent=None) -> None:
+    def __init__(self, name: str, summary: str, parent=None, *, elide_name: bool = False) -> None:
         super().__init__(parent)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -91,8 +91,13 @@ class Tile(QWidget):
         # the summary being squeezed into a column of single words.
         self.header = QHBoxLayout()
         self.header.setSpacing(12)
-        self.name = QLabel(name)
+        # A name can come from a project's README (spec apps-discovery §13.5):
+        # plain text, since a label set to auto-text renders anything that looks
+        # like HTML, and on request one line that is cut with an ellipsis
+        # instead of widening the tile.
+        self.name = ElidedLabel(name) if elide_name else QLabel(name)
         self.name.setObjectName("appName")
+        self.name.setTextFormat(Qt.TextFormat.PlainText)
         self.state = theme.mark_status(QLabel())
         self.state.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.header.addWidget(self.name)
@@ -106,6 +111,7 @@ class Tile(QWidget):
         # The tiles sit in a grid, so they must agree on a height; the summaries
         # differ in length and would otherwise give every row a ragged edge.
         self.summary = theme.hint(summary)
+        self.summary.setTextFormat(Qt.TextFormat.PlainText)  # likewise a README sentence
         self.summary.setMinimumHeight(SUMMARY_HEIGHT)
         self.summary.setAlignment(Qt.AlignmentFlag.AlignTop)
 

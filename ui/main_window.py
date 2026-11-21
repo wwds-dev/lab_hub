@@ -69,8 +69,11 @@ class MainWindow(QMainWindow):
 
         self.apps_tab = AppsTab(
             self.settings,
-            apps=lambda: launcher.SUITES,
+            # Lab Hub's own tile comes last (spec apps-discovery §5): built in
+            # code, so no registry file can hide or edit it.
+            apps=lambda: launcher.SUITES + (self_update.OWN_TILE,),
             check_builds=True,
+            discover=True,
             intro=(
                 "These run in their own window, as their own process — quitting "
                 "Lab Hub leaves them running. An app listed under a suite lives "
@@ -228,6 +231,11 @@ class MainWindow(QMainWindow):
             page.land_jobs = self.land_jobs  # Ask Claude (spec claude-handoff §4.3)
             page.land_state_changed = self.land_state_changed
         self.apps_tab.restart_requested.connect(self.restart_for_update)
+        # An Add changed the app list: reread it and look again everywhere. A
+        # project given back in Settings only needs the Apps page to ask again.
+        self.apps_tab.apps_changed.connect(self.refresh_all)
+        self.settings_tab.suggestions_changed.connect(self.apps_tab.rescan)
+        self.settings_tab.notice.connect(self._on_launched)
         self._pending_update = None  # a self_update.Staged waiting for idle
         self._restart_timer = QTimer(self)
         self._restart_timer.setSingleShot(True)
@@ -329,9 +337,17 @@ class MainWindow(QMainWindow):
         if self.tray is not None:
             self.tray.refresh()
         problem = launcher.registry.last_error
+        # The owner's own added-projects file (apps-local.toml): said here as
+        # well as on the Apps page, since a Refresh is when it gets read.
+        note = launcher.registry.local_note
         if problem:
             self.statusBar().showMessage(
-                f"Refreshed, but the app list was not read: {problem}", 30000
+                f"Refreshed, but the app list was not read: {problem}"
+                + (f" {note}" if note else ""), 30000
+            )
+        elif note:
+            self.statusBar().showMessage(
+                f"Refreshed{' — the app list changed' if changed else ''}. {note}", 30000
             )
         else:
             self.statusBar().showMessage(
