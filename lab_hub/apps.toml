@@ -37,7 +37,7 @@ summary = "Security and investigation command centre. Eight agents live inside i
 
 [[suites]]
 key = "imprint"
-name = "Imprint"
+name = "Imprint Studio"
 project = "imprint"
 entry = "main.py"
 summary = "The create-and-publish studio: a team of AI agents for writing, audio, video, social, web design and gigs, each behind its own mode tab."
