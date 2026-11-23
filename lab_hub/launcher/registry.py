@@ -63,7 +63,7 @@ class RegistryError(ValueError):
 @dataclass(frozen=True)
 class ExternalApp:
     key: str
-    name: str  # display name and installed bundle name
+    name: str  # display name (and bundle name unless `bundle` is set)
     project: str  # folder path under the lab root
     # Entry script, relative to the project folder. None is a project with no
     # launch command (Kaila today): it gets a tile with its version and repo
@@ -98,12 +98,22 @@ class ExternalApp:
     # `build_desktop.py` writes `dist/SYNDUSTRYX.app` and installs nothing.
     build: str | None = None
     build_output: str | None = None
+    # The `/Applications/<bundle>.app` name when it differs from the display
+    # name: SYNDUSTRYX shows "SynCorp Inc." and installs `SynCorp.app`.
+    bundle: str | None = None
+    # Older installed bundle names still found (never built or installed), so
+    # a rename does not lose the copy in /Applications before the next build.
+    legacy_bundles: tuple[str, ...] = ()
     # Read from the owner's local file (`LOCAL_NAME`), never from a TOML key:
     # `parse(local=True)` sets it. Its name came from a README, so it never
     # selects an installed `/Applications/<name>.app` (`state.bundle_path`): a
     # clone of SONAR keeps the title "SONAR" and must run its own source, not
     # open the installed SONAR.
     local: bool = False
+
+    @property
+    def bundle_name(self) -> str:
+        return self.bundle or self.name
 
     @property
     def served(self) -> bool:
@@ -121,7 +131,7 @@ _REQUIRED = ("key", "name", "project", "summary")
 # `local` is set by the reader, not by a file.
 _FIELDS = {f.name: f for f in fields(ExternalApp) if f.name != "local"}
 # Fields that only mean something for an app Lab Hub can start or build.
-_NEEDS_ENTRY = ("url", "service", "args", "bundle_dir", "build", "build_output")
+_NEEDS_ENTRY = ("url", "service", "args", "bundle_dir", "build", "build_output", "bundle", "legacy_bundles")
 
 
 @dataclass(frozen=True)
@@ -198,6 +208,10 @@ def _app(group: str, index: int, raw: object) -> ExternalApp:
             if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
                 raise RegistryError(f"{where}.args must be a list of strings")
             values[name] = tuple(value)
+        elif name == "legacy_bundles":
+            if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+                raise RegistryError(f"{where}.legacy_bundles must be a list of strings")
+            values[name] = tuple(value)
         elif name == "runs_from_source":
             if not isinstance(value, bool):
                 raise RegistryError(f"{where}.runs_from_source must be true or false")
@@ -219,11 +233,15 @@ def _check_text(where: str, values: dict) -> None:
         raise RegistryError(
             f"{where}.key must be letters, digits, '.', '_' or '-' (up to 64)"
         )
-    name = values["name"]
-    if any(c in name for c in "/\\<>&") or any(unicodedata.category(c) == "Cc" for c in name):
-        raise RegistryError(
-            f"{where}.name must not hold / \\ < > & or a control character"
-        )
+    names = [("name", values["name"])]
+    if "bundle" in values:
+        names.append(("bundle", values["bundle"]))
+    names += [("legacy_bundles", value) for value in values.get("legacy_bundles", ())]
+    for field, name in names:
+        if not name or any(c in name for c in "/\\<>&") or any(unicodedata.category(c) == "Cc" for c in name):
+            raise RegistryError(
+                f"{where}.{field} must not be empty or hold / \\ < > & or a control character"
+            )
     for field in ("project", "entry"):
         path = values[field]
         if path is None:

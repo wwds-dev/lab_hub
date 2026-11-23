@@ -47,12 +47,14 @@ def bundle_path(app: ExternalApp, lab_root: Path | None = None) -> Path | None:
     # A name read from the owner's local file came from a README, so it must
     # not pick an installed bundle: that app's tile would then control someone
     # else's installed app.
-    path = APPLICATIONS / f"{app.name}.app"
-    if not app.local and path.is_dir():
-        return path
+    if not app.local:
+        for name in (app.bundle_name, *app.legacy_bundles):
+            path = APPLICATIONS / f"{name}.app"
+            if path.is_dir():
+                return path
     if app.bundle_dir is None or lab_root is None:
         return None
-    built = lab_root / app.project / app.bundle_dir / f"{app.name}.app"
+    built = lab_root / app.project / app.bundle_dir / f"{app.bundle_name}.app"
     return built.resolve() if built.is_dir() else None
 
 
@@ -1083,9 +1085,9 @@ def registered_build_command(app: ExternalApp, project: Path) -> str | None:
     if not app.build or not app.build_output:
         return None
     built = shlex.quote(app.build_output)
-    bundle = APPLICATIONS / f"{app.name}.app"
+    bundle = APPLICATIONS / f"{app.bundle_name}.app"
     installed = shlex.quote(str(bundle))
-    trash = f'"$HOME/.Trash/{app.name} before update $(date +%Y-%m-%d-%H%M%S).app"'
+    trash = f'"$HOME/.Trash/{app.bundle_name} before update $(date +%Y-%m-%d-%H%M%S).app"'
     records = shlex.quote(str(installs_dir()))
     record = shlex.quote(str(installs_dir() / f"{app.key}.json"))
     plist = shlex.quote(str(bundle / "Contents" / "Info.plist"))
@@ -1420,7 +1422,7 @@ def readiness(app: ExternalApp, lab_root: Path) -> Readiness:
         return Readiness(
             state,
             detail,
-            f"nothing built to launch: no {app.name}.app in {where}, and its "
+            f"nothing built to launch: no {app.bundle_name}.app in {where}, and its "
             "checkout is not run directly. Build it first.",
         )
 

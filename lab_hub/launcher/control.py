@@ -252,7 +252,7 @@ def launch(app: ExternalApp, lab_root: Path, *, background: bool = False) -> str
         )
     if not app.runs_from_source:
         raise LaunchError(
-            f"There is no built {app.name}.app to launch, and its checkout at "
+            f"There is no built {app.bundle_name}.app to launch, and its checkout at "
             f"{project} is not run directly. Build it first."
         )
 
