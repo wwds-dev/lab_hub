@@ -1,6 +1,6 @@
 # Spec: status rows on app tiles instead of one yellow line
 
-Needs: owner's word on the §7 deviations; Release (owner gate)
+Needs: Release (owner gate)
 
 Status: Phase Define (`product-manager`), drafted 2026-11-23 in `lab_hub`. Nothing built.
 In-flight check (`session_start.py --inflight`, 2026-11-23): no spec owns the tile's version
@@ -70,7 +70,8 @@ No new state, threads or files: rows are rebuilt from the same `launcher.version
 `refresh_hygiene`). No gate needed.
 
 ## 7. Build notes and review (2026-11-23)
-Built in `lab_hub` on `main`. Deviations from §2, both left for the owner to accept or change:
+Built in `lab_hub` on `main`. Deviations from §2, all three accepted by the owner on
+2026-11-23 ("Accept all three"):
 - **Wording for a bundle.** A frozen bundle built from a dirty checkout says "Built from
   uncommitted changes"; "Uncommitted changes in source" is kept for an app that runs its
   checkout, where it is only shown when no "waiting to land" row already counts those files.

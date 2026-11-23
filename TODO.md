@@ -579,7 +579,7 @@ From `docs/audit/apps-discovery-review-core.md` and `-ui.md`; the P2s and the li
 ## Tile status rows (2026-11-23)
 - [x] `P2` `design` `@ai` **App tiles say each status on its own row, not in one yellow line (2026-11-23).** Spec `docs/specs/tile-status-rows.md` (owner: "much better. build it", "Approve, build"). Code `ui/status_rows.py` (new), `ui/apps_tab.py`, `lab_hub/hygiene.py` (`land_count`), `ui/theme.py`. On `main` (`a7abdf5`), full suite 1827 passed.
 - [x] `P2` `testing` `@me` Look at the status rows in the running Lab Hub after Check builds → Update now (2026-11-23, owner: "I checked the updated app, looks fine").
-- [ ] `P3` `design` `@me` Accept or change the three build deviations in spec §7: "Built from uncommitted changes" for a bundle, the ↓ symbol in ink in light mode (Paper has no accent), the Check builds link on its own line.
+- [x] `P3` `design` `@me` The three build deviations in spec §7 accepted (2026-11-23, owner: "Accept all three").
 - [ ] `P3` `design` `@me` Release of `tile-status-rows` (owner gate; Comply/Release not run).
 - [ ] `P3` `design` `@ai` Follow-up from the mockup: move the background-service line and the app path (spec §4 non-goal; reopens the tiles' reserved-height alignment).
 
