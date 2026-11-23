@@ -2,7 +2,7 @@
 
 Needs: Release (owner gate)
 
-Status: Phase Define (`product-manager`), drafted 2026-11-23 in `lab_hub`. Nothing built.
+Status: Released 2026-11-23 as build 319 (commit ea897cf), installed in /Applications and smoke-tested (selftest OK, app launches). Owner approved the release ("yes, release"); owner checked the status rows in the app earlier the same day.
 In-flight check (`session_start.py --inflight`, 2026-11-23): no spec owns the tile's version
 or badge text. `land-from-tiles` (document done) owns the Land button and the outcome line;
 this spec changes only the Land button's label (a count), never its behaviour. `tile-resolve`
