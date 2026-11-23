@@ -70,3 +70,51 @@ def test_update_installs_under_the_bundle_name(monkeypatch, tmp_path):
     assert str(tmp_path / "Applications" / "SynCorp.app") in command
     assert "SynCorp Inc..app" not in command
     assert "SynCorp before update" in command
+
+
+def test_a_copy_running_from_the_legacy_bundle_still_counts(tmp_path, monkeypatch):
+    apps = tmp_path / "Applications"
+    apps.mkdir()
+    monkeypatch.setattr(launcher, "APPLICATIONS", apps)
+    make_bundle(apps, "SYNDUSTRYX")
+    make_bundle(apps, "SynCorp")
+    markers = launcher.running_markers(_app(), tmp_path)
+    assert str(apps / "SynCorp.app" / "Contents" / "MacOS") in markers
+    assert str(apps / "SYNDUSTRYX.app" / "Contents" / "MacOS") in markers
+
+
+def test_built_bundle_and_messages_use_the_bundle_name(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    lab = tmp_path / "lab"
+    text = RENAMED.replace('runs_from_source = false', 'runs_from_source = false\nbundle_dir = "dist"')
+    app = _app(text)
+    make_bundle(lab / "syndustryx" / "dist", "SynCorp Inc.")  # display name: ignored
+    assert launcher.bundle_path(app, lab) is None
+    make_bundle(lab / "syndustryx" / "dist", "SynCorp")
+    assert launcher.bundle_path(app, lab) == (lab / "syndustryx" / "dist" / "SynCorp.app").resolve()
+
+
+def test_local_app_with_bundle_never_selects_applications(tmp_path, monkeypatch):
+    apps = tmp_path / "Applications"
+    apps.mkdir()
+    monkeypatch.setattr(launcher, "APPLICATIONS", apps)
+    make_bundle(apps, "SynCorp")
+    make_bundle(apps, "SYNDUSTRYX")
+    local = registry.parse(RENAMED, local=True).suites[0] if _local_ok() else None
+    if local is None:
+        pytest.skip("local files may not set build fields")
+    assert launcher.bundle_path(local, tmp_path) is None
+    assert launcher.legacy_bundle_markers(local) == ()
+
+
+def _local_ok():
+    try:
+        registry.parse(RENAMED, local=True)
+        return True
+    except registry.RegistryError:
+        return False
+
+
+def test_update_never_touches_the_legacy_bundle(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "Applications")
+    assert "SYNDUSTRYX" not in launcher.registered_build_command(_app(), tmp_path)

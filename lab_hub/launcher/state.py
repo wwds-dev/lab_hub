@@ -183,8 +183,21 @@ def running_markers(app: ExternalApp, lab_root: Path) -> tuple[str, ...]:
     records: without that, a checkout renamed since this build drops the
     marker and leaves only the bundle — exactly the half that does not last.
     """
-    markers = (bundle_marker(app, lab_root), checkout_marker(app, lab_root))
-    return tuple(marker for marker in markers if marker is not None)
+    markers = (bundle_marker(app, lab_root), checkout_marker(app, lab_root), *legacy_bundle_markers(app))
+    return tuple(dict.fromkeys(marker for marker in markers if marker is not None))
+
+
+def legacy_bundle_markers(app: ExternalApp) -> tuple[str, ...]:
+    """Installed bundles under an older name, which may still be running.
+
+    After a rename, Update now installs the new bundle beside the old one (the
+    owner removes the old one), so a copy started from the old bundle must
+    still read as running: otherwise Launch starts a second copy.
+    """
+    if app.local or not app.launchable:
+        return ()
+    found = (APPLICATIONS / f"{name}.app" for name in app.legacy_bundles)
+    return tuple(str(bundle / "Contents" / "MacOS") for bundle in found if bundle.is_dir())
 
 
 def bundle_marker(app: ExternalApp, lab_root: Path | None = None) -> str | None:

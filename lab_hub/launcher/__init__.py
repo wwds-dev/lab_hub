@@ -79,6 +79,7 @@ from .state import (  # noqa: F401
     build_status,
     bundle_executable,
     bundle_marker,
+    legacy_bundle_markers,
     bundle_path,
     bundle_runs_checkout,
     can_bring_to_front,
