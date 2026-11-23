@@ -561,7 +561,7 @@ From `docs/audit/apps-discovery-review-core.md` and `-ui.md`; the P2s and the li
 
 - [ ] `P3` `bug` `@ai` README titles: `# C#` reads as "C" (`discovery._heading` `rstrip("#")`); markdown, quotes and bullets are shown raw in the summary (core P3-1, P3-2).
 - [ ] `P3` `bug` `@ai` Two tiles can still carry one name (`merge_local` has no name rule); a hand-written local entry with a `build` command and an installed app's name would trash that app on Update now (core P2-2, residual; `add` never writes `build`).
-- [ ] `P3` `design` `@me` Wording the owner has not approved or that overlaps: " · behind" with no count, and the behind fact said twice on Lab Hub's tile; "A newer build is ready to install" for a held row; Lab Hub's tile has no name tooltip (UI P3-5).
+- [ ] `P3` `design` `@me` Wording the owner has not approved or that overlaps: " · behind" with no count, and the behind fact said twice on Lab Hub's tile; "A newer build is ready to install" for a held row; Lab Hub's tile has no name tooltip (UI P3-5). The " · behind" part is gone since `tile-status-rows` (2026-11-23).
 - [ ] `P3` `bug` `@ai` Show again: put the folder name in the row's tooltip (two READMEs with one heading look identical) and say so when a rescan will not suggest it (UI P3-4).
 - [ ] `P3` `testing` `@ai` No test for `aboutToQuit.connect(self._own_verdict.shutdown)`; a double-click on "Add to Apps" is Verify's to try on the Mac (UI P3-6, Not verified).
 ## Land blocker actions (2026-11-21)
@@ -575,6 +575,13 @@ From `docs/audit/apps-discovery-review-core.md` and `-ui.md`; the P2s and the li
 - [ ] `P3` `test` `@ai` The §2.1 check scans only for banned words: a raw git or gitleaks error passed through `plain_reason` ends in no clearing sentence and relies on the Ask Claude… footer (QA `docs/audit/land-blocker-actions-verify.md` P3-8).
 - [ ] `P3` `process` `@owner` `app-context.md` `## Commands` and `## Test bar` are still placeholders, and the venv has no coverage, `pytest-timeout` or `pytest-randomly`: branch coverage, random order and timeouts are not verified (QA P3-9).
 - [ ] `P3` `test` `@ai` `test_land_resolve.py::test_a_file_that_appears_after_the_preview_is_not_committed_and_land_says_not_landed` fails with a long pytest temp path: the reason is cut at 180 characters before "untracked" (QA P3-10; pre-existing, commit `3cd5dd7`).
+
+## Tile status rows (2026-11-23)
+- [x] `P2` `design` `@ai` **App tiles say each status on its own row, not in one yellow line (2026-11-23).** Spec `docs/specs/tile-status-rows.md` (owner: "much better. build it", "Approve, build"). Code `ui/status_rows.py` (new), `ui/apps_tab.py`, `lab_hub/hygiene.py` (`land_count`), `ui/theme.py`. On `main` (`a7abdf5`), full suite 1827 passed.
+- [ ] `P2` `testing` `@me` Look at the status rows in the running Lab Hub after Check builds → Update now: rows, symbol colours, Check builds link, "Land (N)", light and dark, a long row wrapping at a tile's edge. The spec's PNGs are an offscreen render with fixture data (spec §7 "Not verified").
+- [ ] `P3` `design` `@me` Accept or change the three build deviations in spec §7: "Built from uncommitted changes" for a bundle, the ↓ symbol in ink in light mode (Paper has no accent), the Check builds link on its own line.
+- [ ] `P3` `design` `@me` Release of `tile-status-rows` (owner gate; Comply/Release not run).
+- [ ] `P3` `design` `@ai` Follow-up from the mockup: move the background-service line and the app path (spec §4 non-goal; reopens the tiles' reserved-height alignment).
 
 ## Out of scope, deliberately
 
