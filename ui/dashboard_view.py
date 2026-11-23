@@ -45,37 +45,6 @@ def web_available() -> bool:
     return True
 
 
-_warmed = False
-
-
-def warm_up_web_engine() -> bool:
-    """Start QtWebEngine once, early, so opening Dashboards later cannot leave fullscreen.
-
-    On macOS the first web view of a run takes the window out of native fullscreen
-    when it is first shown (verified with PySide6 6.12: lazy first view -> fullscreen
-    lost; any earlier view, even a discarded one -> kept). Without this, going
-    fullscreen and then opening Dashboards for the first time threw the window back
-    to normal size. The view is off the record and deleted at once; the real views
-    keep their own persistent profile. Returns True when it started the engine.
-    """
-    global _warmed
-    if _warmed or not web_available():
-        return False
-    _warmed = True
-    from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
-    from PySide6.QtWebEngineWidgets import QWebEngineView
-
-    profile = QWebEngineProfile()  # no name: off the record, nothing written to disk
-    view = QWebEngineView()
-    page = QWebEnginePage(profile, view)
-    view.setPage(page)
-    # Page before profile: Qt warns, and on some versions aborts, when a profile goes first.
-    page.deleteLater()
-    view.deleteLater()
-    profile.deleteLater()
-    return True
-
-
 def _real_view_factory(page_owner: QWidget) -> Callable[[], QWidget]:
     """Build web views that share one persistent profile and open new windows outside."""
     from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
@@ -127,6 +96,7 @@ class DashboardViewer(QWidget, Refreshable):
         self._stamp: tuple[str, int] | None = None
         self.prefer_local = False
         self._active = False
+        self._spare: QWidget | None = None  # made by prepare(), used by the first dashboard
 
         self.list = QListWidget()
         self.list.setMinimumWidth(200)
@@ -219,6 +189,28 @@ class DashboardViewer(QWidget, Refreshable):
     def address(self, entry: dashboards.Dashboard) -> str | None:
         return dashboards.embed_address(entry, self.prefer_local)
 
+    def prepare(self) -> bool:
+        """Make the first web view now, before the window is on screen.
+
+        The first web view of a run is expensive: the web engine starts and the
+        window gains its first GPU-drawn child. Done on the first visit to
+        Dashboards, that froze the window for a moment and redrew it all (it
+        looked like the app restarting), and before GPU drawing was on from
+        launch it threw a fullscreen window out of fullscreen. Made here, while
+        the app starts, the first visit only shows a view that is ready. It
+        loads about:blank, so nothing is fetched before the page is on screen.
+        Returns True when it made the view.
+        """
+        if self._spare is not None or not web_available():
+            return False
+        if self._factory is None:
+            self._factory = _real_view_factory(self)
+        view = self._factory()
+        view.setUrl(QUrl("about:blank"))
+        self.stack.addWidget(view)
+        self._spare = view
+        return True
+
     def activate(self) -> None:
         """Start loading: nothing is fetched until the page is actually on screen."""
         if not self._active:
@@ -236,14 +228,17 @@ class DashboardViewer(QWidget, Refreshable):
         key = (entry.id, address.startswith("file:") or "127.0.0.1" in address)
         view = self._views.get(key)
         if view is None:
-            if self._factory is None:
-                if not web_available():
-                    return None
-                self._factory = _real_view_factory(self)
-            view = self._factory()
+            if self._spare is not None:
+                view, self._spare = self._spare, None
+            else:
+                if self._factory is None:
+                    if not web_available():
+                        return None
+                    self._factory = _real_view_factory(self)
+                view = self._factory()
+                self.stack.addWidget(view)
             view.setUrl(QUrl(address))
             self._views[key] = view
-            self.stack.addWidget(view)
         return view
 
     def _show_row(self, row: int) -> None:
@@ -306,7 +301,9 @@ class DashboardViewer(QWidget, Refreshable):
     def shutdown(self) -> None:
         """Delete every page before the profile they share — Qt warns, and on some
         versions aborts, when a profile goes first."""
-        for view in self._views.values():
+        views = list(self._views.values()) + ([self._spare] if self._spare is not None else [])
+        self._spare = None
+        for view in views:
             page = view.page() if hasattr(view, "page") else None
             if page is not None:
                 view.setPage(None) if hasattr(view, "setPage") else None

@@ -26,6 +26,9 @@ README and the specs in `docs/specs/` describe them.
   from the start. Apps it launches are not affected.
 - **No white flash before the first dashboard appears.** A dashboard's view starts in the
   window's own colour instead of white until the page has drawn.
+- **The first visit to Dashboards no longer freezes and redraws the window.** Lab Hub now
+  prepares the dashboard view while it starts, before its window appears (it loads an
+  empty page, so nothing is fetched early). This replaces the web-engine warm-up above.
 
 ### Changed
 - **The new-project question names the folder.** When a project's README title differs from

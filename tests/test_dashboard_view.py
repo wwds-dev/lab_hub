@@ -195,37 +195,55 @@ def test_nothing_loads_until_the_page_is_on_screen(qapp, tmp_path):
     assert [v.loaded for v in made] == ["https://claude.ai/artifact/b"]
 
 
-def test_web_engine_warm_up_runs_once_and_only_when_available(monkeypatch):
-    """The first web view of a run must exist before Dashboards is opened, or macOS
-    drops a fullscreen window when it is first shown (owner report, 2026-11-21)."""
+def _unopened_viewer(tmp_path):
+    made = []
+
+    def factory():
+        view = FakeView()
+        made.append(view)
+        return view
+
+    active = _lab(tmp_path, _entries(tmp_path))
+    return DashboardViewer(_settings(active), view_factory=factory), made
+
+
+def test_the_first_web_view_is_made_at_launch_and_fetches_nothing(monkeypatch, qapp, tmp_path):
+    """Made on the first visit, it froze and redrew the whole window (owner, 2026-11-23)."""
     from ui import dashboard_view
 
-    monkeypatch.setattr(dashboard_view, "_warmed", False)
-    monkeypatch.setattr(dashboard_view, "web_available", lambda: False)
-    assert dashboard_view.warm_up_web_engine() is False
+    monkeypatch.setattr(dashboard_view, "web_available", lambda: True)
+    viewer, made = _unopened_viewer(tmp_path)
+
+    assert viewer.prepare() is True
+    assert viewer.prepare() is False  # one is enough
+    assert [v.loaded for v in made] == ["about:blank"]
+    assert viewer.stack.indexOf(made[0]) >= 0
+
+
+def test_the_first_dashboard_uses_the_view_made_at_launch(monkeypatch, qapp, tmp_path):
+    from ui import dashboard_view
 
     monkeypatch.setattr(dashboard_view, "web_available", lambda: True)
-    started = []
+    viewer, made = _unopened_viewer(tmp_path)
+    viewer.prepare()
 
-    class Stub:
-        def __init__(self, *a, **k):
-            started.append(type(self).__name__)
+    viewer.activate()
 
-        def setPage(self, *_):
-            pass
+    assert len(made) == 1
+    assert made[0].loaded == "https://claude.ai/artifact/r"
+    assert viewer.stack.currentWidget() is made[0]
+    viewer.list.setCurrentRow(2)
+    assert len(made) == 2 and viewer.stack.currentWidget() is made[1]
 
-        def deleteLater(self):
-            pass
 
-    import PySide6.QtWebEngineCore as core
-    import PySide6.QtWebEngineWidgets as widgets
+def test_no_view_is_made_at_launch_without_the_web_engine(monkeypatch, qapp, tmp_path):
+    from ui import dashboard_view
 
-    monkeypatch.setattr(core, "QWebEngineProfile", type("Profile", (Stub,), {}))
-    monkeypatch.setattr(core, "QWebEnginePage", type("Page", (Stub,), {}))
-    monkeypatch.setattr(widgets, "QWebEngineView", type("View", (Stub,), {}))
-    assert dashboard_view.warm_up_web_engine() is True
-    assert dashboard_view.warm_up_web_engine() is False  # once per run
-    assert sorted(started) == ["Page", "Profile", "View"]
+    monkeypatch.setattr(dashboard_view, "web_available", lambda: False)
+    viewer, made = _unopened_viewer(tmp_path)
+
+    assert viewer.prepare() is False
+    assert made == []
 
 
 def test_lab_hub_draws_through_the_gpu_from_the_start():
