@@ -1,6 +1,6 @@
 # Spec: status rows on app tiles instead of one yellow line
 
-Needs: verify in the running app (owner)
+Needs: owner's word on the §7 deviations; Release (owner gate)
 
 Status: Phase Define (`product-manager`), drafted 2026-11-23 in `lab_hub`. Nothing built.
 In-flight check (`session_start.py --inflight`, 2026-11-23): no spec owns the tile's version
@@ -87,5 +87,6 @@ uncommitted files said twice — fixed; P2 width test now has the link on. Mutat
 5 planted mutants, all caught after one added case.
 
 Evidence: `docs/specs/tile-status-rows-dark.png`, `-light.png` (offscreen render of four
-tiles with fixture data, not the running app). Not verified: the real app window, and a row
-wrapping exactly at a tile's edge in a live resize.
+tiles with fixture data, not the running app). The owner checked the installed app on
+2026-11-23: "I checked the updated app, looks fine". Not verified: a row wrapping exactly at a
+tile's edge in a live resize.
