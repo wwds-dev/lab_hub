@@ -585,7 +585,7 @@ From `docs/audit/apps-discovery-review-core.md` and `-ui.md`; the P2s and the li
 
 ## Lab Monitor page (2026-11-23)
 
-- [ ] `P3` `bug` `@ai` Lab Monitor page template (`lab/dashboards/lab_monitor/lab_projects_monitor_page_template.html`) has no `<meta charset="utf-8">`: served over HTTP without a charset header, dashes and arrows show as mojibake ("â€”"). Add the meta tag.
+- [x] `P3` `bug` `@ai` (done 2026-11-23, lab commit above) Lab Monitor page template (`lab/dashboards/lab_monitor/lab_projects_monitor_page_template.html`) has no `<meta charset="utf-8">`: served over HTTP without a charset header, dashes and arrows show as mojibake ("â€”"). Add the meta tag.
 
 ## Out of scope, deliberately
 
