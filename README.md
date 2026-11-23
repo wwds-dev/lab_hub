@@ -639,6 +639,13 @@ it. `lab_hub/repo_tidy.py`, `ui/repo_tidy_dialogs.py`,
 A launcher bundle is never out of date, and being dirty does not change that:
 it runs the source, so uncommitted edits are exactly what opens.
 
+**Update gate.** An app in `apps.toml` can set `preflight` (a command run in its checkout after the
+build and before anything is replaced, with `{installed}` and `{candidate}` standing for the installed
+and built bundle) and `require_clean = true` (no build from a checkout with uncommitted changes). A
+failing preflight stops that app's rebuild, installs nothing and shows its output in the log; with no
+bundle installed it is skipped. SynCorp Inc. uses both (`python3 -m desktop.update_preflight`).
+Needs a rebuilt Lab Hub.app to apply.
+
 **Update now** runs the rebuilds it can run itself, one after another, in the
 same Check builds window, which moves to its Update step. The header has the
 Land window's bar, times and working signal (above). The app being rebuilt

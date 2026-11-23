@@ -1089,6 +1089,26 @@ def build_guide(project: Path) -> Path | None:
     return None
 
 
+def _preflight_step(app: ExternalApp, built: str) -> str:
+    """The shell step that runs the app's own preflight against what is installed.
+
+    Chosen in the shell, when Update runs: the bundle now installed under the
+    new name, else under a legacy one. Nothing installed means a first install,
+    which the preflight cannot judge, so it is skipped. A failure stops the
+    chain before the installed bundle is moved or anything is copied.
+    """
+    if not app.preflight:
+        return ""
+    names = (app.bundle_name, *app.legacy_bundles)
+    probes = " ".join(shlex.quote(str(APPLICATIONS / f"{n}.app")) for n in names)
+    command = app.preflight.replace("{installed}", '"$inst"').replace("{candidate}", built)
+    return (
+        f'{{ inst=; for b in {probes}; do [ -d "$b" ] && {{ inst="$b"; break; }}; done; '
+        f'[ -z "$inst" ] || {{ {command} || {{ echo "Update refused: the preflight failed, '
+        f'nothing was installed." >&2; exit 1; }}; }}; }} && '
+    )
+
+
 def registered_build_command(app: ExternalApp, project: Path) -> str | None:
     """Build with the app's own `build` command and install `build_output`.
 
@@ -1130,11 +1150,17 @@ def registered_build_command(app: ExternalApp, project: Path) -> str | None:
         'git diff --name-only HEAD | grep -vxF -f "$pre" | '
         'while IFS= read -r f; do git checkout -q HEAD -- "$f"; done; rm -f "$pre"'
     )
+    clean = (
+        '[ "$dirty" = false ] || { echo "Update refused: the checkout has uncommitted '
+        'changes, so the build would not match a commit. Commit or discard them first." >&2; exit 1; } && '
+        if app.require_clean else ""
+    )
     return (
         f"cd {shlex.quote(str(project))} && commit=$(git rev-parse HEAD) && "
         f"dirty=$([ -n \"$(git status --porcelain)\" ] && echo true || echo false) && "
+        f"{clean}"
         f"pre=$(mktemp) && git diff --name-only HEAD > \"$pre\" && "
-        f"{app.build} && test -d {built} && {{ {restore}; }} && "
+        f"{app.build} && test -d {built} && {_preflight_step(app, built)}{{ {restore}; }} && "
         f"{{ [ ! -e {installed} ] || mv {installed} {trash}; }} && "
         f"ditto {built} {installed} && {stamp}"
     )

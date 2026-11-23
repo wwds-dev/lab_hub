@@ -15,6 +15,12 @@ README and the specs in `docs/specs/` describe them.
 
 ## Unreleased
 
+### Added
+- **Update now refuses to install a SynCorp Inc. build its own preflight rejects.** The app's
+  read-only update preflight runs against the bundle installed in /Applications before anything is
+  replaced, and Update stops with its message if it fails. It also refuses to build from a checkout with
+  uncommitted changes. Other apps are unchanged. (`preflight` and `require_clean` in `apps.toml`.)
+
 ### Fixed
 - **Opening Dashboards no longer takes the window out of fullscreen.** The first time
   Dashboards was opened in a run, macOS dropped the window out of fullscreen (the

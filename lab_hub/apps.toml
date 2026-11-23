@@ -79,9 +79,13 @@ entry = "server.py"
 summary = "An autonomous, money-generating agent company: AI agents run the fulfilment engine, storefront and departments, with the owner as the only approver."
 runs_from_source = false
 # Its builder stops at dist/; Update now installs the result (owner's choice,
-# 2026-11-15, over the project's own update preflight: desktop/BUILDING.md).
+# 2026-11-15), but only when the project's own read-only update preflight
+# (desktop/BUILDING.md) passes against the bundle installed now, and never from
+# a checkout with uncommitted changes (spec update-preflight-gate).
 build = "python3 build_desktop.py"
 build_output = "dist/SynCorp.app"
+preflight = "python3 -m desktop.update_preflight --installed {installed} --candidate {candidate}"
+require_clean = true
 
 [[suites]]
 key = "backstage"

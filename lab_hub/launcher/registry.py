@@ -104,6 +104,15 @@ class ExternalApp:
     # Older installed bundle names still found (never built or installed), so
     # a rename does not lose the copy in /Applications before the next build.
     legacy_bundles: tuple[str, ...] = ()
+    # Update's safety gate (spec update-preflight-gate): a command run in the
+    # checkout after the build and before the installed bundle is replaced.
+    # `{installed}` is the bundle now in /Applications (the new name, else a
+    # legacy one) and `{candidate}` the built one, each shell-quoted. A nonzero
+    # exit stops Update with its output and installs nothing. With no bundle
+    # installed (a first install) it is skipped.
+    preflight: str | None = None
+    # Refuse to build and install while the checkout has uncommitted changes.
+    require_clean: bool = False
     # Read from the owner's local file (`LOCAL_NAME`), never from a TOML key:
     # `parse(local=True)` sets it. Its name came from a README, so it never
     # selects an installed `/Applications/<name>.app` (`state.bundle_path`): a
@@ -131,7 +140,8 @@ _REQUIRED = ("key", "name", "project", "summary")
 # `local` is set by the reader, not by a file.
 _FIELDS = {f.name: f for f in fields(ExternalApp) if f.name != "local"}
 # Fields that only mean something for an app Lab Hub can start or build.
-_NEEDS_ENTRY = ("url", "service", "args", "bundle_dir", "build", "build_output", "bundle", "legacy_bundles")
+_NEEDS_ENTRY = ("url", "service", "args", "bundle_dir", "build", "build_output", "bundle", "legacy_bundles",
+                "preflight", "require_clean")
 
 
 @dataclass(frozen=True)
@@ -212,9 +222,9 @@ def _app(group: str, index: int, raw: object) -> ExternalApp:
             if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
                 raise RegistryError(f"{where}.legacy_bundles must be a list of strings")
             values[name] = tuple(value)
-        elif name == "runs_from_source":
+        elif name in ("runs_from_source", "require_clean"):
             if not isinstance(value, bool):
-                raise RegistryError(f"{where}.runs_from_source must be true or false")
+                raise RegistryError(f"{where}.{name} must be true or false")
         elif not isinstance(value, str):
             raise RegistryError(f"{where}.{name} must be a string")
     values.setdefault("entry", None)
