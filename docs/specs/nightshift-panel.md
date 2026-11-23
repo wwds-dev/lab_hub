@@ -61,7 +61,8 @@ disabled while a command runs. Unreadable rows use the warning pill and the reas
 - `ui/nightshift_tab.py`: the page. A `QTimer` polls every 5 s while the page is visible; each poll starts a
   one-shot reader `QThread` (skipped if the previous one is still going) that returns a `Snapshot`; the UI only
   renders. Commands run in a `CommandWorker` `QThread` with `subprocess.Popen`, no shell, cwd the Foundry folder,
-  a 30-minute cap; Stop kills the child process, never the thread (no `QThread.terminate()`).
+  a 30-minute cap; Cancel sends SIGINT so the CLI's cleanup runs (model unloaded, server stopped), then
+  kills the child after 20 s; never the thread (no `QThread.terminate()`).
 - `MainWindow`: a Tools tile; `busy_reasons` names a running command; `shutdown()` stops the poll, kills a
   running child and waits for both threads.
 
@@ -73,3 +74,6 @@ disabled while a command runs. Unreadable rows use the warning pill and the reas
 - `tests/test_nightshift_tab.py`: the page renders those states; commands run against a fake CLI script and show
   output and exit code; nothing is written in the state folder by the panel.
 - Drift test for the copied track rule. Full suite green; `python main.py --selftest` passes.
+
+## Review (23 Nov 2026)
+Independent read-only review: 1 P1, 2 P2, 5 P3, all fixed (`docs/audit/nightshift-panel-code-review.md`).

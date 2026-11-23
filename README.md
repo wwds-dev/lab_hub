@@ -912,7 +912,7 @@ the tab carries its own **Check builds** and Update now
 ### Tools
 
 The built-in utilities and occasional standalone tools are grouped under one
-tab: **Convert Textfiles**, **Narrator**, **Prepare Images**, **Convert Video** and
+tab: **Convert Textfiles**, **Narrator**, **Prepare Images**, **Convert Video**, **Nightshift** and
 **Unblock Tracker**. Backstage was here until 2026-10-14 and is now an Apps tile.
 
 It opens on **All tools** (`ui/tools_tab.py`, added 2026-10-07): every tool as a
@@ -1019,7 +1019,36 @@ standalone browser app — the engine is `lab_hub/tools/video.py`.
 An occasional standalone tool, kept with the other tools rather than competing
 with the main launchpad apps.
 
-#### Backstage (moved to Apps)
+#### Nightshift
+
+Added 2026-11-23 (spec `docs/specs/nightshift-panel.md`). It is the page for Foundry's Nightshift:
+at night a local LM Studio model works through tasks you approved, each on its own branch
+(Foundry's `docs/nightshift.md`). The page reads `<lab root>/foundry/local-drafts/nightshift/`.
+It shows five things:
+
+- **Tonight:** the armed run with its window and its pre-start gate. The gate covers memory needed
+  and available, compressed memory and swap, the apps to close, the task load, and each task's
+  predicted band, score, reasons and fix hints, with blockers and warnings. When nothing is armed,
+  the page shows the latest run's gate.
+- **Tasks:** the task files, with a tick box for each.
+- **Runs:** newest first. Each run has its state and abort reason. Each task in it has its status,
+  grade, predicted score, gap, retries, model, quantisation (lossy Q3 flagged), branch and verdict.
+  Buttons open `MORNING.md`, `diff.patch`, `tests.log` and `review.md`.
+- **Track record:** for each task type.
+- **Notices.**
+
+The buttons run `python3 tools/nightshift.py` in the Foundry folder, off the UI thread, and show the
+output and exit code. They are Plan, Arm, Disarm, Stop after this task, Stop now, Clear stop,
+Dry run, and Accept or Reject with an optional note. Arm, Disarm, Stop now and Reject ask first.
+The page never writes into Nightshift's folder and never touches a task's `approved` flag. It never
+runs `run`, `recheck` or `launchctl`: `lab_hub/nightshift.py` builds only the listed commands and
+refuses the rest.
+
+A record whose `schema_version` is not 1, or that does not parse, shows as *unreadable* with the
+reason. Nothing in it is guessed. The page reads only while it is on screen, every 5 seconds, on a
+worker thread. The track rule is a copy of Foundry's, and `tests/test_nightshift_drift.py` keeps
+the two in step.
+
 
 From 2026-09-27 to 2026-10-14 Backstage was launched from its own card at the end of
 Tools and nowhere else, by the user's choice. Commit 31dbb9d moved its entry in

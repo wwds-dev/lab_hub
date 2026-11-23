@@ -591,3 +591,14 @@ From `docs/audit/apps-discovery-review-core.md` and `-ui.md`; the P2s and the li
 ## Out of scope, deliberately
 
 Lab Hub does not replace the projects it launches. Each keeps its own repo, README, venv and build script. Changing what Sentinel AI does still means changing Sentinel AI.
+
+## Nightshift panel (2026-11-23)
+
+Spec `docs/specs/nightshift-panel.md`. The panel is built; these were left out of scope or found along the way.
+
+- [ ] `P2` `feature` `@ai` **Nightshift scheduler view.** No scheduler (LaunchAgent) exists yet; when Foundry adds one, show whether it is loaded. Never install or load it from Lab Hub.
+- [ ] `P3` `feature` `@ai` **Nightshift notification delivery.** `notices.jsonl` is only listed on the page; a tray notice for `cancelled` and `aborted` waits on the delivery layer in Foundry.
+- [ ] `P3` `feature` `@ai` **Nightshift task spec editor, model watch, device scanner, savings tracker.** Out of scope for the panel by the owner's brief.
+- [ ] `P2` `testing` `@me` **Nightshift panel on a real night.** Only cancelled dry runs exist so far; check the page against a real armed run and a finished run with task records once the real dry run passes with a model loaded.
+- [ ] `P3` `infra` `@me` **Lab Hub.app rebuild for the Nightshift page.** Built from source only; the packaged app shows it after the owner's Update now.
+

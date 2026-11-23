@@ -319,6 +319,18 @@ def selftest() -> int:
             "and abort at startup"
         )
 
+    # Nightshift panel: the reader imports (tomllib is bundled) and the command
+    # allowlist still refuses `run`. Reads only; finding no Foundry is fine.
+    from lab_hub import nightshift
+
+    foundry = nightshift.locate(lab_root)
+    try:
+        nightshift.command_args("run")
+        problems.append("the Nightshift panel's allowlist accepted `run`")
+    except nightshift.Refused:
+        pass
+    print(f"  nightshift:      {foundry if foundry else 'no Foundry with Nightshift (panel shows that)'}")
+
     try:
         from PIL import Image  # noqa: F401
 

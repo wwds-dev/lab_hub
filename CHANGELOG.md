@@ -16,6 +16,11 @@ README and the specs in `docs/specs/` describe them.
 ## Unreleased
 
 ### Added
+- **Nightshift page under Tools.** Shows tonight's armed run and its pre-start gate (memory, task
+  load, predicted grade per task, blockers and warnings), the task files, past runs with each task's
+  grade, gap, retries, model and quantisation, the track record per task type, and notices. It runs
+  Nightshift's owner commands (plan, arm, disarm, stop, dry run, accept or reject) and shows their
+  output. Records it cannot read are marked unreadable rather than guessed.
 - **Update now refuses to install a SynCorp Inc. build its own preflight rejects.** The app's
   read-only update preflight runs against the bundle installed in /Applications before anything is
   replaced, and Update stops with its message if it fails. It also refuses to build from a checkout with

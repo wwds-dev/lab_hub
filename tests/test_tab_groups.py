@@ -32,7 +32,7 @@ def test_backup_and_sync_apps_have_their_own_tab(window):
 def test_tools_include_built_in_tools_and_unblock_tracker(window):
     assert [window.tools_tabs.widget(i) for i in range(window.tools_tabs.count())] == [
         window.tools_overview, window.convert_tab, window.narrator_tab,
-        window.images_tab, window.video_tab, window.unblock_tracker_tab,
+        window.images_tab, window.video_tab, window.nightshift_tab, window.unblock_tracker_tab,
         window.backstage_tab,
     ]
     assert _keys(window.unblock_tracker_tab) == ["unblock_tracker"]

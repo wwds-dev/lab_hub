@@ -27,6 +27,7 @@ from .video_tab import VideoTab
 from .dashboard_view import DashboardsPage, DashboardViewer
 from .links_tab import DashboardsTab, SitesTab
 from .narrator_tab import NarratorTab
+from .nightshift_tab import NightshiftTab
 from .settings_tab import SettingsTab
 from .tiles import Refreshable
 from .sidebar import Sidebar
@@ -99,6 +100,7 @@ class MainWindow(QMainWindow):
         self.narrator_tab = NarratorTab(self.settings)
         self.images_tab = ImagesTab(self.settings)
         self.video_tab = VideoTab(self.settings)
+        self.nightshift_tab = NightshiftTab(self.settings)
         self.unblock_tracker_tab = AppsTab(
             self.settings,
             apps=lambda: launcher.UTILITIES,
@@ -152,6 +154,15 @@ class MainWindow(QMainWindow):
                         lambda: self.video_tab.run_panel.is_running(), "Converting now."
                     ),
                 ),
+                BuiltInTool(
+                    "Nightshift",
+                    "Tonight's armed run, past runs and grades, and the owner commands "
+                    "for Foundry's overnight local-model queue.",
+                    self.nightshift_tab,
+                    running_or_idle(
+                        lambda: self.nightshift_tab.is_running(), "A command is running."
+                    ),
+                ),
             ],
             apps=lambda: launcher.UTILITIES + launcher.TOOLS_ONLY_APPS,
             open_page=self.tools_tabs.setCurrentWidget,
@@ -175,6 +186,7 @@ class MainWindow(QMainWindow):
             self.narrator_tab,
             self.images_tab,
             self.video_tab,
+            self.nightshift_tab,
             self.unblock_tracker_tab,
             self.backstage_tab,
         ):
@@ -323,6 +335,7 @@ class MainWindow(QMainWindow):
         self.sites_tab.apply_settings(self.settings)
         self.dashboards_page.apply_settings(self.settings)
         self.tools_overview.apply_settings(self.settings)
+        self.nightshift_tab.apply_settings(self.settings)
         self.statusBar().showMessage("Settings saved.", 4000)
 
     def refresh_all(self) -> None:
@@ -433,6 +446,8 @@ class MainWindow(QMainWindow):
         }
         for panel in self._running_panels():
             reasons.append(f"{names.get(id(panel), 'A tool')} is running")
+        if self.nightshift_tab.busy_reason():
+            reasons.append(self.nightshift_tab.busy_reason())
         return reasons
 
     def restart_for_update(self, staged) -> None:
@@ -478,7 +493,7 @@ class MainWindow(QMainWindow):
         from PySide6.QtWidgets import QApplication
 
         running = self._running_panels()
-        if running:
+        if running or self.nightshift_tab.is_running():
             self.present()
             answer = QMessageBox.question(
                 self,
@@ -496,6 +511,8 @@ class MainWindow(QMainWindow):
         is destroyed while still running, so this is not optional."""
         for panel in self._running_panels():
             panel.wait_for_stop()
+        # Nightshift's SnapshotReader and CommandWorker threads.
+        self.nightshift_tab.shutdown()
         self.dashboards_page.shutdown()
         if self.tray is not None:
             self.tray.hide()
@@ -578,7 +595,7 @@ class MainWindow(QMainWindow):
             return
 
         running = self._running_panels()
-        if running and not self._quitting:
+        if (running or self.nightshift_tab.is_running()) and not self._quitting:
             answer = QMessageBox.question(
                 self,
                 "A tool is still running",

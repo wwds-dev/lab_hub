@@ -17,7 +17,8 @@ def test_tools_open_on_the_tiles(window):
 
 
 def test_every_tool_has_a_tile_in_tab_order(window):
-    assert _names(window) == ["Convert Textfiles", "Narrator", "Prepare Images", "Convert Video"]
+    assert _names(window) == ["Convert Textfiles", "Narrator", "Prepare Images", "Convert Video",
+                              "Nightshift"]
     assert [card.app.key for card in window.tools_overview.app_cards] == [
         "unblock_tracker",
     ]
@@ -29,7 +30,8 @@ def test_every_tool_has_a_tile_in_tab_order(window):
 def test_open_goes_to_the_tools_page(window):
     for tile, page in zip(
         window.tools_overview.tool_tiles,
-        (window.convert_tab, window.narrator_tab, window.images_tab, window.video_tab),
+        (window.convert_tab, window.narrator_tab, window.images_tab, window.video_tab,
+         window.nightshift_tab),
     ):
         tile.open_button.click()
         assert window.tools_tabs.currentWidget() is page
