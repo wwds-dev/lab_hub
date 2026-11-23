@@ -280,3 +280,5 @@
 {"ts": "2026-11-23T15:03:31", "phase": "release", "state": "done", "spec": "tile-status-rows"}
 {"ts": "2026-11-23T11:01:21", "phase": "build", "state": "done", "spec": "syncorp-tile", "note": "test-first; 1,822 pass"}
 {"ts": "2026-11-23T11:01:21", "phase": "review", "state": "done", "spec": "syncorp-tile", "note": "independent review, no P0/P1; P3s fixed"}
+{"ts": "2026-11-23T20:17:24", "phase": "define", "state": "start", "spec": "nightshift-panel"}
+{"ts": "2026-11-23T20:18:20", "phase": "define", "state": "done", "spec": "nightshift-panel"}
