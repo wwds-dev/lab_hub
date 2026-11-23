@@ -28,6 +28,7 @@ import types
 from . import control, registry, state
 from .control import (  # noqa: F401
     INHERITED_VARS,
+    OWN_VARS,
     STARTUP_GRACE_SECONDS,
     LaunchError,
     _log_tail,

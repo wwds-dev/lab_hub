@@ -226,3 +226,21 @@ def test_web_engine_warm_up_runs_once_and_only_when_available(monkeypatch):
     assert dashboard_view.warm_up_web_engine() is True
     assert dashboard_view.warm_up_web_engine() is False  # once per run
     assert sorted(started) == ["Page", "Profile", "View"]
+
+
+def test_lab_hub_draws_through_the_gpu_from_the_start():
+    """Without it the first web view rebuilds a fullscreen window, which macOS
+    animates as leaving fullscreen and coming back."""
+    from ui.main_window import prepare_qt_environment
+
+    env: dict[str, str] = {}
+    prepare_qt_environment(env)
+    assert env["QT_WIDGETS_RHI"] == "1"
+
+
+def test_a_gpu_drawing_choice_the_owner_made_is_kept():
+    from ui.main_window import prepare_qt_environment
+
+    env = {"QT_WIDGETS_RHI": "0"}
+    prepare_qt_environment(env)
+    assert env["QT_WIDGETS_RHI"] == "0"

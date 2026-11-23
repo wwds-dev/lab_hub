@@ -46,6 +46,15 @@ def test_the_value_pyinstaller_saved_is_put_back(monkeypatch):
     assert "DYLD_LIBRARY_PATH_ORIG" not in env, "the bookkeeping should not leak"
 
 
+def test_lab_hubs_own_qt_settings_are_not_inherited(monkeypatch):
+    """Lab Hub turns on GPU drawing for itself; a launched app chooses its own."""
+    monkeypatch.setenv("QT_WIDGETS_RHI", "1")
+
+    env = launcher.child_env()
+
+    assert "QT_WIDGETS_RHI" not in env
+
+
 def test_unrelated_variables_survive(monkeypatch):
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     monkeypatch.setenv("HOME", "/Users/someone")

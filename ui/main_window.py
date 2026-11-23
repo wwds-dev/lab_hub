@@ -593,6 +593,24 @@ class MainWindow(QMainWindow):
         event.accept()
 
 
+def prepare_qt_environment(environ=None) -> None:
+    """Settings Qt reads at startup; called before the QApplication exists.
+
+    QT_WIDGETS_RHI: draw every window through the GPU (Metal) from the start.
+    Otherwise a window switches to GPU drawing the first time it gets a web
+    view, and Qt rebuilds the native window to do it. On a fullscreen window
+    macOS shows that as leaving fullscreen and coming straight back: opening
+    Dashboards made the whole Space slide sideways and back (measured
+    2026-11-23, PySide6 6.12: the window's frame went to x=-1900 and back
+    within half a second; gone with this set). A value the owner set wins.
+    Launched apps do not inherit it (`launcher.OWN_VARS`).
+    """
+    import os
+
+    env = os.environ if environ is None else environ
+    env.setdefault("QT_WIDGETS_RHI", "1")
+
+
 def run() -> int:
     """Create the application and show the window."""
     import sys
@@ -600,6 +618,8 @@ def run() -> int:
     from PySide6.QtWidgets import QApplication
 
     from .single_instance import SingleInstance
+
+    prepare_qt_environment()
 
     # Before Qt exists, because Qt's cocoa plugin is the caller this protects:
     # it asks a non-mouse event for its clickCount whenever a menu begins

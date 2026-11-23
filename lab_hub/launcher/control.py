@@ -57,6 +57,10 @@ INHERITED_VARS = (
     "SSL_CERT_FILE",
 )
 
+# Set by Lab Hub itself for its own Qt (`ui.main_window.prepare_qt_environment`),
+# not by PyInstaller: a launched app makes its own choice, so these are dropped.
+OWN_VARS = ("QT_WIDGETS_RHI",)
+
 
 def child_env() -> dict[str, str]:
     """The environment a launched app should see: ours, minus our own runtime."""
@@ -67,6 +71,8 @@ def child_env() -> dict[str, str]:
         if original:
             env[name] = original
     env.pop("_MEIPASS2", None)
+    for name in OWN_VARS:
+        env.pop(name, None)
     return env
 
 

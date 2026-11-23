@@ -20,6 +20,10 @@ README and the specs in `docs/specs/` describe them.
   Dashboards was opened in a run, macOS dropped the window out of fullscreen (the
   second time it did not). Lab Hub now starts the web engine once, right after the
   window comes up, before anyone can have gone fullscreen.
+- **Opening Dashboards in fullscreen no longer makes the screen slide sideways and back.**
+  The first dashboard of a run switched the window to GPU drawing, and macOS showed the
+  rebuilt window as leaving fullscreen and returning. Lab Hub now draws through the GPU
+  from the start. Apps it launches are not affected.
 
 ### Changed
 - **The new-project question names the folder.** When a project's README title differs from
