@@ -67,12 +67,12 @@ def test_land_shows_only_on_a_tile_with_work_and_check_repos_is_gone(qapp, tmp_p
     tab = tab_for(qapp, tmp_path, ["repo", "other"], monkeypatch, check_builds=True)
     tab.refresh()
     repo_card, other_card = tab.cards
-    assert not repo_card.land_button.isHidden() and repo_card.land_button.text() == "Land"
+    assert not repo_card.land_button.isHidden() and repo_card.land_button.text() == "Land (1)"
     assert other_card.land_button.isHidden()
     labels = {b.text() for b in tab.findChildren(QPushButton)}
     assert "Check repos" not in labels
     assert "Land all (1)" in labels
-    assert "Press Land" in repo_card.hygiene.toolTip()
+    assert "Press Land" in repo_card.status.rows[0].tip
     _drop(tab)
 
 
@@ -98,7 +98,8 @@ def test_land_confirms_once_then_lands_and_says_so_on_the_tile(qapp, tmp_path, l
 
     assert len(asked) == 1 and "merge 1 branch into main" in asked[0][0]
     assert (lab / "f.txt").exists() and repo_tidy.ahead_behind(lab) == (0, 0)
-    assert card.land_button.text() == "Land" and not tab.lander.busy
+    # The fake report file is not rewritten by the land, so it still counts the branch.
+    assert card.land_button.text() == "Land (1)" and not tab.lander.busy
     assert card.outcome.objectName() == "stateOk"
     _drop(tab)
 
@@ -112,7 +113,7 @@ def test_cancelling_the_confirmation_changes_nothing(qapp, tmp_path, lab, monkey
     card.land_button.click()
     assert pump(lambda: not tab.lander.busy)
     assert not (lab / "f.txt").exists() and "feat" in repo_tidy.local_branches(lab)
-    assert card.land_button.text() == "Land" and card.land_button.isEnabled()
+    assert card.land_button.text() == "Land (1)" and card.land_button.isEnabled()
     assert card.outcome.isHidden()
     _drop(tab)
 
@@ -378,7 +379,9 @@ def test_git_output_is_shown_as_typed_not_as_markup(qapp, tmp_path, lab, monkeyp
     assert card.outcome.textFormat() == Qt.TextFormat.PlainText
     assert card.outcome.text() == "Not landed: failed <b>x</b>"
     assert "&lt;i&gt;y&lt;/i&gt;" in card.outcome.toolTip()
-    assert card.hygiene.textFormat() == Qt.TextFormat.PlainText
+    from PySide6.QtWidgets import QLabel
+    texts = card.status.findChildren(QLabel, "statusText")
+    assert texts and all(t.textFormat() == Qt.TextFormat.PlainText for t in texts)
     _drop(tab)
 
 
@@ -393,7 +396,7 @@ def test_a_confirmation_that_raises_leaves_no_tile_stuck(qapp, tmp_path, lab, mo
 
     tab.confirm_land = boom
     card.land_button.click()
-    assert pump(lambda: not tab.lander.busy and card.land_button.text() == "Land")
+    assert pump(lambda: not tab.lander.busy and card.land_button.text() == "Land (1)")
     assert card.outcome.isHidden() and card.land_button.isEnabled()
     _drop(tab)
 

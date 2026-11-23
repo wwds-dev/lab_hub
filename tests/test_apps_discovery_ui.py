@@ -26,6 +26,7 @@ from ui import apps_tab, theme
 from ui.apps_tab import (BEHIND_TIP, NO_LAUNCH_HINT, NO_LAUNCH_TIP, OWN_HINT, AppCard, AppsTab,
                          OwnCard, plain_tip)
 from ui.own_verdict import OwnResult, OwnVerdict
+from ui.status_rows import Row
 from ui.progress_window import BuildCheckWindow
 
 from .test_discovery import make_project
@@ -223,7 +224,8 @@ def test_a_no_launch_tile_offers_land_like_any_tile(qapp, lab):
     card.refresh_hygiene(row)
 
     assert _visible(card.land_button, card)
-    assert card.hygiene.text() == "1 branch to land"
+    assert card.status.texts() == ["1 branch waiting to land"]
+    assert card.land_button.text() == "Land (1)"
 
 
 def test_a_no_launch_tile_says_where_the_project_is_or_that_it_is_not(qapp, lab):
@@ -257,7 +259,10 @@ def test_a_long_name_and_summary_do_not_widen_a_no_launch_tile(qapp, pristine_th
     for app in (long, self_update.OWN_TILE):
         card = AppCard(app) if app is long else OwnCard(app)
         card.version.setText("v2.208 · 126 behind · and a very long tail of words")
-        card.hygiene.setText("2 unpushed commits · 1 commit behind · 2 branches to land")
+        card.status.set_rows([
+            Row("update", "Installed build is 126 commits old", link=True),
+            Row("land", "2 unpushed commits · 1 commit behind · 2 branches waiting to land"),
+        ])
         card.refresh(Path("/nonexistent"))
         assert card.minimumSizeHint().width() <= apps_tab.TILE_MIN_WIDTH, app.name
 
@@ -322,15 +327,22 @@ def test_the_verdict_line_and_the_behind_suffix(qapp, lab):
     assert card.version.objectName() == "hint"
 
     card.set_verdict(OwnResult(row=_row("behind", behind=3)))
-    assert card.verdict.text() == "3 commits older than its source"
-    assert card.version.text() == f"{version.version_string()} · 3 behind"
-    assert card.version.objectName() == "stateWarn"
+    # Said once, as a status row; the version line stays the plain ID.
+    assert card.verdict.text() == ""
+    assert card.status.texts() == ["Installed build is 3 commits old"]
+    assert card.status.rows[0].kind == "update" and card.status.rows[0].tip == BEHIND_TIP
+    assert card.version.text() == version.version_string()
+    assert card.version.objectName() == "hint"
+
+    card.set_verdict(OwnResult(row=_row("behind", behind=0)))
+    assert card.status.texts() == ["Installed build is older than its source"]
     assert BEHIND_TIP == "A newer build is ready to install: use Check builds."
     assert card.version.toolTip() == plain_tip(version.tooltip() + "\n" + BEHIND_TIP)
 
     card.set_verdict(OwnResult(row=_row("current", note="runs the checkout directly, so ...")))
     assert card.verdict.text() == "runs the checkout directly"
     assert card.version.objectName() == "hint" and "behind" not in card.version.text()
+    assert "update" not in [row.kind for row in card.status.rows]
 
 
 def test_a_projects_version_text_is_shown_as_typed_never_as_markup(qapp, lab, monkeypatch):
@@ -428,7 +440,7 @@ def test_land_shows_on_lab_hub_tile_when_its_repo_needs_attention(qapp, lab, mon
 
     card = tab.cards[0]
     assert _visible(card.land_button, card)
-    assert card.hygiene.text() == "2 files to land"
+    assert card.status.texts() == ["2 files waiting to land"]
     planned = []
     # No real Lander thread: only what the page asks it to look at.
     monkeypatch.setattr(tab.lander, "plan", lambda repos: planned.append(list(repos)) or True)

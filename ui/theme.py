@@ -542,6 +542,9 @@ def stylesheet(p: Palette) -> str:
     QLabel#stateOk {{ color: {p.ok}; font-size: {FONT_SMALL}px; font-weight: 600; }}
     QLabel#stateWarn {{ color: {p.warn}; font-size: {FONT_SMALL}px; font-weight: 600; }}
     QLabel#stateBad {{ color: {p.bad}; font-size: {FONT_SMALL}px; font-weight: 600; }}
+    QLabel#statusAccent {{ color: {p.accent if p.dark else p.text}; font-size: {FONT_SMALL}px;
+        font-weight: 600; }}
+    QLabel#statusText {{ color: {p.muted}; font-size: {FONT_SMALL}px; }}
     {_status_rules(p, g)}
 
     /* --- inputs ----------------------------------------------------- */

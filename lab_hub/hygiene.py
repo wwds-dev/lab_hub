@@ -68,6 +68,21 @@ class RepoRow:
         return " · ".join(parts) + " to land" if parts else ""
 
     @property
+    def land_count(self) -> int:
+        """How many things the badge counts, for "Land (N)"; 0 when it cannot
+        count them all (an unreadable repo, or a line worded another way)."""
+        if self.error or not self.problems:
+            return 0
+        total = 0
+        for problem in self.problems:
+            numbers = [int(m.group(1)) for pattern, _one, _many in _SHORT
+                       for m in [pattern.search(problem)] if m]
+            if not numbers:
+                return 0
+            total += sum(numbers)
+        return total
+
+    @property
     def detail(self) -> str:
         return self.error or "; ".join(self.problems)
 

@@ -31,6 +31,11 @@ README and the specs in `docs/specs/` describe them.
   empty page, so nothing is fetched early). This replaces the web-engine warm-up above.
 
 ### Changed
+- **App tiles say each status on its own row, not in one yellow line.** The version line is
+  now only the build ID, in grey. Under it, one row per fact with a small coloured symbol:
+  "Installed build is 3 commits old" (with a Check builds link), "1 branch waiting to land",
+  "Uncommitted changes in source", or "Up to date, nothing to land" when Lab Hub can tell.
+  The Land button shows how many things it will land, "Land (3)".
 - **The new-project question names the folder.** When a project's README title differs from
   its folder name (ignoring case), the row reads "Shopfront HQ (shopfront)", so a title
   cannot pass for another app. Add to Apps also checks the folder again just before it

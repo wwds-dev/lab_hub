@@ -98,9 +98,10 @@ def test_the_badge_shows_on_the_app_with_unfinished_work(qapp, tmp_path, monkeyp
     tab, _ = _tab(qapp, tmp_path, monkeypatch)
     tab.refresh()
     a, b = tab.cards
-    assert a.hygiene.text() == "3 files · 1 unpushed commit to land"
-    assert "3 uncommitted files; 1 unpushed commit" in a.hygiene.toolTip()
-    assert b.hygiene.text() == ""
+    assert a.status.texts() == ["3 files · 1 unpushed commit waiting to land"]
+    assert "3 uncommitted files; 1 unpushed commit" in a.status.rows[0].tip
+    assert a.land_button.text() == "Land (4)"
+    assert not any("waiting to land" in t for t in b.status.texts())
     _drop(tab)
 
 
@@ -108,10 +109,10 @@ def test_the_badge_clears_when_the_work_lands(qapp, tmp_path, monkeypatch):
     _write(tmp_path, [_row(tmp_path, "a", ["1 unpushed commit"])])
     tab, _ = _tab(qapp, tmp_path, monkeypatch)
     tab.refresh()
-    assert tab.cards[0].hygiene.text() == "1 unpushed commit to land"
+    assert tab.cards[0].status.texts() == ["1 unpushed commit waiting to land"]
     _write(tmp_path, [_row(tmp_path, "a")] + [_row(tmp_path, "pad", ["x"])])  # new size and mtime
     tab.refresh()
-    assert tab.cards[0].hygiene.text() == ""
+    assert not any("waiting to land" in t for t in tab.cards[0].status.texts())
     _drop(tab)
 
 

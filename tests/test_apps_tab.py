@@ -9,6 +9,7 @@ what it says.
 from __future__ import annotations
 
 import pytest
+from PySide6.QtWidgets import QLabel
 
 from lab_hub import launcher
 
@@ -1591,22 +1592,30 @@ def test_long_version_and_badge_do_not_widen_a_tile(qapp):
     """The version marker and the "to land" badge live on their own line,
     so they cannot push a tile wider than the name, status and summary need."""
     from ui.apps_tab import AppCard
+    from ui.status_rows import Row
 
     card = AppCard(launcher.ExternalApp("s", "SYNDUSTRYX", "s", "main.py", "summary"))
     base = card.minimumSizeHint().width()
     card.version.setText("v0.6.53+g861546d-dirty · 126 behind · and a very long tail")
-    card.hygiene.setText("26 branches · 7 worktrees · 1 file to land")
+    card.status.set_rows([Row("land", "26 branches · 7 worktrees · 1 file waiting to land")])
     assert card.minimumSizeHint().width() <= base + 160
-    assert card.header.indexOf(card.version) == -1 and card.header.indexOf(card.hygiene) == -1
+    assert card.header.indexOf(card.version) == -1 and card.header.indexOf(card.status) == -1
 
 
 def test_the_longest_badge_wraps_instead_of_widening_a_tile(qapp):
     """Regression (2026-11-16): "2 unpushed commits · 1 commit behind · 2
     branches to land" on one unwrapped line pushed the grid off the window."""
     from ui.apps_tab import AppCard
+    from ui.status_rows import Row
 
     card = AppCard(launcher.ExternalApp("s", "Sentinel", "s", "main.py", "summary"))
     base = card.minimumSizeHint().width()
-    card.hygiene.setText("2 unpushed commits · 1 commit behind · 2 branches to land")
-    assert card.hygiene.wordWrap()
+    card.set_check_builds_available(True)  # the link must not widen it either
+    card.status.set_rows([
+        Row("update", "Installed build is 126 commits old", link=True),
+        Row("land", "2 unpushed commits · 1 commit behind · 2 branches waiting to land"),
+        Row("uncommitted", "Uncommitted changes in source"),
+    ])
+    texts = card.status.findChildren(QLabel, "statusText")
+    assert texts and all(label.wordWrap() for label in texts)
     assert card.minimumSizeHint().width() <= base + 20

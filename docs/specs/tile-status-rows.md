@@ -1,6 +1,6 @@
 # Spec: status rows on app tiles instead of one yellow line
 
-Needs: define (owner approval of this spec)
+Needs: verify in the running app (owner)
 
 Status: Phase Define (`product-manager`), drafted 2026-11-23 in `lab_hub`. Nothing built.
 In-flight check (`session_start.py --inflight`, 2026-11-23): no spec owns the tile's version
@@ -68,3 +68,24 @@ layout under the version. Sentence case, no terminal punctuation.
 No new state, threads or files: rows are rebuilt from the same `launcher.version` result and
 `hygiene.RepoRow` the tile already reads, on the same calls (`refresh_version`,
 `refresh_hygiene`). No gate needed.
+
+## 7. Build notes and review (2026-11-23)
+Built in `lab_hub` on `main`. Deviations from §2, both left for the owner to accept or change:
+- **Wording for a bundle.** A frozen bundle built from a dirty checkout says "Built from
+  uncommitted changes"; "Uncommitted changes in source" is kept for an app that runs its
+  checkout, where it is only shown when no "waiting to land" row already counts those files.
+- **Light mode symbol.** The Paper theme has no accent colour by design ("what would be
+  accented is ink", `ui/theme.py`), so the ↓ symbol is ink there and mint in dark.
+- **Link placement.** "Check builds" sits on its own line under the update row: beside
+  wrapped words it squeezed them and the row was drawn a line short.
+
+Review (`code-reviewer`, separate agent): P0 five stale tests in `tests/test_land_ui.py` —
+updated to the new label and rows; P1 "Up to date" said without a comparison (no commit,
+`behind_unknown`, Lab Hub's own tile before or after a failed check) — fixed, the tile now
+requires a real comparison (own tile: its check says "up to date"), with tests; P2 checkout
+uncommitted files said twice — fixed; P2 width test now has the link on. Mutation check:
+5 planted mutants, all caught after one added case.
+
+Evidence: `docs/specs/tile-status-rows-dark.png`, `-light.png` (offscreen render of four
+tiles with fixture data, not the running app). Not verified: the real app window, and a row
+wrapping exactly at a tile's edge in a live resize.

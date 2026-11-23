@@ -339,7 +339,10 @@ def test_tile_text_and_tooltip_for_the_provisio_case(qapp, tmp_path, monkeypatch
 
     card.refresh_version(tmp_path / "lab")
 
-    assert card.version.text() == f"v2.0.003+g{sha} · 2 behind"
+    assert card.version.text() == f"v2.0.003+g{sha}"
+    assert card.version.objectName() == "hint"
+    assert card.status.texts() == ["Installed build is 2 commits old"]
+    assert card.status.rows[0].link and "2 commits further on" in card.status.rows[0].tip
     assert sha in card.version.toolTip() and "2 commits further on" in card.version.toolTip()
 
 

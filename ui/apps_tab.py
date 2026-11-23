@@ -40,6 +40,7 @@ from .tiles import (  # noqa: F401 - the layout constants are re-exported
 from .discovery_banner import SuggestionBanner
 from .lander import Lander
 from .own_verdict import OwnResult, OwnVerdict
+from .status_rows import Row, StatusRows, update_text
 from .web_open import OpenWhenServing
 from .widgets import plain_tip  # noqa: F401 - plain_tip is re-exported: tests and the Land code import it from here
 
@@ -117,6 +118,7 @@ class AppCard(Tile):
     start_failed = Signal(str)
     land_requested = Signal(object)  # this card
     review_requested = Signal(object)  # this card
+    check_builds_requested = Signal()
 
     def __init__(self, app: launcher.ExternalApp, parent=None) -> None:
         # A name from a README is cut to one line instead of widening the tile.
@@ -141,24 +143,27 @@ class AppCard(Tile):
         # A VERSION file is the project's own text: shown as typed, never as markup.
         self.version.setTextFormat(Qt.TextFormat.PlainText)
 
-        # Work not yet committed, pushed or merged: read from git_autosync's
-        # report, so it costs a file read and never a git call on this thread.
-        self.hygiene = QLabel()
-        self.hygiene.setObjectName("hint")
-        # Wrapped, and stacked under the version below: "2 unpushed commits ·
-        # 1 commit behind · 2 branches to land" on one unwrappable line sets a
-        # minimum width wider than a tile column and pushes the grid off-window.
-        self.hygiene.setWordWrap(True)
-        self.hygiene.setTextFormat(Qt.TextFormat.PlainText)  # the report is a file
+        # One row per fact under the version (spec tile-status-rows): a stale
+        # build, work to land (read from git_autosync's report, so a file read
+        # and never a git call on this thread), uncommitted changes, or "up to
+        # date" when there is evidence for it. Each row wraps, so a long count
+        # never widens a tile column and pushes the grid off-window.
+        # True only when a comparison with the source actually ran, so "up to
+        # date" is never said from a number alone (spec tile-status-rows §2.4).
+        self._compared = False
+        self._stale_behind = 0
+        self._dirty_text = ""
+        self._dirty_in_checkout = False
+        self.status = StatusRows()
+        self.status.link_clicked.connect(self.check_builds_requested)
 
-        # Version and badge get a line of their own under the name. On the
-        # name's line, "v0.6.53+g861546d · 1 behind" plus "3 to land" plus the
-        # status chip set a minimum width wider than a tile column, and the
-        # grid pushed the third column off the window.
+        # Version and status get lines of their own under the name. On the
+        # name's line they set a minimum width wider than a tile column, and
+        # the grid pushed the third column off the window.
         self.meta = QVBoxLayout()
         self.meta.setSpacing(2)
         self.meta.addWidget(self.version)
-        self.meta.addWidget(self.hygiene)
+        self.meta.addWidget(self.status)
         self.heading.addLayout(self.meta)
 
         self.launch_button = QPushButton("Launch")
@@ -333,20 +338,28 @@ class AppCard(Tile):
         is not the code that would open.
         """
         found = launcher.version(self.app, lab_root)
+        self._compared = found.known and bool(found.commit) and not found.behind_unknown
+        self._dirty_in_checkout = found.origin == "checkout"
+        self._stale_behind = found.behind if found.known and found.stale else 0
+        self._dirty_text = (
+            ("Uncommitted changes in source" if found.origin == "checkout"
+             else "Built from uncommitted changes")
+            if found.known and found.commit and found.dirty else ""
+        )
+        self.restyle(self.version, "hint")
         if not found.known:
             self.version.setText("")
             self.version.setToolTip(plain_tip(
                 f"Lab Hub cannot tell which build of {self.app.name} is installed."
                 + (f" {found.detail}." if found.detail else "")
             ))
-            self.restyle(self.version, "hint")
+            self._sync_status()
             return
 
-        # An installed build older than its source is the answer to the question
-        # the number exists for. Saying only the number would be true and
-        # useless: the button would still open the old one without a word.
-        suffix = f" · {found.behind} behind" if found.stale else ""
-        self.version.setText(found.marker + suffix)
+        # The line is only the ID. An installed build older than its source is
+        # still the answer to the question the number exists for, so it gets a
+        # status row of its own (spec tile-status-rows) rather than a suffix.
+        self.version.setText(found.marker.removesuffix("-dirty"))
         commit = (
             f" Commit {found.commit}{' with uncommitted changes' if found.dirty else ''}."
             if found.commit
@@ -367,7 +380,44 @@ class AppCard(Tile):
                 else ""
             )
         ))
-        self.restyle(self.version, "stateWarn" if found.stale else "hint")
+        self._update_tip = (
+            f"The working checkout is {launcher.state.commits_further(found.behind)}, so Launch "
+            "opens the older build until it is rebuilt and reinstalled."
+        )
+        self._sync_status()
+
+    _update_tip = ""
+
+    def set_check_builds_available(self, available: bool) -> None:
+        """The update row links to Check builds only on a page that has it."""
+        self.status.set_link_available(available)
+
+    def _status_rows(self) -> list[Row]:
+        """What the status block says, from evidence already on the tile."""
+        rows: list[Row] = []
+        if self._stale_behind:
+            rows.append(Row("update", update_text(self._stale_behind),
+                            self._update_tip, link=True))
+        row = self.hygiene_row
+        if row is not None and row.needs_attention:
+            tip = (f"{self.app.name} ({row.branch or 'unknown branch'}): {row.detail}. "
+                   "Press Land to commit, merge and push it.")
+            if row.error:
+                rows.append(Row("unreadable", "Repo not readable", tip))
+            elif row.badge:
+                rows.append(Row("land", row.badge.removesuffix(" to land") + " waiting to land", tip))
+        # A checkout's uncommitted files are already in the "waiting to land" row.
+        said = self._dirty_in_checkout and any(r.kind == "land" for r in rows)
+        if self._dirty_text and not said:
+            rows.append(Row("uncommitted", self._dirty_text,
+                            "The build was made from a checkout with changes not yet committed."))
+        if (not rows and self._compared and row is not None
+                and not row.needs_attention):
+            rows.append(Row("clean", "Up to date, nothing to land"))
+        return rows
+
+    def _sync_status(self) -> None:
+        self.status.set_rows(self._status_rows())
 
     def refresh_hygiene(self, row: hygiene.RepoRow | None) -> None:
         """Say how much of this app's work has not landed yet, or nothing."""
@@ -375,17 +425,7 @@ class AppCard(Tile):
         if row is not None:
             self._repo_path = row.path
         self._sync_land()
-        if row is None or not row.badge:
-            self.hygiene.setText("")
-            self.hygiene.setToolTip("")
-            self.restyle(self.hygiene, "hint")
-            return
-        self.hygiene.setText(row.badge)
-        self.hygiene.setToolTip(plain_tip(
-            f"{self.app.name} ({row.branch or 'unknown branch'}): {row.detail}. "
-            "Press Land to commit, merge and push it."
-        ))
-        self.restyle(self.hygiene, "stateWarn")
+        self._sync_status()
 
     def _sync_land(self) -> None:
         """Land shows while there is work to land, and not while one is running."""
@@ -393,7 +433,8 @@ class AppCard(Tile):
         show = row is not None and row.needs_attention
         self.land_button.setVisible(show)
         if not self._landing:
-            self.land_button.setText("Land")
+            count = row.land_count if show else 0
+            self.land_button.setText(f"Land ({count})" if count else "Land")
             self.land_button.setEnabled(
                 self._land_allowed and not (show and land.landing(row.path))
             )
@@ -674,17 +715,23 @@ class OwnCard(AppCard):
         row = self._result.row if self._result is not None else None
         behind = row is not None and row.verdict == "behind"
         if behind:
-            count = row.version.behind
-            text += f" · {count} behind" if count > 0 else " · behind"
             tooltip += f"\n{BEHIND_TIP}"
+        # "Behind" is a status row (spec tile-status-rows), not a suffix; a
+        # count Lab Hub could not make still says the build is older.
+        self._compared = row is not None and self_update.verdict_line(row) == "up to date"
+        self._stale_behind = (max(row.version.behind, 0) or -1) if behind else 0
+        self._update_tip = BEHIND_TIP
+        self._dirty_text = ""
         self.version.setText(text)
         self.version.setToolTip(plain_tip(tooltip))
         self.version.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.restyle(self.version, "stateWarn" if behind else "hint")
+        self.restyle(self.version, "hint")
+        self._sync_status()
         if self.verdict is None:
             return
         if row is not None:
-            self.verdict.setText(self_update.verdict_line(row))
+            # Behind is said once, by the status row above.
+            self.verdict.setText("" if behind else self_update.verdict_line(row))
             self.verdict.setToolTip(plain_tip(row.note) if row.note else "")
         else:
             error = self._result.error if self._result is not None else None
@@ -877,6 +924,9 @@ class AppsTab(TilePage):
         )
         self.stop_land_button.clicked.connect(self.lander.stop)
         self.stop_land_button.hide()
+        # The first tiles were made before the page knew whether it has Check builds.
+        for card in self.cards:
+            card.set_check_builds_available(self.check_button is not None)
         self.show_land_button = QPushButton("Show progress")
         self.show_land_button.setToolTip("Show the Land window again")
         self.show_land_button.clicked.connect(self.show_land_window)
@@ -915,6 +965,8 @@ class AppsTab(TilePage):
                 card.land_requested.connect(self.land_card)
                 card.review_requested.connect(self.review_card)
                 card.set_land_enabled(not self.lander.busy)
+                card.set_check_builds_available(getattr(self, "check_button", None) is not None)
+                card.check_builds_requested.connect(self.show_build_report)
                 cards.append(card)
             self.set_tiles(index, cards)
         self._shown = wanted

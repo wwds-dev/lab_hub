@@ -161,8 +161,9 @@ after a run, which covers these repos too.
 edited. It shows the name, "This app: the launcher for the lab's projects.", the build
 you are running as the window title shows it (`v2.170` style; the tooltip has the
 commit and date), and one verdict line, the same as Lab Hub's row in Check builds:
-"up to date", "N commits older than its source" (the version line then adds
-"· N behind"), or "runs the checkout directly" when started from source. That line
+"up to date" or "runs the checkout directly" when started from source. When it is
+behind, the verdict line is blank and a status row says "Installed build is N commits
+old" instead. That line
 comes from git, so it is worked out in the background at start-up and on Refresh and is
 blank until it arrives, never on the poll. The tile has **Land** and **Open in
 Terminal**, and none of Launch, Bring to front, Stop, Quit or Update now: you are already
@@ -324,7 +325,8 @@ the process up and the tile correctly says *Running*. That is not a stale tile;
 
 **An installed build older than its source says so.** A frozen bundle is only
 as new as its last build, and committing to a project does not rebuild it — so
-the tile reads `v2.104+g1a2b3c4 · 5 behind`, and the tooltip says Launch will open the
+the tile shows a status row "↓ Installed build is 5 commits old" with a **Check builds**
+link under its version `v2.104+g1a2b3c4`, and the tooltip says Launch will open the
 older build until it is rebuilt and reinstalled. Reporting only the number
 would be true and useless: the button would still open the old one without a
 word.
@@ -342,9 +344,11 @@ says why. `scripts/stamp_version.py` now refuses to stamp without a commit.
 runs the project root in `Contents/Resources/project_root.txt`, which is not
 always the working checkout — Provisio's runs a release clone. The tile reads
 that root and counts, from its commit, how far the working checkout has moved
-on (`v2.0.153+gc534bbb · 21 behind`). When the recorded root *is* the working
-checkout it cannot be behind, as before. `-dirty` uses `git status`, cached for
-ten seconds per checkout because uncommitted edits move no ref.
+on ("Installed build is 21 commits old" under `v2.0.153+gc534bbb`). When the recorded
+root *is* the working checkout it cannot be behind, as before. Uncommitted changes are a
+status row of their own ("Uncommitted changes in source", or "Built from uncommitted
+changes" for a bundle); for a checkout they come from `git status`, cached for ten
+seconds per checkout because uncommitted edits move no ref.
 
 A root that cannot be read (missing, no entry script, not git, no `VERSION`
 arc) gives *no* number: the tile is blank and its tooltip, and the build report
@@ -379,7 +383,7 @@ too). Spec `docs/specs/progress-windows.md`; `ui/progress_window.py`,
 `lab_hub/progress.py`.
 
 **Land** answers the neighbouring question, and acts on it: has the work
-*landed*? Each app tile carries an amber "N to land" badge when its repo has
+*landed*? Each app tile carries a status row "⇄ N … waiting to land" when its repo has
 uncommitted files, unpushed commits, is behind or diverged, has local branches
 not merged into the default branch, or has a worktree with uncommitted work;
 the tooltip lists them. The data is `git_autosync`'s `hygiene.json` (refreshed
@@ -387,6 +391,14 @@ by every autosync run, with a fetch), read as a file, so the tiles cost no git
 call; Refresh (⌘R) also re-runs `git_autosync/scripts/hygiene.py` in the
 background (local git only, no fetch), so there is no button to press to look.
 `lab_hub/hygiene.py`, `tests/test_hygiene.py`.
+
+**Status rows** (spec `docs/specs/tile-status-rows.md`). Under the version ID, which is
+always grey, a tile has one row per fact, and only the symbol is coloured: ↓ an older
+installed build, ⇄ work waiting to land, ✎ uncommitted changes, ✕ a repo that cannot be
+read. When the version is known and the report shows nothing to land, one row says
+"✓ Up to date, nothing to land"; without that evidence the block stays empty. The Land
+button shows the count, "Land (3)", when every line in the report can be counted.
+`ui/status_rows.py`, `tests/test_status_rows.py`.
 
 A tile with something to land shows **Land** beside Launch, or beside Open in Terminal
 on a tile with no launch command (spec
