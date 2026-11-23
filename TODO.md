@@ -583,6 +583,10 @@ From `docs/audit/apps-discovery-review-core.md` and `-ui.md`; the P2s and the li
 - [x] `P3` `design` `@me` Release of `tile-status-rows` (2026-11-23, build 319 installed, owner: "yes, release").
 - [ ] `P3` `design` `@ai` Follow-up from the mockup: move the background-service line and the app path (spec §4 non-goal; reopens the tiles' reserved-height alignment).
 
+## Lab Monitor page (2026-11-23)
+
+- [ ] `P3` `bug` `@ai` Lab Monitor page template (`lab/dashboards/lab_monitor/lab_projects_monitor_page_template.html`) has no `<meta charset="utf-8">`: served over HTTP without a charset header, dashes and arrows show as mojibake ("â€”"). Add the meta tag.
+
 ## Out of scope, deliberately
 
 Lab Hub does not replace the projects it launches. Each keeps its own repo, README, venv and build script. Changing what Sentinel AI does still means changing Sentinel AI.
