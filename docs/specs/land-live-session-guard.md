@@ -1,5 +1,7 @@
 # Spec: Land does not commit files a session is still editing
 
+Needs: define, architect, plan, build, review, verify, secure, docs (spec lists no phases; judged from content.)
+
 Status: **Define approved by the owner 2026-11-20 ("Approve as recommended"):** §5 takes the
 recommendation for all four decisions (15 minutes, main checkout included, no override, no
 exception list in slice 1). Branch `claude/land-live-session-guard`. Design does not apply to

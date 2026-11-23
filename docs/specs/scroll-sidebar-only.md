@@ -1,5 +1,7 @@
 # Spec: vertical scrolling switches section only over the sidebar
 
+Needs: define, build, verify, docs
+
 Status: **Shipped in build 222 (2026-11-19).** Define approved by the owner 2026-11-18; review `docs/audit/scroll-sidebar-only-review.md` (no P0/P1); verify `docs/audit/scroll-sidebar-only-qa.md`.
 In-flight check (`session_start.py --inflight`, 2026-11-18): no spec or worktree touches scrolling or `ui/swipe.py`.
 

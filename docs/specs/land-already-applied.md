@@ -1,5 +1,7 @@
 # Spec: Land recognises a branch whose commits are all already in the default branch as copies
 
+Needs: define, build, review, verify, docs
+
 Status: **Define, awaiting owner approval (GATE).** Phase: Define (`product-manager`), 2026-11-17. Slug `land-already-applied` is owned by this session.
 In-flight check (`session_start.py --inflight`, 2026-11-17): no listed spec covers this. It touches `lab_hub/repo_tidy.py` `is_landed` / `plan_repo`, the engine of `repo-tidy` and `land-from-tiles` (both "document done", not released); this change is additive to them and does not change their guards.
 Nothing built.

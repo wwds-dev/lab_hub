@@ -1,5 +1,7 @@
 # Spec: Land stops point at the button that clears them
 
+Needs: define, design, plan, build, review, verify, secure, docs
+
 Status: **Define, awaiting owner approval (GATE: user-visible).** Phase: Define (`product-manager`). Drafted 2026-11-21 in `lab_hub`; shrunk the same day after the owner's words: "shrink it" (the first draft added a dialog per stop; **Ask Claude…** already resolves them).
 In-flight check (`session_start.py --inflight`, 2026-11-21): no unreleased spec owns this. It extends `claude-handoff` (document done; owns **Ask Claude…**, `lab_hub/handoff.py`) and `land-resolve-all` (document done). `land-network-preflight` (build, another session, uncommitted edits in `land.py`) owns the network stop, so this builds after it is merged.
 Nothing built.

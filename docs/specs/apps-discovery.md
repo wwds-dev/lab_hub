@@ -1,5 +1,7 @@
 # Spec: Apps finds new projects and shows Lab Hub itself
 
+Needs: define, design, architect, build, review, verify, secure, docs
+
 Status: **Define approved by the owner 2026-11-21 ("Approve as recommended"): all six §11 recommendations and the §7 wording.** Design (§12) and Architect (§13, ADR 0007) written 2026-11-21, **Architect gate approved by the owner 2026-11-21 ("Approve as recommended": every §14 recommendation, ADR 0007 accepted)**. Next: Build. Written 2026-11-21 from the owner's request of the same day. No code written.
 In-flight check (`session_start.py --inflight`, 2026-11-21): none of the 20 unreleased specs covers project discovery or a Lab Hub tile. Touching ones, all compatible:
 - `self-update` (§1-§3, Amendment 1) gave Lab Hub a **build row** in Check builds (`self_update.SELF`, `lab_hub/self_update.py:64-71`, comment "Never registered: no tile"). This spec adds a tile and leaves that row and Update now unchanged; Build amends only the comment.

@@ -1,5 +1,7 @@
 # Spec: pick the repos to land, and see how long Land took
 
+Needs: define, design, architect, plan, build, review, verify, secure, docs
+
 Status: **Define approved by the owner 2026-11-18 ("Approve as recommended"): all four §5 decisions as recommended.** Design is the mockup below. Architect: §8, approved by the owner 2026-11-18 ("Approve architecture"), including the end title "Land finished · N repos". Built; Review, Verify and Secure in `docs/audit/land-pick-and-time-*.md`.
 In-flight check (`session_start.py --inflight`, 2026-11-18): no spec owns choosing repos in the confirmation or the Land window's end state. `land-confirm-dialog` (released in build 199) owns the confirmation's look; this spec adds a choice to it. `progress-windows` (document done) owns the Land window; this spec changes only its finished state and lets finished rows open. `land-fast` and `land-from-tiles` own what Land does; nothing here changes that. Another session ("Land: let Claude edit .claude/ files; test main once") is changing `lab_hub/land.py`; this spec needs no change to `land.py`'s engine.
 Mockup: `docs/specs/land-pick-and-time-mockup.html` (filled with the data from the owner's build-199 screenshots).

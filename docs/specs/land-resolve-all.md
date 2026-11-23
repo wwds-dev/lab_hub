@@ -1,5 +1,7 @@
 # Spec: Land leaves nothing open
 
+Needs: define, architect, plan, build, review, verify, secure, docs
+
 Status: **Define approved by the owner 2026-11-17 ("Approve, use defaults"): §6 decisions take the recommended option.** Phase: Define (`product-manager`). Drafted 2026-11-17 in `lab_hub`.
 In-flight check (`session_start.py --inflight`, 2026-11-17): `land-from-tiles` and `land-already-applied` (both document done, not released) own the Land code this extends; both are on `main` (`9e92d1e`, `924a29b`). This spec changes their behaviour only where §4 says, and builds on `main` after them. `tile-resolve` is superseded. No other spec matches.
 

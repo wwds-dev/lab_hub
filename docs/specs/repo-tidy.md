@@ -1,5 +1,7 @@
 # Spec: Check repos can clean up what is safe and list the rest for review
 
+Needs: define, architect, plan, build, review, verify, secure, docs
+
 Status: **Define/Architect approved 2026-11-15 ("Approve as recommended"); Build, Review and Secure done, fixes applied.** Owner: Lab Hub session, 2026-11-15.
 Nothing built. In-flight check (`session_start.py --inflight`, 2026-11-14): no spec covers Check repos.
 Owner's choice so far (2026-11-15): "Safe cleanup", then "Cleanup + review list". Merging branches into main is out of scope (it would bypass review and QA).

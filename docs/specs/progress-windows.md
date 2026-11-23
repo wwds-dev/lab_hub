@@ -1,5 +1,7 @@
 # Spec: progress windows for Land and Check builds
 
+Needs: define, design, architect, plan, build, review, verify, secure, docs
+
 Status: **Define approved by the owner 2026-11-17 ("Approve as recommended"): all four §5 decisions as recommended.** Phase: Define (`product-manager`), 2026-11-17. Design is the mockup below; next is Architect (GATE).
 Nothing built. In-flight check (`session_start.py --inflight`, 2026-11-17): no spec owns a progress window. `land-from-tiles` (document done, not released) owns Land's engine and tile UI; this spec reuses its `Lander` signals and changes none of its behaviour. `update-now-terminal` and `release-root-behind` (document done, not released) own the Check builds report and `RebuildDialog`; this spec replaces their presentation, not what they run.
 Mockup: `docs/specs/progress-windows-mockup.html` (the owner chose "take best of both" of two variants per window, 2026-11-17).

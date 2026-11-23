@@ -1,5 +1,7 @@
 # Spec: every lab app's tile shows its real build and how far behind it is
 
+Needs: define, architect, plan, build, review, verify, docs
+
 Status: **Define draft, awaiting the owner's gate.** Phase: Define (`product-manager`). Owner: Lab Hub session, 2026-11-13.
 Nothing was built, installed, tagged or pushed. In-flight check (`session_start.py --inflight`, lab_hub and provisio, 2026-11-13): no spec covers this.
 

@@ -1,5 +1,7 @@
 # Spec: Land takes minutes, and says why anything stays open
 
+Needs: define, architect, plan, build, review, verify, secure, docs, comply
+
 Status: **Define approved by the owner 2026-11-17 ("Approve as recommended"): §5 decisions take the recommended option.** Built, reviewed, secured and verified 2026-11-17; not committed (§10).
 In-flight check (`session_start.py --inflight`, 2026-11-17): `land-resolve-all` (document done) owns "Land leaves nothing open" (prep, triage, archive) and `progress-windows` (document done) owns the Land window and `durations.json`. Neither covers how long a Claude merge takes or the stops below. This spec changes `claude_resolve.resolve` and adds two stop kinds to `land-resolve-all` §4.7; it changes neither spec's other behaviour. No other spec matches.
 

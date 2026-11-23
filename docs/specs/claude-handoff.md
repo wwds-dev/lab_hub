@@ -1,5 +1,7 @@
 # Spec: hand what Lab Hub cannot fix to a Claude Code session
 
+Needs: define, design, architect, plan, build, review, verify, secure, docs
+
 Status: **Define approved by the owner 2026-11-17 ("Approve, use defaults"): §6 takes every recommended option. Architect approved by the owner 2026-11-17 ("Approve architecture"). Built (`69aa809`); review findings fixed with the limit changes below, approved by the owner 2026-11-18 ("Fix all as proposed"). Verify and Secure findings fixed, approved by the owner 2026-11-18 ("Fix as proposed"). Next: owner's real-Mac check (§2.7), Document.** Phase: Define (`product-manager`). Drafted in worktree `zealous-benz-97c752`, branch `claude/resolve-button-5dc32f`.
 
 In-flight check (`session_start.py --inflight`, 2026-11-17):

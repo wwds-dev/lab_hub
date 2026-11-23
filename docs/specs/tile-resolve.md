@@ -1,5 +1,7 @@
 # Spec: a Resolve button on each app tile that has work to land
 
+Needs: define (Superseded by land-from-tiles; do not build.)
+
 Status: **Superseded 2026-11-16 by `land-from-tiles.md` (owner approved); do not build.** Phase: Define (`product-manager`). Drafted 2026-11-16 in `lab_hub`.
 Nothing built. In-flight check (`session_start.py --inflight`, 2026-11-16): `repo-tidy` (document done 2026-11-16, not released) is the spec this extends. It owns `repo_tidy`, `CleanupDialog` and `ReviewDialog`; this spec changes none of their behaviour and builds after it is released or merged, by whichever session owns `repo-tidy`.
 

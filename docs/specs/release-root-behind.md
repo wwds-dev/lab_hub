@@ -1,5 +1,7 @@
 # Spec: when an app runs a release clone that is behind, the Build check says to move the clone, not to re-run the installer
 
+Needs: define, architect, plan, build, review, verify, docs
+
 Status: **Built 2026-11-16 on claude/release-root-behind, not yet merged.** Define approved by the owner 2026-11-16 ("Approve"), all three recommendations in §5. Phase: Define (`product-manager`). Drafted 2026-11-16 in `lab_hub`.
 Nothing built. In-flight check (`session_start.py --inflight`, 2026-11-16): `update-now-terminal` (document done, merged to `main`, not released) is the spec this builds on: it owns `run_updates` and `run_in_terminal`, and this spec changes what they are handed for one kind of app, not how they work. The others (`lab-wide-build-marker`, `land-from-tiles`, `repo-tidy`, `tile-resolve`) do not touch `build_status`.
 

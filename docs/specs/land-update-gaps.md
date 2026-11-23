@@ -1,5 +1,7 @@
 # Spec: Land and Update now gaps found in the 17 Nov Land all
 
+Needs: define, architect, plan, build, review, verify, secure, docs, comply, release
+
 Status: **Define approved by the owner 2026-11-17 ("Approve as recommended"): §5 takes the recommended options.** Built, reviewed, verified, secured and documented 2026-11-17; not committed. Open for the owner: §10. Owner: this session (`land-update-gaps`).
 In-flight check (`session_start.py --inflight`, 2026-11-17): `land-fast` (document done, on `main` as `2c5c465`) already covers items 1 and 2 of the task below, see §1. `land-resolve-all` owns the untracked-file step; this spec changes one rule in it (§3.1). `self-update` (on `main` as `5e5a19f`; its worktree is clean) owns Update now's self-update; this spec changes only what happens after a failed rebuild (§3.2). No other in-flight spec, branch or worktree touches these files.
 

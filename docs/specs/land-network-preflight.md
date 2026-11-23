@@ -1,5 +1,7 @@
 # Spec: Land checks the network before it starts any slow work
 
+Needs: define, build, review, verify, docs
+
 Status: **Build done 2026-11-21.** Define approved by the owner 2026-11-21 ("Approve, build it"), both proposals in §3 accepted.
 In-flight check (`session_start.py --inflight`, 2026-11-21): no spec or worktree touches a network check in Land. The `land-*` specs in flight (`land-live-session-guard`, `land-update-gaps`, `land-pick-and-time`, …) touch other parts of `land.py`; Build must be rebased on them and must not edit their code paths beyond the one call below.
 

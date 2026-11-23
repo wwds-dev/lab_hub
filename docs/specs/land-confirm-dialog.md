@@ -1,5 +1,7 @@
 # Spec: a readable Land confirmation
 
+Needs: define, design, architect, plan, build, review, verify, secure, docs
+
 Status: **Define approved by the owner 2026-11-17 ("Approve as recommended"): all four §5 decisions as recommended.** Design is the mockup below. Architect: §8 (no GATE). Build in progress.
 In-flight check (`session_start.py --inflight`, 2026-11-17): no spec owns the confirmation shown before Land starts. `land-from-tiles` (document done) made it one confirmation and owns Land's engine; `land-resolve-all` (document done) added stops and the triage notice; `progress-windows` (document done) owns the window shown *after* confirmation; `land-fast` (document done) changed stop wording. This spec changes only how the confirmation looks; it changes nothing Land does.
 Mockup: `docs/specs/land-confirm-dialog-mockup.html` (filled with the data from the owner's screenshot).

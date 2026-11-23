@@ -1,5 +1,7 @@
 # Spec: Update now also covers apps whose installer needs a terminal (Provisio)
 
+Needs: define, architect, plan, build, review, verify, secure, docs
+
 Status: **Built and merged 2026-11-16; owner confirmed on the real Mac that Update now opens Terminal.** Define approved by the owner 2026-11-16 ("Approve"), all three recommendations in §5. Phase: Define (`product-manager`). Drafted 2026-11-16 in `lab_hub`.
 Nothing built. In-flight check (`session_start.py --inflight`, 2026-11-16): `lab-wide-build-marker`, `land-from-tiles`, `repo-tidy` (all document done, not released) and `tile-resolve` (superseded). None of them changes the Build check dialog or `build_status`; this spec touches `ui/apps_tab.py` `show_build_report` and `lab_hub/launcher/{control,state}.py` only.
 

@@ -1,5 +1,7 @@
 # Spec: Land stops a branch that already contains a folder link
 
+Needs: define, architect, build, review, verify, secure, docs
+
 Status: **Define approved by the owner 2026-11-18 ("Approve as recommended"): §5 takes option A for all four decisions. Architect (§8) and the widening to plain files (§9, P1-1) approved 2026-11-20 ("Approve and land").** Owner of the spec: this
 session (`land-folder-link-guard`, worktree `bold-merkle-831506`).
 In-flight check (`session_start.py --inflight`, 2026-11-18): no unreleased spec, `claude/*` branch

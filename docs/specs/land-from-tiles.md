@@ -1,5 +1,7 @@
 # Spec: one-click Land on each tile; retire Check repos, Resolve and Review as separate steps
 
+Needs: define, architect, plan, build, review, verify, secure, docs
+
 Status: **Define approved by the owner 2026-11-16 ("approve as recommended").** Phase: Define (`product-manager`), 2026-11-16. Supersedes `docs/specs/tile-resolve.md` (approved earlier the same day) if approved; that spec would then be closed unbuilt.
 Nothing built. In-flight check (`session_start.py --inflight`, 2026-11-16): `repo-tidy` (document done, not released) owns the code this reuses; its Resolve engine (`lab_hub/repo_tidy.py`, `claude_resolve`) is kept, only its front end changes.
 
