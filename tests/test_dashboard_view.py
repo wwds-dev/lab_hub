@@ -244,3 +244,39 @@ def test_a_gpu_drawing_choice_the_owner_made_is_kept():
     env = {"QT_WIDGETS_RHI": "0"}
     prepare_qt_environment(env)
     assert env["QT_WIDGETS_RHI"] == "0"
+
+
+def test_a_web_view_starts_in_the_window_colour_not_white(monkeypatch, qapp, tmp_path):
+    """The default white page flashed before the first dashboard painted."""
+    from PySide6.QtGui import QPalette
+    from PySide6.QtWidgets import QWidget
+
+    from ui import dashboard_view
+
+    painted = []
+
+    class Stub:
+        class PersistentCookiesPolicy:
+            ForcePersistentCookies = 0
+
+        def __init__(self, *a, **k):
+            pass
+
+        def __getattr__(self, name):
+            return lambda *a, **k: None
+
+    class Page(Stub):
+        def setBackgroundColor(self, colour):
+            painted.append(colour)
+
+    import PySide6.QtWebEngineCore as core
+    import PySide6.QtWebEngineWidgets as widgets
+
+    monkeypatch.setattr(core, "QWebEngineProfile", type("Profile", (Stub,), {}))
+    monkeypatch.setattr(core, "QWebEnginePage", Page)
+    monkeypatch.setattr(widgets, "QWebEngineView", type("View", (Stub,), {}))
+    monkeypatch.setattr(config, "SUPPORT_DIR", tmp_path)
+
+    owner = QWidget()
+    dashboard_view._real_view_factory(owner)()
+    assert painted == [owner.palette().color(QPalette.ColorRole.Window)]

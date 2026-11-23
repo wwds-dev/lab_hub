@@ -24,6 +24,8 @@ README and the specs in `docs/specs/` describe them.
   The first dashboard of a run switched the window to GPU drawing, and macOS showed the
   rebuilt window as leaving fullscreen and returning. Lab Hub now draws through the GPU
   from the start. Apps it launches are not affected.
+- **No white flash before the first dashboard appears.** A dashboard's view starts in the
+  window's own colour instead of white until the page has drawn.
 
 ### Changed
 - **The new-project question names the folder.** When a project's README title differs from

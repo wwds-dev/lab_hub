@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Callable
 
 from PySide6.QtCore import QSize, QUrl, Signal
+from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -95,7 +96,11 @@ def _real_view_factory(page_owner: QWidget) -> Callable[[], QWidget]:
 
     def make() -> QWidget:
         view = QWebEngineView()
-        view.setPage(Page(profile, view))
+        page = Page(profile, view)
+        # The window's own colour until the dashboard paints: the default white
+        # flashed for a moment before the first dashboard of a run appeared.
+        page.setBackgroundColor(page_owner.palette().color(QPalette.ColorRole.Window))
+        view.setPage(page)
         return view
 
     make.profile = profile  # type: ignore[attr-defined]
