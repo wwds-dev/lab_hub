@@ -625,7 +625,7 @@ Spec `docs/specs/nightshift-panel.md`. The panel is built; these were left out o
 - [x] `P3` `infra` `@ai` **Network Speed Dashboard aligned with the dashboard standard (2026-11-24).** Chart.js 4.4.1 inlined (works offline); data kept through the Monitor's data API (`data/state.json`) with browser storage as cache; README and `test_page.py` added (seed pinned by hash).
 
 ## Land busy line and Close it… on the card (2026-11-24)
-- [ ] `P1` `release` `@me` Merge branch `claude/land-busy-monitor` (spec land-blocker-actions §9) into main and rebuild Lab Hub, so the Busy now line, the card's Close it… and the order note show up in the app.
+- [ ] `P1` `release` `@me` Rebuild Lab Hub so the Busy now line, the card's Close it… and the order note show up: launchpad → Check builds → Update now on the Lab Hub row (merged to main 2026-11-24).
 - [ ] `P3` `test` `@ai` `AppsTab._busy_repos` gating (hidden, minimised, inactive app, hygiene running, Land on another page) has no test: review P3-6, docs/audit/land-blocker-actions-9-review.md.
 - [ ] `P3` `bug` `@ai` Busy now line can flash for one tick while Check builds runs its own git in a repo: review P3-1, not covered.
 - [ ] `P2` `docs` `@me` docs/foundry/app-context.md still has template placeholders (Commands, Invariants): reviewers have no test command or invariants to check against.
