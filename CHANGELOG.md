@@ -15,6 +15,8 @@ README and the specs in `docs/specs/` describe them.
 
 ## Unreleased
 
+## v2.347 - 2026-11-24
+
 ### Added
 - **Check build on every app tile.** Each tile (Lab Hub's own included) has a Check build button beside
   Land. It opens the usual Check builds window for that one app only, so you no longer run every app's
