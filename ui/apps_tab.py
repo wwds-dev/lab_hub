@@ -11,6 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QProcess, QProcessEnvironment, Qt, QTimer, Signal
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -38,6 +39,7 @@ from .tiles import (  # noqa: F401 - the layout constants are re-exported
     columns_for,
 )
 from .discovery_banner import SuggestionBanner
+from .busy_monitor import BusyMonitor
 from .lander import Lander
 from .own_verdict import OwnResult, OwnVerdict
 from .status_rows import Row, StatusRows, update_text
@@ -108,6 +110,12 @@ NO_LAUNCH_TIP = (
     "registry when it has an app to open."
 )
 OWN_HINT = "You are using it: it has no Launch button."
+ORDER_NOTE = "Run Land all first, then Check builds."
+ORDER_TIP = ("Run Land all first, then Check builds: the build check then compares "
+             "against the landed code, so nothing it rebuilds is stale a minute later.")
+CLOSE_NOT_RECOMMENDED = (
+    "Not recommended: this ends running processes. A test run, build or Claude Code "
+    "session in this folder loses its work. Waiting until they finish is safer.")
 BEHIND_TIP = "A newer build is ready to install: use Check builds."
 
 
@@ -211,6 +219,15 @@ class AppCard(Tile):
         self.review_button.clicked.connect(lambda: self.review_requested.emit(self))
         self.review_button.hide()
         self.extra.addWidget(self.review_button)
+        # The live "busy now" line (spec land-blocker-actions §9.2): who runs in
+        # this repo's worktrees, so Land is not started under them. Advice only.
+        self.busy_line = QLabel()
+        self.busy_line.setObjectName("stateWarn")
+        self.busy_line.setWordWrap(True)
+        self.busy_line.setTextFormat(Qt.TextFormat.PlainText)  # process names from lsof
+        self.busy_line.hide()
+        self.extra.addWidget(self.busy_line)
+        self._busy_text = ""
 
         # Only a web app has one. A server has no window to close, so without
         # this one started from here would run until the Mac restarts.
@@ -432,12 +449,20 @@ class AppCard(Tile):
         row = self.hygiene_row
         show = row is not None and row.needs_attention
         self.land_button.setVisible(show)
+        self.busy_line.setVisible(show and bool(self._busy_text) and not self._landing)
         if not self._landing:
             count = row.land_count if show else 0
             self.land_button.setText(f"Land ({count})" if count else "Land")
             self.land_button.setEnabled(
                 self._land_allowed and not (show and land.landing(row.path))
             )
+
+    def set_busy(self, text: str) -> None:
+        """The live line under Land: "" hides it (spec land-blocker-actions §9.2)."""
+        self._busy_text = text
+        self.busy_line.setText(text)
+        self.busy_line.setToolTip(plain_tip(text) if text else "")
+        self._sync_land()
 
     def set_land_enabled(self, allowed: bool) -> None:
         """The page disables every Land while any one is running."""
@@ -467,6 +492,8 @@ class AppCard(Tile):
                             not self.review_button.isHidden())
             self._before_failed = not self.terminal_button.isHidden()
         self._landing = True
+        self._busy_text = ""  # stale after the Land; the next check says (review P3-3)
+        self.busy_line.hide()  # Land's own steps would show as busy
         self.land_button.setText("Landing…")
         self.land_button.setEnabled(False)
         self.land_button.show()
@@ -793,6 +820,9 @@ class AppsTab(TilePage):
         self.lander.repo_done.connect(self._land_repo_done)
         self.lander.finished.connect(self._land_finished)
         self.lander.held.connect(self._land_held)
+        self.busy_monitor = BusyMonitor(self._busy_repos, self)
+        self.busy_monitor.updated.connect(self._busy_updated)
+        self.busy_monitor.start()
         # Cards Land was asked on, by repo name, held from the click: a hygiene
         # refresh or a rebuilt tile mid-Land must not lose the outcome.
         self._landing_cards: dict[str, AppCard] = {}
@@ -885,7 +915,8 @@ class AppsTab(TilePage):
         if check_builds:
             check = QPushButton("Check builds")
             check.setToolTip(
-                "Compare every installed app against its source checkout"
+                "Compare every installed app against its source checkout. "
+                + ORDER_TIP
             )
             check.clicked.connect(self.show_build_report)
             self.buttons.addWidget(check)
@@ -894,12 +925,17 @@ class AppsTab(TilePage):
             land_all.setToolTip(
                 "Land every repo that has work not yet committed, pushed or "
                 "merged. You confirm once; a repo that fails is reported and "
-                "the rest carry on."
+                "the rest carry on. " + ORDER_TIP
             )
             land_all.setEnabled(False)
             land_all.clicked.connect(self.land_all)
             self.buttons.addWidget(land_all)
             self.land_all_button = land_all
+            # Which first (spec land-blocker-actions §9.3).
+            self.order_note = QLabel(ORDER_NOTE)
+            self.order_note.setObjectName("hint")
+            self.order_note.setToolTip(ORDER_TIP)
+            self.buttons.addWidget(self.order_note)
         elif check_own_builds:
             # Backstage and the two sync companions have no launchpad tile, so
             # their own tab carries the same check and Update now — scoped to
@@ -1497,6 +1533,32 @@ class AppsTab(TilePage):
         for card in self.cards:
             card.set_land_enabled(not busy)
 
+    def _busy_repos(self) -> list[tuple[str, Path]] | None:
+        """What the busy line looks at now: repos with a Land button, while this
+        page is visible and no Land or look at git is under way."""
+        window = self.window()
+        if (not self.isVisible() or self.lander.busy or window.isMinimized()
+                or QGuiApplication.applicationState() != Qt.ApplicationState.ApplicationActive):
+            return None  # nobody looking: no lsof (review P2-3)
+        if self._hygiene_proc is not None:
+            return None  # its own git would count as busy (review P3-1)
+        # land.landing: a Land from another page counts too (review P3-2).
+        return [(c.hygiene_row.name, c.hygiene_row.path) for c in self.cards
+                if c.hygiene_row is not None and c.hygiene_row.needs_attention
+                and not land.landing(c.hygiene_row.path)]
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt override
+        super().showEvent(event)
+        self.busy_monitor.poll()  # not the line from hours ago (review P3-3)
+
+    def _busy_updated(self, lines: dict) -> None:
+        if self.lander.busy:
+            return  # a Land started while lsof ran: its own steps are not "busy"
+        for card in self.cards:
+            row = card.hygiene_row
+            if row is not None and row.name in lines:
+                card.set_busy(lines[row.name])
+
     def _card_for(self, name: str) -> AppCard | None:
         held = self._landing_cards.get(name)
         if held is not None and any(held is card for card in self.cards):
@@ -1534,8 +1596,10 @@ class AppsTab(TilePage):
         True still means all of them)."""
         from .land_confirm import LandConfirmDialog
 
-        dialog = LandConfirmDialog(plans, self)
-        return dialog.chosen() if dialog.exec() == QDialog.DialogCode.Accepted else []
+        dialog = LandConfirmDialog(plans, self, confirm_close=self.confirm_close)
+        chosen = dialog.chosen() if dialog.exec() == QDialog.DialogCode.Accepted else []
+        dialog.deleteLater()  # review P3-7
+        return chosen
 
     def _land_planned(self, plans) -> None:
         if self.land_window is not None:
@@ -1665,13 +1729,13 @@ class AppsTab(TilePage):
         n = len(lines)
         box.setText(f"Close {n} process{'es' if n != 1 else ''} running in {name}?")
         box.setInformativeText(
-            "\n".join(lines) + "\n\nLab Hub asks each one to quit (SIGTERM, never a forced "
+            CLOSE_NOT_RECOMMENDED + "\n\n" + "\n".join(lines) + "\n\nLab Hub asks each one to quit (SIGTERM, never a forced "
             "kill) and waits up to 5 seconds. Unsaved work in a terminal or editor there can "
             "be lost. A process that ignores the request stays open and stays on the row, "
             "named: an interactive shell such as zsh does. Close its Terminal window, then "
             "press Close it… again. When nothing is left, Land looks at the repo again and "
             "asks you before it runs.")
-        close = box.addButton("Close them", QMessageBox.ButtonRole.DestructiveRole)
+        close = box.addButton("Close anyway", QMessageBox.ButtonRole.DestructiveRole)
         cancel = box.addButton(QMessageBox.StandardButton.Cancel)
         box.setDefaultButton(cancel)
         box.exec()

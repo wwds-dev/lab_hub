@@ -20,6 +20,7 @@ Everything here blocks on git; the UI runs it on a worker thread.
 from __future__ import annotations
 
 import dataclasses
+import os
 import re
 import threading
 import time
@@ -357,6 +358,51 @@ class ClaudeCost:
                           self.triage + other.triage, self.tests + other.tests)
 
 
+def busy_stops(stops) -> tuple[land_resolve.Stop, ...]:
+    """The stops Close it… clears: a worktree with named processes in it
+    (the Land row and the confirmation card both offer it)."""
+    return tuple(s for s in stops if s.processes
+                 and land_resolve.clearing(s.reason) == land_resolve.CLOSE)
+
+
+def busy_now(repo: Path, listing, own_pid: int | None = None) -> str:
+    """The tile's live line (spec land-blocker-actions §9.2): "" when Land would
+    not stop at a busy worktree, else who runs where. Land's own two tests: the
+    worktree has open work (`has_open_work`) and a process runs in it
+    (`processes_in`), so the line and Land's stop agree (review P2-2). A shell
+    in a clean checkout is not counted. `listing` is one shared `cwd_listing()`;
+    None (lsof could not tell) says nothing."""
+    if not listing:
+        return ""
+    mine = f" (pid {os.getpid() if own_pid is None else own_pid})"
+    try:
+        trees = repo_tidy.worktrees(repo)
+    except (OSError, ValueError):  # a courtesy line, never an error
+        return ""
+    parts = []
+    default: list = []
+    for wt in trees:
+        found = [p for p in land_resolve.processes_in(wt, trees, listing)
+                 if not p.endswith(mine)]
+        if not found or not wt.path.exists():
+            continue
+        if not default:  # one git call, only once a process is found
+            default.append(repo_tidy.default_branch(repo))
+        try:
+            if default[0] is not None and not land_resolve.has_open_work(repo, wt, default[0]):
+                continue
+        except (OSError, ValueError):
+            pass  # cannot tell: say it, as Land would stop
+        names = list(dict.fromkeys(p.rpartition(" (pid ")[0] or p for p in found))
+        who = _and(names[:3]) + (f" and {len(names) - 3} more" if len(names) > 3 else "")
+        where = ("main checkout" if wt.path == repo or _same(wt.path, repo)
+                 else f"worktree {wt.path.name}")
+        parts.append(f"{who} in {where}")
+    if not parts:
+        return ""
+    return "Busy now: " + "; ".join(parts) + ". Landing not recommended until they finish."
+
+
 @dataclass(frozen=True)
 class StopView:
     """One hard stop, for the confirmation: where, what, and the one thing to do."""
@@ -526,8 +572,7 @@ class LandResult:
     @property
     def busy(self) -> tuple[land_resolve.Stop, ...]:
         """The stops Close it… clears: a worktree with named processes in it."""
-        return tuple(s for s in self.stops if s.processes
-                     and land_resolve.clearing(s.reason) == land_resolve.CLOSE)
+        return busy_stops(self.stops)
 
     @property
     def line(self) -> str:

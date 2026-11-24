@@ -16,6 +16,16 @@ README and the specs in `docs/specs/` describe them.
 ## Unreleased
 
 ### Added
+- **Close it… before Land.** The Land confirmation's "only you can clear" list now has a
+  real **Close it…** button on a busy worktree; it used to tell you to press a button that
+  only existed on the Land window. Its line and its confirm say closing is not recommended
+  (a test run, build or Claude Code session there loses its work); Cancel is the default.
+  After a close the card shows the repo as it is now.
+- **Busy now line on tiles.** Under a tile's Land button: "Busy now: pytest and claude in
+  worktree X. Landing not recommended until they finish." Checked every 5 seconds while
+  the page is open, with Land's own test, so it matches what Land would stop at. It only
+  advises.
+- **Order note.** "Run Land all first, then Check builds." next to the two buttons.
 - **Nightshift page under Tools.** Shows tonight's armed run and its pre-start gate (memory, task
   load, predicted grade per task, blockers and warnings), the task files, past runs with each task's
   grade, gap, retries, model and quantisation, the track record per task type, and notices. It runs

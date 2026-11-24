@@ -1102,6 +1102,14 @@ def _rescue_needed(repo: Path, wt: rt.Worktree) -> bool:
     return not (rc == 0 and tags.strip())
 
 
+def has_open_work(repo: Path, wt: rt.Worktree, default: str | None) -> bool:
+    """Land looks at this worktree: work no branch holds, uncommitted files, or
+    the main checkout off the default branch. Prep and the tile's busy line
+    (spec land-blocker-actions §9.2) both ask this."""
+    return _rescue_needed(repo, wt) or not rt.is_clean(wt.path) or (
+        wt.main and rt.current_branch(wt.path) != default)
+
+
 def prep(name: str, repo: Path, busy) -> tuple[list[Step], list[Stop]]:
     """The prep steps one repo needs now, and its hard stops."""
     steps: list[Step] = []
@@ -1119,9 +1127,7 @@ def prep(name: str, repo: Path, busy) -> tuple[list[Step], list[Stop]]:
     for wt in rt.worktrees(repo):
         if not wt.path.exists():
             continue
-        open_work = _rescue_needed(repo, wt) or not rt.is_clean(wt.path) or (
-            wt.main and rt.current_branch(wt.path) != default)
-        if not open_work:
+        if not has_open_work(repo, wt, default):
             continue
         stop, who = _worktree_stop_full(repo, wt, busy, listing)
         if stop:

@@ -464,6 +464,14 @@ the other rows and Ask Claude… stay. Cancel that confirmation and the row read
   is not a network fault: "origin refused access …: press Ask Claude…". It checks origin again; still down,
   the row says why and nothing in git changes. Up, the repo is planned and
   confirmed as any Land is.
+- **Busy now** under a tile's Land button names who is running in the repo's
+  checkout or worktrees ("Busy now: pytest in worktree X. Landing not recommended
+  until they finish."), refreshed every 5 seconds while the page is open, with the
+  same test Land uses for its stop. It never blocks Land and never closes anything.
+  Run **Land all** first, then **Check builds**: the note beside them says so.
+- **Close it…** also sits on the Land confirmation, beside each busy worktree in
+  "Only you can clear". Waiting is the recommended choice; the confirm says
+  closing ends those processes and is not recommended.
 - **Close it…** on "a process is running in it (…)". One confirmation lists each
   process with its pid and folder. Lab Hub sends each a polite quit (SIGTERM,
   never a forced kill), only to a pid a fresh `lsof` still shows with the same

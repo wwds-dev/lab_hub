@@ -8,7 +8,11 @@ path, branch, process and reason is plain text: they come from git and lsof.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+import threading
+from pathlib import Path
+from collections.abc import Callable
+
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -22,7 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from lab_hub import land
+from lab_hub import land, land_resolve
 
 from .progress_window import _label, _plain_tip
 
@@ -31,6 +35,8 @@ SCREEN_SHARE = 0.7  # the cards scroll when taller than this share of the screen
 WINDOW_SHARE = 0.9  # and the whole window stays within this share
 DETAILS_MIN = 80  # with Details open, it and the cards share the room left,
 CARDS_MIN_WITH_DETAILS = 70  # so a short screen still fits (review P2-2)
+CLOSE_HINT = ("Best: wait until they finish, then Land again. Close it… ends them now "
+              "(not recommended).")
 FOOTNOTE = ("Each step is checked again just before it runs. Nothing is forced. "
             "Cancel leaves everything as it is.")
 
@@ -97,9 +103,10 @@ class RepoCard(QFrame):
     `choosable`, a tick box (on) leaves the repo in or out of this Land."""
 
     choice_changed = Signal()
+    close_requested = Signal()
 
     def __init__(self, plan: land.LandPlan, parent: QWidget | None = None,
-                 choosable: bool = False) -> None:
+                 choosable: bool = False, can_close: bool = False) -> None:
         super().__init__(parent)
         self.setObjectName("card")
         self.plan = plan
@@ -159,16 +166,35 @@ class RepoCard(QFrame):
                                  wrap=True))
 
         self.stop_rows: list[QLabel] = []
+        self.close_button: QPushButton | None = None
+        self.busy = land.busy_stops(plan.stops) if can_close else ()
         if plan.stops:
             box.addSpacing(4)
             box.addWidget(_label("⚠  ONLY YOU CAN CLEAR", "stateWarn"))
-            for view in plan.stop_views:
+            for stop, view in zip(plan.stops, plan.stop_views):
                 where = _label(f"{view.place} · {view.problem}", "runStrong", wrap=True)
                 where.setToolTip(_plain_tip(view.full))
                 box.addWidget(where)
                 self.stop_rows.append(where)
-                if view.action:
+                if any(stop is s for s in self.busy):
+                    # The card's own Close it… (spec land-blocker-actions §9.1).
+                    box.addWidget(_label(CLOSE_HINT, "stateWarn", wrap=True))
+                elif view.action:
                     box.addWidget(_label(view.action, "stateWarn", wrap=True))
+            if self.busy:
+                line = QHBoxLayout()
+                self.close_state = _label("", "hint", wrap=True)
+                self.close_state.hide()  # until a close runs or is held
+                line.addWidget(self.close_state, 1)
+                line.addStretch(0)
+                self.close_button = QPushButton("Close it…")
+                self.close_button.setAutoDefault(False)
+                self.close_button.setToolTip(_plain_tip(
+                    "Ends the processes listed above (you confirm first). Not recommended "
+                    "while a test run, build or Claude Code session is still working."))
+                self.close_button.clicked.connect(lambda _=False: self.close_requested.emit())
+                line.addWidget(self.close_button, 0, Qt.AlignmentFlag.AlignTop)
+                box.addLayout(line)
 
     @property
     def chosen(self) -> bool:
@@ -213,11 +239,39 @@ class ClaudeBox(QFrame):
         box.addWidget(_label(panel.body, "hint", wrap=True))
 
 
-class LandConfirmDialog(QDialog):
-    """Land, or Cancel. Return presses nothing; Escape cancels (decision 1)."""
+def close_and_look(plan: land.LandPlan,
+                   stops: tuple[land_resolve.Stop, ...]) -> tuple:
+    """Close it… from a card (worker thread): close the confirmed processes
+    (spec §3.2 rules), then look at the repo again. (new plan, "", ()) when the
+    stops are gone, else (None, what is still running, the stops left with the
+    processes still there), as `Lander._cleared` does (review P2-1)."""
+    left = []
+    for stop in stops:
+        done = land_resolve.close_processes(plan.path, Path(stop.target), stop.processes)
+        if not done.clear:
+            left.append(land_resolve.Stop(plan.name, stop.target, done.reason, done.left))
+    if left:
+        return None, land.plain_reason(left[0].reason), tuple(left)
+    return land.make_plan(plan.name, plan.path), "", ()
 
-    def __init__(self, plans: list[land.LandPlan], parent: QWidget | None = None) -> None:
+
+class LandConfirmDialog(QDialog):
+    """Land, or Cancel. Return presses nothing; Escape cancels (decision 1).
+
+    `confirm_close(name, repo, stops, parent) -> bool` asks before a card's
+    Close it… ends anything; without it, cards show no Close it…. `closer` does
+    the closing off the UI thread (tests replace it)."""
+
+    def __init__(self, plans: list[land.LandPlan], parent: QWidget | None = None,
+                 confirm_close: Callable[..., bool] | None = None,
+                 closer: Callable[..., tuple] = close_and_look) -> None:
         super().__init__(parent)
+        self._confirm_close = confirm_close
+        self._closer = closer
+        self._closing: tuple | None = None  # (card, [result]) while a close runs
+        self._poll = QTimer(self)
+        self._poll.setInterval(100)
+        self._poll.timeout.connect(self._close_done)
         self.setWindowTitle("Land")
         self.setModal(True)
         todo = [p for p in plans if not p.nothing]
@@ -234,14 +288,13 @@ class LandConfirmDialog(QDialog):
         outer.addWidget(self.summary)
 
         holder = QWidget()
-        cards = QVBoxLayout(holder)
+        self._cards_box = cards = QVBoxLayout(holder)
         cards.setContentsMargins(0, 0, 0, 0)
         cards.setSpacing(10)
         choosable = len(todo) > 1
-        self.cards = [RepoCard(p, choosable=choosable) for p in todo]
+        self.cards = [self._card(p, choosable) for p in todo]
         for card in self.cards:
             cards.addWidget(card)
-            card.choice_changed.connect(self._sync)
         cards.addStretch(1)
         self.scroll = QScrollArea()
         self.scroll.setWidget(holder)
@@ -250,10 +303,10 @@ class LandConfirmDialog(QDialog):
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         outer.addWidget(self.scroll, 1)
 
-        self.idle = None
-        if idle:
-            self.idle = _label("Nothing to land in " + land._and(idle) + ".", "hint", wrap=True)
-            outer.addWidget(self.idle)
+        self._idle = idle
+        self.idle = _label("", "hint", wrap=True)
+        outer.addWidget(self.idle)
+        self._show_idle()
 
         # The Claude Code box sits here; _sync replaces it as the choice changes.
         self._claude_at = outer.count()
@@ -290,6 +343,93 @@ class LandConfirmDialog(QDialog):
         outer.addLayout(buttons)
         self._fit()
 
+    def _card(self, plan: land.LandPlan, choosable: bool) -> RepoCard:
+        card = RepoCard(plan, choosable=choosable, can_close=self._confirm_close is not None)
+        card.choice_changed.connect(self._sync)
+        if card.close_button is not None:
+            card.close_requested.connect(lambda c=card: self.close_card(c))
+        return card
+
+    def _show_idle(self) -> None:
+        self.idle.setText("Nothing to land in " + land._and(self._idle) + "." if self._idle else "")
+        self.idle.setVisible(bool(self._idle))
+
+    # -- Close it… on a card (spec land-blocker-actions §9.1) -------------------
+    def close_card(self, card: RepoCard) -> None:
+        """Warn, then close that card's busy processes off the UI thread."""
+        if self._closing is not None or self._confirm_close is None or not card.busy:
+            return
+        plan = card.plan
+        if not self._confirm_close(plan.name, plan.path, card.busy, self):
+            return
+        result: list = []
+
+        def work() -> None:
+            try:
+                result.append(self._closer(plan, card.busy))
+            except Exception as exc:  # noqa: BLE001 - the card must say something
+                result.append((None, f"{type(exc).__name__}: {exc}", None))
+
+        self._closing = (card, result)
+        card.close_button.setEnabled(False)
+        card.close_state.setText("Closing, then looking at the repo again…")
+        card.close_state.show()
+        self._restyle(card.close_state, "hint")
+        self.land.setEnabled(False)
+        self.cancel.setEnabled(False)  # it would wait for the close anyway (review P3-5)
+        threading.Thread(target=work, daemon=True, name="lab-hub-close-it").start()
+        self._poll.start()
+
+    @property
+    def closing(self) -> bool:
+        return self._closing is not None
+
+    def _close_done(self) -> None:
+        if self._closing is None or not self._closing[1]:
+            return
+        self._poll.stop()
+        (card, result), self._closing = self._closing, None
+        self.cancel.setEnabled(True)
+        plan, why, left = (tuple(result[0]) + ((),))[:3]
+        if plan is None:
+            if left:  # the next confirm lists what is running now (review P2-1)
+                card.busy = land.busy_stops(left) or card.busy
+            card.close_button.setEnabled(True)
+            card.close_state.setText(f"Could not close: {why}" if left is None
+                                     else f"Still running: {why}")
+            self._restyle(card.close_state, "stateBad")
+            self._sync()
+            return
+        at = self.cards.index(card)
+        self._cards_box.removeWidget(card)
+        card.hide()
+        card.deleteLater()
+        if plan.nothing:
+            self.cards.pop(at)
+            self._idle.append(plan.name)
+            self._show_idle()
+        else:
+            new = self._card(plan, card.check is not None)
+            if card.check is not None and not card.check.isChecked():
+                new.check.setChecked(False)
+            self.cards[at] = new
+            self._cards_box.insertWidget(at, new)
+        self._sync()
+
+    @staticmethod
+    def _restyle(widget: QWidget, name: str) -> None:
+        widget.setObjectName(name)
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+
+    def reject(self) -> None:  # noqa: D102 - Escape or Cancel: not while a close runs
+        if self._closing is None:
+            super().reject()
+
+    def accept(self) -> None:  # noqa: D102
+        if self._closing is None:
+            super().accept()
+
     def chosen(self) -> list[land.LandPlan]:
         """The ticked repos, in plan order: what Land runs (spec land-pick-and-time)."""
         return [card.plan for card in self.cards if card.chosen]
@@ -312,7 +452,7 @@ class LandConfirmDialog(QDialog):
             self._outer.insertWidget(self._claude_at, self.claude)
         self.details.setPlainText(details_text(chosen))
         self.land.setText("Land" if len(chosen) <= 1 else f"Land {len(chosen)} repos")
-        self.land.setEnabled(bool(chosen))
+        self.land.setEnabled(bool(chosen) and self._closing is None)
         self._refit()
 
     def _refit(self) -> None:
