@@ -268,6 +268,7 @@
 
 ## No sideways swipe — follow-ups (2026-11-24)
 
+- [ ] `P2` `testing` `@me` Release v2.338 smoke test, quit and relaunch not verified: Lab Hub launched from /Applications (build 338, `d2737d0`) and is running, but a scripted quit got "User cancelled" (a quit confirmation is probably showing). Quit it yourself, relaunch, and check that your open page and state come back.
 - [ ] `P2` `testing` `@ai` `tests/test_apps_tab.py`: 4 rebuild tests (`test_escape_during_a_rebuild_kills_it_and_the_next_command_never_starts`, `test_the_close_button_during_a_rebuild_kills_it_too`, `test_a_command_that_cannot_start_fails_and_the_run_still_ends`, `test_escape_after_a_command_could_not_start_returns`) failed in a combined run with other test files but pass alone (found by QA, `docs/audit/no-sideways-swipe-qa.md`). Order or load dependence; cause not found.
 - [ ] `P3` `bug` `@ai` `ui/swipe.py` once-per-gesture latch swallows every wheel event for up to 0.4 s after a section change, a sideways scroll over a wide table included (review P2-2, inherited, not a section change).
 
