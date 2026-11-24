@@ -15,6 +15,8 @@ README and the specs in `docs/specs/` describe them.
 
 ## Unreleased
 
+## v2.338 - 2026-11-24
+
 ### Removed
 - **Sideways trackpad swipes no longer change section.** A left or right two-finger scroll or
   three-finger swipe used to move the sidebar up or down a section, from anywhere in the window.
