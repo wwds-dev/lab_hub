@@ -607,4 +607,4 @@ Spec `docs/specs/nightshift-panel.md`. The panel is built; these were left out o
 
 ## Network Speed Dashboard (2026-11-24)
 
-- [ ] `P3` `infra` `@ai` **Network Speed Dashboard loads Chart.js from cdnjs** (`dashboards/network_speed/index.html`, lab root), against the dashboard standard ("no external scripts", `docs/dashboard_standard_plan.md`). Left as delivered (owner: do not change behaviour); it needs internet to draw charts. Inline Chart.js if the owner wants it offline.
+- [x] `P3` `infra` `@ai` **Network Speed Dashboard aligned with the dashboard standard (2026-11-24).** Chart.js 4.4.1 inlined (works offline); data kept through the Monitor's data API (`data/state.json`) with browser storage as cache; README and `test_page.py` added (seed pinned by hash).
