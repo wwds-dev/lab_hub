@@ -604,3 +604,7 @@ Spec `docs/specs/nightshift-panel.md`. The panel is built; these were left out o
 - [ ] `P2` `feature` `@ai` **Nightshift page: Dry run cannot pick the model** (found 2026-11-23 in a check from the Foundry session): the button runs `dry-run` with the default MLX model, which needs about 21 GB free; the Q3 model that fits this Mac needs `--model refusal`, which `command_args` refuses. Offer the model choice (default or refusal) and allow that one flag.
 - [ ] `P3` `bug` `@ai` **Nightshift page: python lookup can pick a Python too old for the CLI** (found 2026-11-23): `lab_hub.nightshift.python()` takes the first `python3` in Homebrew, `/usr/local/bin` or `/usr/bin`; `tools/nightshift.py` needs 3.12+ and the system one is 3.9. Homebrew's is found first today. Check the version and say so on the page when none is new enough.
 
+
+## Network Speed Dashboard (2026-11-24)
+
+- [ ] `P3` `infra` `@ai` **Network Speed Dashboard loads Chart.js from cdnjs** (`dashboards/network_speed/index.html`, lab root), against the dashboard standard ("no external scripts", `docs/dashboard_standard_plan.md`). Left as delivered (owner: do not change behaviour); it needs internet to draw charts. Inline Chart.js if the owner wants it offline.
