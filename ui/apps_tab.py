@@ -127,6 +127,7 @@ class AppCard(Tile):
     land_requested = Signal(object)  # this card
     review_requested = Signal(object)  # this card
     check_builds_requested = Signal()
+    check_build_requested = Signal(object)  # this card's app
 
     def __init__(self, app: launcher.ExternalApp, parent=None) -> None:
         # A name from a README is cut to one line instead of widening the tile.
@@ -199,6 +200,18 @@ class AppCard(Tile):
         self.land_button.clicked.connect(lambda: self.land_requested.emit(self))
         self.land_button.hide()
         self.buttons.addWidget(self.land_button)
+        # Check build: this app's row of Check builds, on its own (spec
+        # tile-check-build). No button when there is nothing to build, not a
+        # disabled one.
+        self.check_build_button = QPushButton("Check build")
+        self.check_build_button.setToolTip(
+            "Compare this app's installed build with its source and rebuild it "
+            "if it is behind. Only this app is checked."
+        )
+        self.check_build_button.clicked.connect(
+            lambda: self.check_build_requested.emit(self.app))
+        self.check_build_button.setVisible(self._can_check_build())
+        self.buttons.addWidget(self.check_build_button)
         self.outcome = QLabel()
         self.outcome.setObjectName("hint")
         self.outcome.setWordWrap(True)
@@ -316,6 +329,8 @@ class AppCard(Tile):
             return self._refresh_no_launch(lab_root)
         self.lab_root = lab_root
         ready = launcher.readiness(self.app, lab_root)
+        # Nothing installed and no checkout: nothing to check (spec tile-check-build §2.5).
+        self.check_build_button.setVisible(self._can_check_build() and ready.state != "missing")
         here = (
             launcher.presence(self.app, lab_root, table)
             if ready.state != "missing"
@@ -405,6 +420,16 @@ class AppCard(Tile):
 
     _update_tip = ""
 
+    def _can_check_build(self) -> bool:
+        """Whether Check builds has a row for this app (it lists launchable apps)."""
+        return self.app.launchable
+
+    def _sync_check_build(self) -> None:
+        """One job per repo: no build check from the tile while it is landing."""
+        row = self.hygiene_row
+        claimed = row is not None and land.landing(row.path)  # another card or page is landing it
+        self.check_build_button.setEnabled(not (self._landing or claimed))
+
     def set_check_builds_available(self, available: bool) -> None:
         """The update row links to Check builds only on a page that has it."""
         self.status.set_link_available(available)
@@ -442,6 +467,7 @@ class AppCard(Tile):
         if row is not None:
             self._repo_path = row.path
         self._sync_land()
+        self._sync_check_build()
         self._sync_status()
 
     def _sync_land(self) -> None:
@@ -485,6 +511,7 @@ class AppCard(Tile):
             self._before = None
             self._landing = False
             self._sync_land()
+            self._sync_check_build()
             return
         if not self._landing:
             self._before = (self.outcome.text(), self.outcome.objectName(),
@@ -494,6 +521,7 @@ class AppCard(Tile):
         self._landing = True
         self._busy_text = ""  # stale after the Land; the next check says (review P3-3)
         self.busy_line.hide()  # Land's own steps would show as busy
+        self._sync_check_build()
         self.land_button.setText("Landing…")
         self.land_button.setEnabled(False)
         self.land_button.show()
@@ -507,6 +535,7 @@ class AppCard(Tile):
     def show_outcome(self, result: land.LandResult) -> None:
         """Say how Land went, in words, on the tile."""
         self._landing = False
+        self._sync_check_build()
         self._before = None
         self.outcome.setText(result.line)
         self.outcome.setToolTip(plain_tip("\n".join(result.notes)) if result.notes else "")
@@ -729,6 +758,9 @@ class OwnCard(AppCard):
         self.verdict.setTextFormat(Qt.TextFormat.PlainText)
         self.meta.insertWidget(1, self.verdict)
         self.refresh_version(self.lab_root)
+
+    def _can_check_build(self) -> bool:
+        return True  # Lab Hub's own row is in Check builds, though it has no Launch
 
     def set_verdict(self, result: OwnResult | None) -> None:
         self._result = result
@@ -1003,6 +1035,7 @@ class AppsTab(TilePage):
                 card.set_land_enabled(not self.lander.busy)
                 card.set_check_builds_available(getattr(self, "check_button", None) is not None)
                 card.check_builds_requested.connect(self.show_build_report)
+                card.check_build_requested.connect(self.check_card_build)
                 cards.append(card)
             self.set_tiles(index, cards)
         self._shown = wanted
@@ -1125,8 +1158,14 @@ class AppsTab(TilePage):
         self._scan()
         self._request_own_verdict()
 
-    def show_build_report(self) -> None:
+    def check_card_build(self, app: launcher.ExternalApp) -> None:
+        """A tile's Check build: the same window, for that one app."""
+        self.show_build_report(only=app)
+
+    def show_build_report(self, *_checked, only: launcher.ExternalApp | None = None) -> None:
         """Say, for every registered app, whether it is the newest available.
+        With `only`, for that app alone (spec tile-check-build); the extra
+        positional is the `clicked(bool)` a button passes.
 
         A frozen bundle is only as new as its last build, and two different
         things can leave it behind: commits since the build, and edits never
@@ -1134,11 +1173,18 @@ class AppsTab(TilePage):
         so both are checked here.
         """
         root = self.settings.resolved_lab_root()
-        report = (launcher.build_report(root) if self._build_apps is None
-                  else launcher.build_report(root, self._build_apps))
-        if self._build_apps is None:
+        scope = (only,) if only is not None else self._build_apps
+        own_only = only is not None and only == self_update.OWN_TILE
+        if own_only:
+            report = ()
+        elif scope is None:
+            report = launcher.build_report(root)
+        else:
+            report = launcher.build_report(root, scope)
+        if own_only or (only is None and self._build_apps is None):
             # The launchpad's report speaks for every app, Lab Hub included,
-            # always last (spec self-update §2.1).
+            # always last (spec self-update §2.1); Lab Hub's own tile asks for
+            # that row alone.
             try:
                 own = self_update.self_status(root)
                 busy = self.busy_reasons()
@@ -1148,11 +1194,15 @@ class AppsTab(TilePage):
                                             f"finishes: {'; '.join(busy)}.")
                 report = (*report, own)
             except Exception as error:  # noqa: BLE001 - its own row must not hide the others
+                if own_only:  # nothing else to show: never an empty "all newest" window
+                    QMessageBox.warning(self, "Check build",
+                                        f"Could not check Lab Hub's own build: {error}")
+                    return
                 self.launched.emit(f"Could not check Lab Hub's own build: {error}")
         # The words and commands are computed as the message box had them
         # (spec progress-windows §8.7); the window shows them as rows and
         # offers exactly the box's buttons, under the same conditions.
-        view = progress.build_check_view(report, scoped=self._build_apps is not None)
+        view = progress.build_check_view(report, scoped=scope is not None)
         commands, by_hand, forward = (list(view.commands), list(view.by_hand),
                                       list(view.forward))
         folders = list(view.folders)

@@ -15,6 +15,12 @@ README and the specs in `docs/specs/` describe them.
 
 ## Unreleased
 
+### Added
+- **Check build on every app tile.** Each tile (Lab Hub's own included) has a Check build button beside
+  Land. It opens the usual Check builds window for that one app only, so you no longer run every app's
+  check to rebuild one. The page's Check builds still checks all of them. A tile with nothing to build
+  has no button, and the button waits while that tile is landing.
+
 ## v2.338 - 2026-11-24
 
 ### Removed

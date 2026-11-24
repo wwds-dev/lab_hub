@@ -1619,3 +1619,164 @@ def test_the_longest_badge_wraps_instead_of_widening_a_tile(qapp):
     texts = card.status.findChildren(QLabel, "statusText")
     assert texts and all(label.wordWrap() for label in texts)
     assert card.minimumSizeHint().width() <= base + 20
+
+
+# ---------------------------------------------------------------------------
+# A Check build button on each tile (spec tile-check-build)
+# ---------------------------------------------------------------------------
+
+
+from lab_hub import self_update  # noqa: E402
+
+
+def _status(app):
+    return launcher.BuildStatus(app, launcher.Version(), "behind", "older.", None,
+                                f"cd /{app.project} && ./build_app.sh")
+
+
+def test_a_tiles_check_build_reports_only_its_own_app(qapp, tmp_path, monkeypatch):
+    from ui.progress_window import BuildCheckWindow
+
+    tab = _tab(qapp, tmp_path, monkeypatch, with_checkouts=True)
+    asked, rows = [], []
+    monkeypatch.setattr(launcher, "build_report", lambda root, scope=None: (
+        asked.append(scope), tuple(_status(a) for a in (scope or tab._shown[0])))[1])
+    monkeypatch.setattr(BuildCheckWindow, "ask", lambda self: rows.append(
+        [i.name for i in self.view.items]))
+
+    card = tab.cards[2]
+    assert not card.check_build_button.isHidden()
+    card.check_build_button.click()
+
+    assert asked == [(card.app,)]
+    assert len(rows[0]) == 1 and "App 2" in rows[0][0]
+    _drop(tab)
+
+
+def test_the_page_level_check_builds_still_asks_about_every_app(qapp, tmp_path, monkeypatch):
+    """The tile button must not change what the page button reports."""
+    from ui.progress_window import BuildCheckWindow
+
+    tab = _tab(qapp, tmp_path, monkeypatch)
+    asked = []
+    monkeypatch.setattr(launcher, "build_report", lambda root, scope=None: (
+        asked.append(scope), ())[1])
+    monkeypatch.setattr(BuildCheckWindow, "ask", lambda self: None)
+    monkeypatch.setattr(self_update, "self_status", lambda root, **kw: _status(self_update.SELF))
+    tab.show_build_report(False)  # a button's clicked(bool) passes its state
+    assert asked == [None]
+    _drop(tab)
+
+
+def test_the_real_page_button_click_still_scopes_to_its_apps(qapp, tmp_path, monkeypatch):
+    """Driven through the button, so clicked(bool) really reaches show_build_report."""
+    from lab_hub import config
+    from ui.apps_tab import AppsTab
+    from ui.progress_window import BuildCheckWindow
+
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    apps = (launcher.ExternalApp("b", "B", "b", "main.py", "s"),)
+    tab = AppsTab(config.Settings(), apps, "B", "intro", check_own_builds=True)
+    asked = []
+    monkeypatch.setattr(launcher, "build_report", lambda root, scope=None: (
+        asked.append(scope), (_status(apps[0]),))[1])
+    monkeypatch.setattr(BuildCheckWindow, "ask", lambda self: None)
+    tab.check_button.click()
+    assert asked == [apps]
+    _drop(tab)
+
+
+def test_a_tile_with_no_install_and_no_checkout_hides_check_build(qapp, tmp_path, monkeypatch):
+    tab = _tab(qapp, tmp_path, monkeypatch)  # the apps are nowhere at all
+    tab.refresh()
+    assert all(card.check_build_button.isHidden() for card in tab.cards)
+    _drop(tab)
+
+
+def test_a_tile_with_a_checkout_shows_check_build_after_refresh(qapp, tmp_path, monkeypatch):
+    tab = _tab(qapp, tmp_path, monkeypatch, with_checkouts=True)
+    tab.refresh()
+    assert all(not card.check_build_button.isHidden() for card in tab.cards)
+    _drop(tab)
+
+
+def test_check_build_waits_while_another_job_lands_the_same_repo(qapp, monkeypatch, tmp_path):
+    from lab_hub import land
+    from ui.apps_tab import AppCard
+
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    card = AppCard(launcher.ExternalApp("b", "B", "b", "main.py", "x"))
+    from lab_hub import hygiene
+
+    row = hygiene.RepoRow("b", tmp_path, "main", ("1 unpushed commit",))
+    monkeypatch.setattr(land, "landing", lambda path: True)
+    card.refresh_hygiene(row)
+    assert not card.check_build_button.isEnabled()
+    monkeypatch.setattr(land, "landing", lambda path: False)
+    card.refresh_hygiene(row)
+    assert card.check_build_button.isEnabled()
+
+
+def test_lab_hubs_own_check_build_error_is_said_not_an_empty_window(qapp, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    from lab_hub import self_update
+    from ui.progress_window import BuildCheckWindow
+
+    tab = _tab(qapp, tmp_path, monkeypatch)
+
+    def boom(root, **kw):
+        raise RuntimeError("git is broken")
+
+    monkeypatch.setattr(self_update, "self_status", boom)
+    said, opened = [], []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a: said.append(a[2]))
+    monkeypatch.setattr(BuildCheckWindow, "ask", lambda self: opened.append(1))
+    tab.check_card_build(self_update.OWN_TILE)
+    assert opened == [] and "git is broken" in said[0]
+    _drop(tab)
+
+
+def test_a_tile_with_nothing_to_build_has_no_check_build_button(qapp, monkeypatch, tmp_path):
+    from ui.apps_tab import AppCard
+
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    card = AppCard(launcher.ExternalApp("s", "S", "s", None, "source only"))
+    assert card.check_build_button.isHidden()
+    shown = AppCard(launcher.ExternalApp("b", "B", "b", "main.py", "x"))
+    assert not shown.check_build_button.isHidden()
+
+
+def test_check_build_waits_while_the_tile_is_landing(qapp, monkeypatch, tmp_path):
+    from lab_hub import land
+    from ui.apps_tab import AppCard
+
+    monkeypatch.setattr(launcher, "APPLICATIONS", tmp_path / "none")
+    card = AppCard(launcher.ExternalApp("b", "B", "b", "main.py", "x"))
+    assert card.check_build_button.isEnabled()
+    card.set_landing("Merging…")
+    assert not card.check_build_button.isEnabled()
+    card.set_landing(None)
+    assert card.check_build_button.isEnabled()
+    card.set_landing("Merging…")
+    card.show_outcome(land.LandResult("b", "landed"))
+    assert card.check_build_button.isEnabled()
+
+
+def test_lab_hubs_own_tile_checks_only_its_own_row(qapp, tmp_path, monkeypatch):
+    from lab_hub import self_update
+    from ui.apps_tab import OwnCard
+    from ui.progress_window import BuildCheckWindow
+
+    tab = _tab(qapp, tmp_path, monkeypatch)
+    own = _status(self_update.SELF)
+    monkeypatch.setattr(self_update, "self_status", lambda root, **kw: own)
+    calls, rows = [], []
+    monkeypatch.setattr(launcher, "build_report", lambda root, scope=None: calls.append(scope) or ())
+    monkeypatch.setattr(BuildCheckWindow, "ask", lambda self: rows.append(len(self.view.items)))
+
+    assert not OwnCard(self_update.OWN_TILE).check_build_button.isHidden()
+    tab.check_card_build(self_update.OWN_TILE)
+
+    assert calls == [] and rows == [1]
+    _drop(tab)

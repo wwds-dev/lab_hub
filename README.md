@@ -363,6 +363,10 @@ reports `behind` (commits since the build), `uncommitted` (edits the commit
 count cannot see — it only moves on commit, so a bundle built from the last
 commit looks level while the source has since been edited), `unknown` (installed
 but carrying no stamp), and names the build script for anything out of date.
+Each tile with a launch command, and Lab Hub's own, also has its own **Check build**
+button beside Land (spec `tile-check-build`): the same window and the same rows for that
+one app alone. It waits while that tile is landing. A tile with nothing to build has no
+button.
 The answer opens in the **Check builds window** (it replaced the message box
 that listed `[ok]`/`[OLD]` lines), modal as the box was. A strip at the top
 shows where it is: Check, Review, Update, Done. Review has one row per app that
