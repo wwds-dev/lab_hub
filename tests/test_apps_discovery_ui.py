@@ -294,7 +294,8 @@ def test_lab_hub_tile_has_no_launch_stop_or_update_buttons(window):
 
     assert not _visible(card.launch_button, card)
     assert card.stop_button is None
-    assert labels <= {"Open in Terminal", "Land"}
+    # Check build is Lab Hub's own row of Check builds (spec tile-check-build §2.4).
+    assert labels <= {"Open in Terminal", "Land", "Check build"}
     assert not any("Update" in label or "Quit" in label or "front" in label
                    for label in labels)
 
