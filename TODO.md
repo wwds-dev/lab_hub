@@ -611,6 +611,7 @@ Spec `docs/specs/nightshift-panel.md`. The panel is built; these were left out o
 - [x] `P3` `infra` `@me` **Lab Hub.app rebuild for the Nightshift page.** Built from source only; the packaged app shows it after the owner's Update now. Done 2026-11-23: v2.327 built and installed on the owner's "Update now Lab Hub".
 - [ ] `P2` `feature` `@ai` **Nightshift page: Dry run cannot pick the model** (found 2026-11-23 in a check from the Foundry session): the button runs `dry-run` with the default MLX model, which needs about 21 GB free; the Q3 model that fits this Mac needs `--model refusal`, which `command_args` refuses. Offer the model choice (default or refusal) and allow that one flag.
 - [ ] `P3` `bug` `@ai` **Nightshift page: python lookup can pick a Python too old for the CLI** (found 2026-11-23): `lab_hub.nightshift.python()` takes the first `python3` in Homebrew, `/usr/local/bin` or `/usr/bin`; `tools/nightshift.py` needs 3.12+ and the system one is 3.9. Homebrew's is found first today. Check the version and say so on the page when none is new enough.
+- [ ] `P2` `feature` `@ai` **Nightshift page: show who approved each task and list drafts** (2026-11-24, Foundry v15.2): `nightshift.py add` now writes task files with `approved_words`, `approved_on` and `approved_via` (`chat` or `terminal`), or unapproved with `--draft`. Show those fields on each task, and list drafts (`approved = false`) as waiting for the owner, without approving from the page.
 
 
 ## Network Speed Dashboard (2026-11-24)
