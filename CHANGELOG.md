@@ -15,6 +15,11 @@ README and the specs in `docs/specs/` describe them.
 
 ## Unreleased
 
+### Removed
+- **Sideways trackpad swipes no longer change section.** A left or right two-finger scroll or
+  three-finger swipe used to move the sidebar up or down a section, from anywhere in the window.
+  It now does nothing. Scrolling up or down over the sidebar still changes section.
+
 ### Added
 - **Nightshift page under Tools.** Shows tonight's armed run and its pre-start gate (memory, task
   load, predicted grade per task, blockers and warnings), the task files, past runs with each task's
