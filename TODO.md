@@ -268,7 +268,6 @@
 
 ## No sideways swipe — follow-ups (2026-11-24)
 
-- [ ] `P2` `infra` `@ai` Push Hub `main` (commit "Remove sideways trackpad swipe", spec `no-sideways-swipe`): the push failed, github.com unreachable from this machine at the time. Retry `git push`.
 - [ ] `P2` `testing` `@ai` Spec `no-sideways-swipe`: independent Review (`code-reviewer`) and Verify (`qa-engineer`) not run; only the author's tests (full suite green, new tests fail on the old `ui/swipe.py`).
 
 ## Show Tracker — follow-ups (2026-11-24)
