@@ -50,3 +50,4 @@
 {"ts": "2026-11-24T16:58:21", "gate": "define", "by": "owner", "words": "Approve", "recorded_by": "agent", "spec": "no-sideways-swipe"}
 {"ts": "2026-11-24T17:56:56", "gate": "define", "by": "owner", "words": "Approve defaults", "recorded_by": "agent", "spec": "tile-check-build"}
 {"ts": "2026-11-24T17:06:54", "gate": "define", "by": "owner", "words": "yes add a close it button but with a warning that this would end running processes and that it is not recommended; go", "recorded_by": "agent", "spec": "land-blocker-actions"}
+{"ts": "2026-11-24T18:23:40", "gate": "release", "by": "owner", "words": "Yes, merge", "recorded_by": "agent", "spec": "land-blocker-actions", "note": "answer to: Merge claude/land-busy-monitor into main and rebuild Lab Hub?"}
