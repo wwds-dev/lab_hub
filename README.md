@@ -1305,7 +1305,8 @@ is that hunt written down, and its regression test fails against the old code.
 real ones, because the gesture itself cannot be produced from a test — what it
 pins down is everything after the event arrives. Every rule above is
 mutation-tested: removing the momentum guard, the latch, the dominance check or
-the sideways-scroll veto each fails a named test. Two of those tests originally
+the vertical-zone check each fails a named test; sideways input is pinned by
+"does nothing" tests. Two of those tests originally
 passed against the broken code (they swiped off the last tab, where nothing
 could move either way); if you add one here, check it fails without the feature.
 

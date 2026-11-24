@@ -218,9 +218,41 @@ def test_a_sideways_scroll_leaves_nothing_behind(tabs):
     w, swipe, page = tabs
     for _ in range(5):
         send(swipe, page, wheel(page, -STEP))
-    send(swipe, page, wheel(page, 0, 0, Qt.ScrollBegin))
+    assert swipe._accumulated == 0.0
+    # No ScrollBegin: drivers without phases rely on nothing having been kept.
     assert send(swipe, page, wheel(page, 0, -int(SWIPE_THRESHOLD / 4))) is False
     assert w.currentIndex() == 0
+
+
+def test_a_mostly_sideways_scroll_with_a_vertical_part_does_nothing(tabs):
+    w, swipe, page = tabs
+    for dx, dy in ((-STEP * 3, -STEP // 2), (-STEP, -STEP), (-STEP, -int(STEP * 1.4))):
+        assert send(swipe, page, wheel(page, dx, dy)) is False
+    assert w.currentIndex() == 0 and swipe._accumulated == 0.0
+
+
+def test_diagonal_native_swipes_do_nothing(tabs):
+    w, swipe, page = tabs
+    w.setCurrentIndex(1)
+    for angle in (30.0, 135.0, 200.0, 315.0):
+        assert send(swipe, page, native_swipe(page, angle)) is False
+    assert w.currentIndex() == 1
+
+
+def test_a_pause_ends_a_gesture_for_drivers_without_phases(tabs, monkeypatch):
+    """No ScrollBegin/End: a pause resets the count and the once-per-gesture latch."""
+    import ui.swipe as swipe_module
+
+    w, swipe, page = tabs
+    clock = [100.0]
+    monkeypatch.setattr(swipe_module.time, "monotonic", lambda: clock[0])
+    assert send(swipe, page, wheel(page, 0, -STEP)) is True
+    assert w.currentIndex() == 1
+    assert send(swipe, page, wheel(page, 0, -STEP)) is True  # same gesture: swallowed
+    assert w.currentIndex() == 1
+    clock[0] += 1.0
+    assert send(swipe, page, wheel(page, 0, -STEP)) is True  # new gesture
+    assert w.currentIndex() == 2
 
 
 def test_other_native_gestures_are_left_alone(tabs):
@@ -277,8 +309,8 @@ def test_a_blocked_scroll_leaves_nothing_behind(tabs):
     for _ in range(5):
         send(swipe, area.viewport(), wheel(area.viewport(), 0, STEP))
     assert w.currentIndex() == page_index
+    assert swipe._accumulated == 0.0
     # Now a small nudge over the tabs themselves, well under the threshold.
-    send(swipe, w, wheel(w, 0, 0, Qt.ScrollBegin))
     assert send(swipe, w, wheel(w, 0, STEP // 4)) is False
     assert w.currentIndex() == page_index
 

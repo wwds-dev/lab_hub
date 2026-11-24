@@ -35,7 +35,7 @@ SWIPE_THRESHOLD = 120.0
 
 # A scroll has to be clearly vertical. Without this a sideways scroll with any
 # wobble in it changes tab, which reads as the app losing your place.
-HORIZONTAL_DOMINANCE = 1.5
+VERTICAL_DOMINANCE = 1.5
 
 # A mouse wheel and some trackpad drivers send no scroll phases at all, so
 # there is no "gesture ended" to reset on. Treat a pause as the end instead.
@@ -220,7 +220,7 @@ class SwipeTabs(QObject):
         delta = event.pixelDelta()
         if delta.isNull():
             delta = event.angleDelta()
-        if abs(delta.y()) <= abs(delta.x()) * HORIZONTAL_DOMINANCE:
+        if abs(delta.y()) <= abs(delta.x()) * VERTICAL_DOMINANCE:
             return False  # sideways or unclear: nothing here uses it
         # Decided before anything is accumulated: a scroll that belongs to a
         # page that scrolls must leave no trace here, or the next one over the
@@ -264,12 +264,13 @@ class SwipeTabs(QObject):
         return shiboken6.isValid(zone) and (widget is zone or zone.isAncestorOf(widget))
 
     def _candidates(self, under_pointer: QWidget):
-        """Registered tab widgets above the pointer, innermost first.
+        """Registered tab widgets a vertical gesture may move, innermost first.
 
-        Empty if a scroll area between the pointer and the tabs can scroll the
-        way the gesture goes: that widget has the better claim on it. So a
-        vertical two-finger swipe changes page only over a page that fits its
-        window; on one that scrolls, it scrolls.
+        With a vertical zone (the window's sidebar): every registered tab widget
+        over the zone, none anywhere else. Without one (the filter used on its
+        own, and the tests): the tab widgets above the pointer, but empty if a
+        scroll area between the pointer and them can scroll vertically, since
+        that widget has the better claim; a page that fits does not.
         """
         if self._vertical_zone is not None:
             # The sidebar sits beside the pages, not above them: over it, every registered

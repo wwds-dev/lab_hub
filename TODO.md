@@ -268,7 +268,8 @@
 
 ## No sideways swipe — follow-ups (2026-11-24)
 
-- [ ] `P2` `testing` `@ai` Spec `no-sideways-swipe`: independent Review (`code-reviewer`) and Verify (`qa-engineer`) not run; only the author's tests (full suite green, new tests fail on the old `ui/swipe.py`).
+- [ ] `P2` `testing` `@ai` `tests/test_apps_tab.py`: 4 rebuild tests (`test_escape_during_a_rebuild_kills_it_and_the_next_command_never_starts`, `test_the_close_button_during_a_rebuild_kills_it_too`, `test_a_command_that_cannot_start_fails_and_the_run_still_ends`, `test_escape_after_a_command_could_not_start_returns`) failed in a combined run with other test files but pass alone (found by QA, `docs/audit/no-sideways-swipe-qa.md`). Order or load dependence; cause not found.
+- [ ] `P3` `bug` `@ai` `ui/swipe.py` once-per-gesture latch swallows every wheel event for up to 0.4 s after a section change, a sideways scroll over a wide table included (review P2-2, inherited, not a section change).
 
 ## Show Tracker — follow-ups (2026-11-24)
 
