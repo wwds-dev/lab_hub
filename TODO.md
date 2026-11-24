@@ -266,6 +266,14 @@
 - [ ] `P3` `docs` `@ai` Lab root `AGENTS.md`: list `build_marker.py` among the root scripts (Monitor side of the marker, commit `40aa92a`).
 - [ ] `P3` `feature` `@me` Spec decision 2: branch suffix ` (<branch>)` on checkout tiles. Unanswered; not built.
 
+## Show Tracker — follow-ups (2026-11-24)
+
+The Show Tracker is a Dashboards-tab page (`~/Documents/lab/dashboards/show_tracker/`), tracked here because it has no project of its own.
+
+- [ ] `P2` `infra` `@me` TMDB key: the Keychain item `show-tracker-tmdb` holds a web address, not a key, so TMDB answers 401 and the second source stays off. Copy the API Key (32 characters) or Read Access Token from themoviedb.org, then run `security add-generic-password -U -s show-tracker-tmdb -a "$USER" -w "$(pbpaste)"; printf '' | pbcopy`, press Refresh, and check a show's Next season cell for "TMDB only" or "Sources disagree". The TMDB code is tested against a fake only.
+- [ ] `P3` `docs` `@ai` Show Tracker: `README.md` and `dashboard.toml` still point at the deleted claude.ai artifact and the retired `mcp_server.py`; remove the links and the MCP helper (`claude mcp remove show-tracker -s user`).
+- [ ] `P3` `feature` `@ai` Show Tracker: fold the older `finished` flag into `official` (by you) so there is one field, once you are happy with which shows are red.
+
 ## Narrator converter — open (2026-09-30)
 
 What the review of df9c356 found. The fix (1dc265b, wwds-dev/lab_hub#1) and its port to
