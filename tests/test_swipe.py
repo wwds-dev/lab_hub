@@ -1,4 +1,4 @@
-"""Changing tab with a trackpad swipe.
+"""Changing section with a vertical trackpad scroll or swipe (sideways ones do nothing).
 
 Driven with synthetic events shaped the way macOS shapes the real ones: a
 two-finger page swipe arrives as a run of ``QEvent.Wheel`` with scroll phases,
@@ -54,16 +54,24 @@ def native_swipe(widget, angle):
     )
 
 
+def sideways_across(swipe, widget, dx):
+    """One whole sideways gesture: begin, a move past the threshold, end."""
+    send(swipe, widget, wheel(widget, 0, 0, Qt.ScrollBegin))
+    consumed = send(swipe, widget, wheel(widget, dx))
+    send(swipe, widget, wheel(widget, 0, 0, Qt.ScrollEnd))
+    return consumed
+
+
 def send(swipe, widget, event):
     """What QApplication's filter would do, without the real event loop."""
     return swipe.eventFilter(widget, event)
 
 
-def swipe_across(swipe, widget, dx, *, phases=True):
-    """One whole gesture: begin, a move past the threshold, end."""
+def swipe_across(swipe, widget, dy, *, phases=True):
+    """One whole vertical gesture: begin, a move past the threshold, end."""
     if phases:
         send(swipe, widget, wheel(widget, 0, 0, Qt.ScrollBegin))
-    consumed = send(swipe, widget, wheel(widget, dx))
+    consumed = send(swipe, widget, wheel(widget, 0, dy))
     if phases:
         send(swipe, widget, wheel(widget, 0, 0, Qt.ScrollEnd))
     return consumed
@@ -85,13 +93,13 @@ def tabs(qapp):
     w.deleteLater()
 
 
-def test_swiping_left_goes_to_the_next_tab(tabs):
+def test_fingers_up_go_to_the_next_tab(tabs):
     w, swipe, page = tabs
     assert swipe_across(swipe, page, -STEP) is True
     assert w.currentIndex() == 1
 
 
-def test_swiping_right_goes_back(tabs):
+def test_fingers_down_go_back(tabs):
     w, swipe, page = tabs
     w.setCurrentIndex(2)
     assert swipe_across(swipe, w.widget(2), STEP) is True
@@ -103,7 +111,7 @@ def test_one_gesture_changes_one_tab(tabs):
     w, swipe, page = tabs
     send(swipe, page, wheel(page, 0, 0, Qt.ScrollBegin))
     for _ in range(10):
-        send(swipe, page, wheel(page, -STEP))
+        send(swipe, page, wheel(page, 0, -STEP))
     send(swipe, page, wheel(page, 0, 0, Qt.ScrollEnd))
     assert w.currentIndex() == 1
 
@@ -114,21 +122,21 @@ def test_momentum_after_the_fingers_lift_is_ignored(tabs):
     swipe_across(swipe, page, -STEP)
     assert w.currentIndex() == 1
     for _ in range(5):
-        send(swipe, page, wheel(page, -STEP, phase=Qt.ScrollMomentum))
+        send(swipe, page, wheel(page, 0, -STEP, phase=Qt.ScrollMomentum))
     assert w.currentIndex() == 1
 
 
 def test_a_short_nudge_does_not_change_tab(tabs):
     w, swipe, page = tabs
     send(swipe, page, wheel(page, 0, 0, Qt.ScrollBegin))
-    assert send(swipe, page, wheel(page, -int(SWIPE_THRESHOLD / 4))) is False
+    assert send(swipe, page, wheel(page, 0, -int(SWIPE_THRESHOLD / 4))) is False
     assert w.currentIndex() == 0
 
 
-def test_a_mostly_sideways_swipe_with_wobble_still_counts(tabs):
+def test_a_mostly_vertical_swipe_with_wobble_still_counts(tabs):
     w, swipe, page = tabs
     send(swipe, page, wheel(page, 0, 0, Qt.ScrollBegin))
-    assert send(swipe, page, wheel(page, -STEP * 3, -STEP)) is True
+    assert send(swipe, page, wheel(page, -STEP, -STEP * 3)) is True
     assert w.currentIndex() == 1
 
 
@@ -185,13 +193,66 @@ def test_it_does_not_wrap_before_the_first_tab(tabs):
     assert w.currentIndex() == 0
 
 
-def test_a_three_finger_swipe_changes_tab(tabs):
-    """macOS sends NSEventTypeSwipe as a single already-recognised gesture."""
+def test_a_sideways_three_finger_swipe_does_nothing(tabs):
+    """Removed 2026-11-24 (spec no-sideways-swipe): left and right change no tab."""
     w, swipe, page = tabs
-    assert send(swipe, page, native_swipe(page, 180.0)) is True  # left
+    w.setCurrentIndex(1)
+    assert send(swipe, page, native_swipe(page, 180.0)) is False  # left
+    assert send(swipe, page, native_swipe(page, 0.0)) is False  # right
     assert w.currentIndex() == 1
-    assert send(swipe, page, native_swipe(page, 0.0)) is True  # right
+
+
+def test_a_sideways_scroll_does_nothing(tabs):
+    """Removed 2026-11-24: neither direction, neither with phases nor momentum."""
+    w, swipe, page = tabs
+    w.setCurrentIndex(1)
+    for dx in (-STEP, STEP, -STEP * 5, STEP * 5):
+        assert sideways_across(swipe, w.widget(1), dx) is False
+    for _ in range(5):
+        assert send(swipe, page, wheel(page, -STEP, phase=Qt.ScrollMomentum)) is False
+    assert w.currentIndex() == 1
+
+
+def test_a_sideways_scroll_leaves_nothing_behind(tabs):
+    """Sideways deltas must not count towards a later vertical gesture."""
+    w, swipe, page = tabs
+    for _ in range(5):
+        send(swipe, page, wheel(page, -STEP))
+    assert swipe._accumulated == 0.0
+    # No ScrollBegin: drivers without phases rely on nothing having been kept.
+    assert send(swipe, page, wheel(page, 0, -int(SWIPE_THRESHOLD / 4))) is False
     assert w.currentIndex() == 0
+
+
+def test_a_mostly_sideways_scroll_with_a_vertical_part_does_nothing(tabs):
+    w, swipe, page = tabs
+    for dx, dy in ((-STEP * 3, -STEP // 2), (-STEP, -STEP), (-STEP, -int(STEP * 1.4))):
+        assert send(swipe, page, wheel(page, dx, dy)) is False
+    assert w.currentIndex() == 0 and swipe._accumulated == 0.0
+
+
+def test_diagonal_native_swipes_do_nothing(tabs):
+    w, swipe, page = tabs
+    w.setCurrentIndex(1)
+    for angle in (30.0, 135.0, 200.0, 315.0):
+        assert send(swipe, page, native_swipe(page, angle)) is False
+    assert w.currentIndex() == 1
+
+
+def test_a_pause_ends_a_gesture_for_drivers_without_phases(tabs, monkeypatch):
+    """No ScrollBegin/End: a pause resets the count and the once-per-gesture latch."""
+    import ui.swipe as swipe_module
+
+    w, swipe, page = tabs
+    clock = [100.0]
+    monkeypatch.setattr(swipe_module.time, "monotonic", lambda: clock[0])
+    assert send(swipe, page, wheel(page, 0, -STEP)) is True
+    assert w.currentIndex() == 1
+    assert send(swipe, page, wheel(page, 0, -STEP)) is True  # same gesture: swallowed
+    assert w.currentIndex() == 1
+    clock[0] += 1.0
+    assert send(swipe, page, wheel(page, 0, -STEP)) is True  # new gesture
+    assert w.currentIndex() == 2
 
 
 def test_other_native_gestures_are_left_alone(tabs):
@@ -216,52 +277,41 @@ def test_other_native_gestures_are_left_alone(tabs):
 # ---------------------------------------------------------------------------
 
 
-def _scrolling_page(tabs_widget, width):
-    """A tab page holding a scroll area whose content is `width` wide."""
+def _scrolling_page(tabs_widget, height):
+    """A tab page holding a scroll area whose content is `height` tall."""
     area = QScrollArea()
     inner = QLabel("x")
-    inner.setFixedWidth(width)
+    inner.setFixedHeight(height)
     area.setWidget(inner)
     area.resize(200, 100)
-    tabs_widget.addTab(area, "Wide")
+    tabs_widget.addTab(area, "Tall")
     tabs_widget.setCurrentWidget(area)
     area.show()
     QApplication.processEvents()
     return area
 
 
-def test_a_sideways_scrolling_table_keeps_the_gesture(tabs):
-    """A wide table has a real use for a horizontal swipe; the tabs do not win."""
-    w, swipe, _ = tabs
-    area = _scrolling_page(w, 4000)
-    assert area.horizontalScrollBar().maximum() > 0, "fixture is not scrollable"
-    before = w.currentIndex()
-    assert before > 0, "swipe back, so a tab change is available to be refused"
-    assert swipe_across(swipe, area.viewport(), STEP) is False
-    assert w.currentIndex() == before
-
-
 def test_content_that_fits_does_not_block_the_gesture(tabs):
-    """A scroll area with nowhere to go sideways is not using the swipe."""
+    """A scroll area with nowhere to go vertically is not using the scroll."""
     w, swipe, _ = tabs
-    area = _scrolling_page(w, 50)
-    assert area.horizontalScrollBar().maximum() == 0
+    area = _scrolling_page(w, 20)
+    assert area.verticalScrollBar().maximum() == 0
     before = w.currentIndex()
     assert swipe_across(swipe, area.viewport(), STEP) is True
     assert w.currentIndex() == before - 1
 
 
-def test_a_blocked_swipe_leaves_nothing_behind(tabs):
-    """The vetoed swipe must not count towards the next one."""
+def test_a_blocked_scroll_leaves_nothing_behind(tabs):
+    """The vetoed scroll must not count towards the next one."""
     w, swipe, _ = tabs
     area = _scrolling_page(w, 4000)
     page_index = w.currentIndex()
     for _ in range(5):
-        send(swipe, area.viewport(), wheel(area.viewport(), STEP))
+        send(swipe, area.viewport(), wheel(area.viewport(), 0, STEP))
     assert w.currentIndex() == page_index
+    assert swipe._accumulated == 0.0
     # Now a small nudge over the tabs themselves, well under the threshold.
-    send(swipe, w, wheel(w, 0, 0, Qt.ScrollBegin))
-    assert send(swipe, w, wheel(w, STEP // 4)) is False
+    assert send(swipe, w, wheel(w, 0, STEP // 4)) is False
     assert w.currentIndex() == page_index
 
 
@@ -330,24 +380,24 @@ def test_the_window_swipes_the_top_row_only(window):
     assert window.swipe._tabs == [window.tabs]
 
 
-def test_a_swipe_on_a_tool_page_moves_the_top_row(window):
+def test_a_swipe_over_the_sidebar_on_a_tool_page_moves_the_top_row(window):
     """Not the Tools sub-tabs: those are reached by clicking."""
     window.tabs.setCurrentWidget(window.tools_tabs)
     window.tools_tabs.setCurrentWidget(window.convert_tab)
 
-    assert swipe_across(window.swipe, window.convert_tab, -STEP) is True
+    assert swipe_across(window.swipe, window.sidebar, -STEP) is True
 
     assert window.sidebar.title_of(window.tabs.currentWidget()) == "Settings"
     assert window.tools_tabs.currentWidget() is window.convert_tab
 
 
-def test_a_swipe_back_from_tools_leaves_the_tool_where_it_was(window):
+def test_a_swipe_back_over_the_sidebar_from_tools_leaves_the_tool_where_it_was(window):
     """Started mid-row on purpose: from the first tool page the old two-row
     wiring fell through to the top row as well, and could not be told apart."""
     window.tabs.setCurrentWidget(window.tools_tabs)
     window.tools_tabs.setCurrentWidget(window.narrator_tab)
 
-    assert swipe_across(window.swipe, window.narrator_tab, STEP) is True
+    assert swipe_across(window.swipe, window.sidebar, STEP) is True
 
     assert window.sidebar.title_of(window.tabs.currentWidget()) == "Backup and Sync"
     assert window.tools_tabs.currentWidget() is window.narrator_tab
@@ -355,7 +405,7 @@ def test_a_swipe_back_from_tools_leaves_the_tool_where_it_was(window):
 
 def test_a_swipe_moves_the_real_window_tabs(window):
     window.tabs.setCurrentIndex(0)
-    assert swipe_across(window.swipe, window.apps_tab, -STEP) is True
+    assert swipe_across(window.swipe, window.sidebar, -STEP) is True
     assert window.sidebar.title_of(window.tabs.currentWidget()) == "Websites"
 
 
@@ -375,7 +425,6 @@ def test_a_dialog_over_the_tabs_does_not_swipe_them(tabs):
     inner = QLabel("progress", dialog)
     QVBoxLayout(dialog).addWidget(inner)
     assert swipe._candidates(inner) == []
-    assert swipe._candidates(inner, vertical=True) == []
     assert swipe_across(swipe, inner, -STEP) is False
     assert w.currentIndex() == 0
     dialog.deleteLater()
@@ -464,7 +513,7 @@ def test_a_filtered_widget_still_swipes_after_install(qapp):
     swipe.install()
     page = w.widget(0)
     QApplication.sendEvent(page, wheel(page, 0, 0, Qt.ScrollBegin))
-    QApplication.sendEvent(page, wheel(page, -STEP))
+    QApplication.sendEvent(page, wheel(page, 0, -STEP))
     assert w.currentIndex() == 1
     w.deleteLater()
 
@@ -545,9 +594,14 @@ def test_a_three_finger_vertical_swipe_over_a_page_does_not_change_section(windo
     assert window.tabs.currentIndex() == 2
 
 
-def test_a_sideways_swipe_over_a_page_still_changes_section(window):
-    window.tabs.setCurrentIndex(0)
-    assert swipe_across(window.swipe, window.apps_tab, -STEP) is True
+def test_a_sideways_swipe_changes_no_section_anywhere(window):
+    """Removed 2026-11-24 (spec no-sideways-swipe): page, sidebar or tab strip."""
+    window.tabs.setCurrentIndex(1)
+    for target in (window.apps_tab, window.sidebar, window.tabs.currentWidget()):
+        for dx in (-STEP, STEP):
+            assert sideways_across(window.swipe, target, dx) is False
+        for angle in (180.0, 0.0):
+            assert send(window.swipe, target, native_swipe(target, angle)) is False
     assert window.tabs.currentIndex() == 1
 
 

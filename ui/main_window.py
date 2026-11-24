@@ -225,11 +225,9 @@ class MainWindow(QMainWindow):
         self.sidebar.add_footer(self.refresh_button, "refresh")
         QShortcut(QKeySequence.Refresh, self, activated=self.refresh_all)
 
-        # Trackpad swipes change page — the sidebar's top level only, Apps to
-        # Settings (the user's call, 2026-10-07). A sideways swipe anywhere, a tool's
-        # page included, moves that level; the Tools pages are reached by
-        # clicking them in the sidebar. A vertical scroll changes page only over the
-        # sidebar; over a page it only scrolls (spec scroll-sidebar-only).
+        # A vertical trackpad scroll or three-finger swipe changes page only over the sidebar
+        # (spec scroll-sidebar-only); over a page it only scrolls. Sideways swipes do
+        # nothing (spec no-sideways-swipe, the user's call, 2026-11-24).
         self.swipe = swipe.SwipeTabs(self.tabs, vertical_zone=self.sidebar, parent=self)
         self.swipe.install()
 

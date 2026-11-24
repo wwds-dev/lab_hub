@@ -44,24 +44,18 @@ Sentinel and works the same way from source and from the installed app.
 
 ## Tabs
 
-**Trackpad swipes change tab** (`ui/swipe.py`). macOS has two horizontal
-swipes and the app sees them as two different Qt events, so both are handled:
-a two-finger swipe arrives as an ordinary horizontal scroll (`QEvent.Wheel`),
-a three-finger one as `QEvent.NativeGesture` with `Qt.SwipeNativeGesture`.
-Which one reaches the app is a System Settings choice, not ours —
-**Trackpad ▸ More Gestures ▸ Swipe between pages**.
+**Scrolling over the sidebar changes tab** (`ui/swipe.py`). A **vertical** two-finger
+scroll (`QEvent.Wheel`) or three-finger swipe (`QEvent.NativeGesture` with
+`Qt.SwipeNativeGesture`) over the left sidebar moves to the next or previous page: the
+pages run down the sidebar, so fingers up goes to the next one, as scrolling does. Over a
+page it only scrolls that page. **Sideways** swipes, two or three fingers, do nothing
+(removed 2026-11-24, spec `no-sideways-swipe`).
 
-A **vertical** two-finger swipe changes page as well: the pages run down the
-sidebar, so a swipe up (the content moving up) goes to the next one, as
-scrolling does.
+Worth knowing before filing it as broken: whether a three-finger swipe reaches the app at
+all is a System Settings choice (**Trackpad ▸ More Gestures**); two fingers works out of
+the box.
 
-Worth knowing before filing it as broken: by default macOS gives the
-three-finger horizontal swipe to *Swipe between full-screen apps*
-(`TrackpadThreeFingerHorizSwipeGesture = 2`), and while that is selected the
-window server consumes the gesture and no application ever sees it. Two fingers
-is what works out of the box.
-
-Three rules it keeps:
+Rules it keeps:
 
 * **It never wraps.** The macOS page swipe does not, and a navigation gesture
   that loops makes the ends indistinguishable from the middle.
@@ -73,11 +67,9 @@ Three rules it keeps:
   a swipe inside Tools walked the tools before falling out to the top row.
   `SwipeTabs` still supports that — pass several tab widgets, innermost first,
   and `tests/test_swipe.py` keeps it working — but the window passes one.
-* **A widget that can genuinely use the gesture keeps it.** A table wide enough
-  to scroll sideways (the Narrator library's eight columns) takes a horizontal
-  swipe, and a page with somewhere to scroll vertically takes a vertical one;
-  a widget whose content fits does not, because it is not using the gesture for
-  anything.
+* **A widget that can genuinely use the gesture keeps it.** A page with somewhere to
+  scroll vertically takes a vertical scroll; a widget whose content fits does not, because
+  it is not using the gesture for anything.
 
 One gesture is one tab: the change latches on the first delta past the
 threshold and the rest of the swipe — including the momentum after the fingers
@@ -1321,7 +1313,8 @@ is that hunt written down, and its regression test fails against the old code.
 real ones, because the gesture itself cannot be produced from a test — what it
 pins down is everything after the event arrives. Every rule above is
 mutation-tested: removing the momentum guard, the latch, the dominance check or
-the sideways-scroll veto each fails a named test. Two of those tests originally
+the vertical-zone check each fails a named test; sideways input is pinned by
+"does nothing" tests. Two of those tests originally
 passed against the broken code (they swiped off the last tab, where nothing
 could move either way); if you add one here, check it fails without the feature.
 

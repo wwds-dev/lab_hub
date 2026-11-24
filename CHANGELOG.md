@@ -15,6 +15,13 @@ README and the specs in `docs/specs/` describe them.
 
 ## Unreleased
 
+## v2.338 - 2026-11-24
+
+### Removed
+- **Sideways trackpad swipes no longer change section.** A left or right two-finger scroll or
+  three-finger swipe used to move the sidebar up or down a section, from anywhere in the window.
+  It now does nothing. Scrolling up or down over the sidebar still changes section.
+
 ### Added
 - **Close it… before Land.** The Land confirmation's "only you can clear" list now has a
   real **Close it…** button on a busy worktree; it used to tell you to press a button that
