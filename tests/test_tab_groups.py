@@ -56,7 +56,7 @@ def test_the_apps_tab_lists_the_suites(window):
     (spec apps-discovery §5).
     """
     assert _keys(window.apps_tab) == [
-        "sentinel", "imprint", "sonar", "provisio", "syndustryx", "backstage",
+        "sentinel", "imprint", "sonar", "provisio", "syncorp", "backstage",
         "lab_hub",
     ]
 

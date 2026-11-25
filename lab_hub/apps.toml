@@ -64,17 +64,17 @@ project = "provisio"
 entry = "main.py"
 summary = "Income-protection product design and review, with a Demo/Real workspace switch. Headroom, its solvency-filings engine, lives inside it."
 
-# SynCorp Inc. (folder and repo keep the name syndustryx, ADR 0005 Stage 2):
-# source in active/syndustryx, app installed in /Applications like the others.
+# SynCorp Inc. (folder and repo renamed from syndustryx on 2026-11-25):
+# source in active/syncorp, app installed in /Applications like the others.
 # server.py is its engine without the window, so the checkout is never run:
 # only the installed bundle launches. The bundle is SynCorp.app; build71 and
 # older installs are SYNDUSTRYX.app until the owner installs a new build.
 [[suites]]
-key = "syndustryx"
+key = "syncorp"
 name = "SynCorp Inc."
 bundle = "SynCorp"
 legacy_bundles = ["SYNDUSTRYX"]
-project = "syndustryx"
+project = "syncorp"
 entry = "server.py"
 summary = "An autonomous, money-generating agent company: AI agents run the fulfilment engine, storefront and departments, with the owner as the only approver."
 runs_from_source = false

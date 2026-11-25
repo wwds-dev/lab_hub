@@ -192,8 +192,8 @@ checkout, so it would stop the app's own server from starting.
 through Provisio, under the same rule as Tunnel and Bug Spray below.
 
 **SYNDUSTRYX is the Antfarm workstation, named by the owner.** Its current
-source and Lab registration use `syndustryx`; the source stays in the Codex
-workspace and `active/syndustryx` links to it. Desktop records and credentials
+source lives in `active/syncorp` (renamed from `syndustryx` 2026-11-25) and its
+Lab registration key is `syncorp`. Desktop records and credentials
 migrate compatibly; historical releases remain intact. Two registry fields
 exist for it:
 

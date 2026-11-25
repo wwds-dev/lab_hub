@@ -48,11 +48,11 @@ def test_registry_rejects_bad_values_and_entryless_use():
         registry.parse('[[suites]]\nkey="k"\nname="K"\nproject="k"\nsummary="s"\npreflight="true"\n')
 
 
-def test_the_real_registry_gates_syndustryx():
+def test_the_real_registry_gates_syncorp():
     from pathlib import Path
 
     text = (Path(registry.__file__).parent.parent / "apps.toml").read_text()
-    app = next(a for a in registry.parse(text).suites if a.key == "syndustryx")
+    app = next(a for a in registry.parse(text).suites if a.key == "syncorp")
     assert "desktop.update_preflight" in app.preflight
     assert "{installed}" in app.preflight and "{candidate}" in app.preflight
     assert app.require_clean is True
